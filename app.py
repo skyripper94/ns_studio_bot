@@ -40,7 +40,8 @@ def process_image():
         for y in range(gradient_start, height):
             # Вычисляем прозрачность (от 0 до 255)
             progress = (y - gradient_start) / gradient_height
-            alpha = int(255 * (progress ** 1.5))  # квадратичная функция
+            # Более резкий градиент для лучшей читаемости
+            alpha = int(255 * (progress ** 0.8))  # было 1.5, теперь 0.8
             
             # Рисуем линию с нужной прозрачностью
             color_with_alpha = rgb + (alpha,)
@@ -78,15 +79,22 @@ def process_image():
             text_width = bbox[2] - bbox[0]
             text_x = (width - text_width) // 2
             
-            # Тень для читаемости
-            shadow_offset = 2
-            draw.text((text_x + shadow_offset, text_y + shadow_offset + i * font_size), 
-                     line, fill=(0, 0, 0, 180), font=font)
+            # Жирная обводка для читаемости (4 пикселя)
+            outline_width = 4
+            for offset_x in range(-outline_width, outline_width + 1):
+                for offset_y in range(-outline_width, outline_width + 1):
+                    if offset_x != 0 or offset_y != 0:
+                        draw.text(
+                            (text_x + offset_x, text_y + offset_y + i * (font_size + 10)),
+                            line, 
+                            fill=(0, 0, 0, 255), 
+                            font=font
+                        )
             
             # Основной текст
             hex_font_color = font_color.lstrip('#')
             rgb_font = tuple(int(hex_font_color[i:i+2], 16) for i in (0, 2, 4))
-            draw.text((text_x, text_y + i * font_size), line, fill=rgb_font, font=font)
+            draw.text((text_x, text_y + i * (font_size + 10)), line, fill=rgb_font, font=font)
         
         # Конвертируем результат
         output = io.BytesIO()
