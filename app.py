@@ -201,10 +201,10 @@ def process_image():
         print(f"Text lines: {lines}")
         
         # Межстрочный интервал
-        line_spacing = int(font_size * 0.9)
+        line_spacing = int(font_size * 1.10)
         
         # Начало текста
-        text_start_y = gradient_start + 40
+        text_start_y = gradient_start + 80
         
         # Рисуем текст с ВЫТЯГИВАНИЕМ
         for i, line in enumerate(lines):
@@ -277,7 +277,13 @@ def health():
     for fp in font_paths:
         if os.path.exists(fp):
             fonts_available.append(fp)
-    
+    # also list local fonts directory contents for easier debugging
+    local_fonts = []
+    fonts_dir = os.path.join(os.path.dirname(__file__), "fonts")
+    if os.path.isdir(fonts_dir):
+        for fn in sorted(os.listdir(fonts_dir)):
+            local_fonts.append(fn)
+
     return {
         'status': 'ok',
         'version': 'NEUROSTEP_v3_CYAN_GLOW',
@@ -288,8 +294,9 @@ def health():
             'Schist Black (main text)',
             'Exo 2 (logo)',
         ],
-        'fonts': fonts_available
+        'fonts': fonts_available,
+        'local_fonts': local_fonts,
     }
-
+ 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
