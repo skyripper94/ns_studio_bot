@@ -41,19 +41,19 @@ def get_font(size, bold=True):
     return ImageFont.load_default()
 
 def get_font_for_logo(size, bold=True):
-    """Загрузка шрифта для логотипа - Exo 2 (более плотный для заголовка)"""
+    """Загрузка шрифта для логотипа - предпочитаем системный DejaVu (надежный в prod)."""
     if bold:
         font_paths = [
-            # Exo2 - приоритет для логотипа
-            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
-            # Fallback
-            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
+            # System DejaVu first (reliable binary present in container)
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            # Local fallbacks
+            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
+            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
         ]
     else:
         font_paths = [
-            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
         ]
     
     for font_path in font_paths:
