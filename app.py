@@ -37,7 +37,7 @@ def process_image():
         
         # Параметры
         gradient_percent = config.get('gradientPercent', 40) / 100  # 40% чтобы скрыть желтые полосы
-        font_size = config.get('fontSize', 42)  # Еще меньше: с 48 до 42
+        font_size = config.get('fontSize', 40)  # Уменьшил с 42 до 40 (компактнее)
         
         print(f"Processing: {text}")
         
@@ -98,8 +98,8 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ПОДЛОЖКИ) =====
-        logo_font = get_font(24)  # Чуть меньше
+        # ===== 3. ЛОГОТИП "NEUROSTEP" (С ЛЕГКОЙ ПОДЛОЖКОЙ) =====
+        logo_font = get_font(24)
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -110,16 +110,15 @@ def process_image():
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Тень для читаемости на светлом фоне
-        shadow_offset = 2
-        draw.text(
-            (logo_x + shadow_offset, logo_y + shadow_offset),
-            logo_text,
-            font=logo_font,
-            fill=(0, 0, 0, 200)
+        # Полупрозрачная темная подложка для читаемости
+        padding = 10
+        draw.rectangle(
+            [(logo_x - padding, logo_y - 8), 
+             (logo_x + logo_width + padding, logo_y + 32)],
+            fill=(0, 0, 0, 150)  # Черный с прозрачностью 60%
         )
         
-        # Логотип - белый текст (БЕЗ рамки и подложки)
+        # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
