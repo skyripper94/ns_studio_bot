@@ -1,5 +1,5 @@
 from flask import Flask, request, send_file
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 import io
 import base64
 import os
@@ -9,25 +9,19 @@ app = Flask(__name__)
 def get_font(size):
     """Загрузка шрифта с кириллицей"""
     font_paths = [
-        # Ваш шрифт в папке fonts/
         os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
-        # Системные шрифты с кириллицей (приоритетные)
+        os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
     ]
     
     for font_path in font_paths:
         try:
             if os.path.exists(font_path):
-                print(f"Using font: {font_path}")
                 return ImageFont.truetype(font_path, size)
-        except Exception as e:
-            print(f"Failed to load {font_path}: {e}")
+        except:
             continue
     
-    # Если ничего не нашли - используем дефолтный (без кириллицы)
-    print("WARNING: Using default font (no cyrillic)")
     return ImageFont.load_default()
 
 @app.route('/process', methods=['POST'])
@@ -41,63 +35,115 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 35) / 100
-        font_size = config.get('fontSize', 64)
-        font_color = config.get('fontColor', '#ffffff')
-        
-        print(f"Processing image with text: {text}")
+        gradient_percent = config.get('gradientPercent', 40) / 100  # Увеличено до 40%
+        font_size = config.get('fontSize', 56)
         
         # Декодируем изображение
         image_data = base64.b64decode(image_base64)
         img = Image.open(io.BytesIO(image_data)).convert('RGB')
         width, height = img.size
         
-        print(f"Image size: {width}x{height}")
+        # 1. ЭФФЕКТЫ НА ФОТО
+        # Увеличиваем резкость
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(2.0)  # Резкость x2
         
-        # Создаем overlay для градиента
+        # Легкий сепия-эффект (теплый оттенок)
+        img_array = img.convert('RGB')
+        pixels = img_array.load()
+        
+        for y in range(height):
+            for x in range(width):
+                r, g, b = pixels[x, y]
+                
+                # Сепия формула
+                tr = int(0.393 * r + 0.769 * g + 0.189 * b)
+                tg = int(0.349 * r + 0.686 * g + 0.168 * b)
+                tb = int(0.272 * r + 0.534 * g + 0.131 * b)
+                
+                # Ограничиваем значения
+                tr = min(255, tr)
+                tg = min(255, tg)
+                tb = min(255, tb)
+                
+                # Смешиваем с оригиналом (50% сепия)
+                pixels[x, y] = (
+                    int(r * 0.5 + tr * 0.5),
+                    int(g * 0.5 + tg * 0.5),
+                    int(b * 0.5 + tb * 0.5)
+                )
+        
+        img = img_array
+        
+        # 2. ГРАДИЕНТ (нижние 40%)
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
-        # Высота градиента (нижние 35%)
         gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        print(f"Gradient from {gradient_start} to {height}")
-        
-        # КРИТИЧНО: Делаем СПЛОШНОЙ черный градиент
-        # Верх градиента - прозрачный (0%)
-        # Низ - полностью черный (100%)
+        # Черный градиент (быстрое затемнение)
         for y in range(gradient_start, height):
             progress = (y - gradient_start) / gradient_height
-            # Делаем более агрессивный переход
-            # progress^0.3 = быстрое затемнение
-            alpha = int(255 * (progress ** 0.3))
-            
-            # Черный цвет с нарастающей непрозрачностью
+            alpha = int(255 * (progress ** 0.4))
             draw_overlay.rectangle(
                 [(0, y), (width, y + 1)],
                 fill=(0, 0, 0, alpha)
             )
         
-        # Накладываем градиент на изображение
         img = img.convert('RGBA')
         img = Image.alpha_composite(img, overlay)
         img = img.convert('RGB')
         
-        # Загружаем шрифт с кириллицей
-        font = get_font(font_size)
-        
-        # Разбиваем текст на строки
+        # 3. ЛОГОТИП "NEUROSTEP" С ПОЛОСКАМИ
         draw = ImageDraw.Draw(img)
+        
+        # Позиция логотипа (сверху градиента)
+        logo_y = gradient_start + 20
+        
+        # Шрифт для логотипа (меньше)
+        logo_font = get_font(24)
+        logo_text = "NEUROSTEP"
+        
+        # Центрируем логотип
+        bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
+        logo_width = bbox[2] - bbox[0]
+        logo_x = (width - logo_width) // 2
+        
+        # Рисуем полоски слева и справа от логотипа
+        line_y = logo_y + 12  # Вертикальная позиция линий
+        line_thickness = 2
+        line_margin = 15  # Расстояние от текста до линии
+        
+        # Левая линия
+        left_line_end = logo_x - line_margin
+        draw.rectangle(
+            [(30, line_y), (left_line_end, line_y + line_thickness)],
+            fill=(255, 255, 255)
+        )
+        
+        # Правая линия
+        right_line_start = logo_x + logo_width + line_margin
+        draw.rectangle(
+            [(right_line_start, line_y), (width - 30, line_y + line_thickness)],
+            fill=(255, 255, 255)
+        )
+        
+        # Логотип (белый текст)
+        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
+        
+        # 4. ОСНОВНОЙ ТЕКСТ (компактно)
+        # Разбиваем на строки с минимальным расстоянием
+        main_font = get_font(font_size)
         words = text.split()
         lines = []
         current_line = []
         
-        max_width = int(width * 0.85)  # 85% ширины
+        max_width = int(width * 0.90)
         
         for word in words:
             test_line = ' '.join(current_line + [word])
-            bbox = draw.textbbox((0, 0), test_line, font=font)
+            bbox = draw.textbbox((0, 0), test_line, font=main_font)
             text_width = bbox[2] - bbox[0]
             
             if text_width > max_width:
@@ -112,53 +158,61 @@ def process_image():
         if current_line:
             lines.append(' '.join(current_line))
         
-        print(f"Text lines: {lines}")
+        # МИНИМАЛЬНОЕ расстояние между строками
+        line_spacing = int(font_size * 1.1)  # Было 1.2, теперь 1.1
         
-        # Рисуем текст
-        line_spacing = int(font_size * 1.2)
-        total_height = len(lines) * line_spacing
-        
-        # Центрируем по вертикали в области градиента
-        text_y = gradient_start + (gradient_height - total_height) // 2
-        
-        # Цвет текста
-        hex_font_color = font_color.lstrip('#')
-        rgb_font = tuple(int(hex_font_color[i:i+2], 16) for i in (0, 2, 4))
+        # Позиция текста (ниже логотипа)
+        text_start_y = logo_y + 50
         
         for i, line in enumerate(lines):
-            # Вычисляем позицию по X (центр)
-            bbox = draw.textbbox((0, 0), line, font=font)
+            bbox = draw.textbbox((0, 0), line, font=main_font)
             text_width = bbox[2] - bbox[0]
             text_x = (width - text_width) // 2
             
-            y_pos = text_y + i * line_spacing
+            y_pos = text_start_y + i * line_spacing
             
-            # Рисуем ТОЛСТУЮ обводку (8 пикселей)
-            outline = 8
+            # Жирная обводка
+            outline = 7
             for dx in range(-outline, outline + 1):
                 for dy in range(-outline, outline + 1):
                     if dx != 0 or dy != 0:
                         draw.text(
                             (text_x + dx, y_pos + dy),
                             line,
-                            font=font,
+                            font=main_font,
                             fill=(0, 0, 0)
                         )
             
-            # Основной белый текст
-            draw.text(
-                (text_x, y_pos),
-                line,
-                font=font,
-                fill=rgb_font
-            )
+            # Белый текст
+            draw.text((text_x, y_pos), line, font=main_font, fill=(255, 255, 255))
+        
+        # 5. СТРЕЛКА (в правом нижнем углу)
+        arrow_size = 50
+        arrow_x = width - arrow_size - 30
+        arrow_y = height - arrow_size - 30
+        
+        # Рисуем стрелку →
+        arrow_points = [
+            (arrow_x, arrow_y + arrow_size // 2),
+            (arrow_x + arrow_size - 15, arrow_y + arrow_size // 2),
+        ]
+        
+        # Линия стрелки
+        draw.line(arrow_points, fill=(255, 255, 255), width=4)
+        
+        # Наконечник стрелки (треугольник)
+        tip_points = [
+            (arrow_x + arrow_size, arrow_y + arrow_size // 2),
+            (arrow_x + arrow_size - 15, arrow_y + arrow_size // 2 - 10),
+            (arrow_x + arrow_size - 15, arrow_y + arrow_size // 2 + 10),
+        ]
+        draw.polygon(tip_points, fill=(255, 255, 255))
         
         # Сохраняем результат
         output = io.BytesIO()
         img.save(output, format='JPEG', quality=95)
         output.seek(0)
         
-        print("Image processed successfully")
         return send_file(output, mimetype='image/jpeg')
     
     except Exception as e:
@@ -169,12 +223,12 @@ def process_image():
 
 @app.route('/health', methods=['GET'])
 def health():
-    # Проверяем доступные шрифты
     fonts_available = []
     font_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
+        os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
     ]
     
     for fp in font_paths:
@@ -184,7 +238,8 @@ def health():
     return {
         'status': 'ok',
         'fonts_available': fonts_available,
-        'cyrillic_support': len(fonts_available) > 0
+        'cyrillic_support': len(fonts_available) > 0,
+        'style': 'NEUROSTEP'
     }
 
 if __name__ == '__main__':
