@@ -81,6 +81,13 @@ def process_image():
         # Параметры ИЗ CONFIG
         gradient_percent = config.get('gradientPercent', 40) / 100
         font_size = config.get('fontSize', 42)
+        # Цвет основного текста: можно передать как [r,g,b] в config.textColor
+        text_color_cfg = config.get('textColor', None)
+        if text_color_cfg and isinstance(text_color_cfg, (list, tuple)) and len(text_color_cfg) == 3:
+            text_color = tuple(int(c) for c in text_color_cfg)
+        else:
+            # default blue (bright)
+            text_color = (0, 122, 255)
         
         print(f"Processing: {text}")
         print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
@@ -215,8 +222,8 @@ def process_image():
             # Черная тень снизу
             temp_draw.text((padding + 3, padding + 3), line, font=main_font, fill=(0, 0, 0, 200))
             
-            # Белый текст
-            temp_draw.text((padding, padding), line, font=main_font, fill=(255, 255, 255))
+            # Основной текст (можно настроить через config.textColor)
+            temp_draw.text((padding, padding), line, font=main_font, fill=text_color)
             
             # ╔══════════════════════════════════════════════════╗
             # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+15%)           ║
