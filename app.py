@@ -247,26 +247,7 @@ def process_image():
             
             print(f"[DEBUG] Line '{line}' rendered with CYAN glow and 20% stretch")
         
-        # ===== 5. СТРЕЛКА → =====
-        arrow_size = 80
-        arrow_margin = 30
-        arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 50
-        
-        line_width = 7
-        draw.line(
-            [(arrow_x, arrow_y), (arrow_x + arrow_size - 25, arrow_y)],
-            fill=(255, 255, 255),
-            width=line_width
-        )
-        
-        tip_size = 24
-        tip_points = [
-            (arrow_x + arrow_size, arrow_y),
-            (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
-            (arrow_x + arrow_size - tip_size, arrow_y + tip_size // 2),
-        ]
-        draw.polygon(tip_points, fill=(255, 255, 255))
+        # (arrow removed)
         
         # Сохраняем
         output = io.BytesIO()
