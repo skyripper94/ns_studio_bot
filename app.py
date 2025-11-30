@@ -46,8 +46,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры ИЗ CONFIG
-        gradient_percent = config.get('gradientPercent', 45) / 100
-        font_size = config.get('fontSize', 40)
+        gradient_percent = config.get('gradientPercent', 40) / 100
+        font_size = config.get('fontSize', 42)
         
         print(f"Processing: {text}")
         print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
@@ -161,10 +161,10 @@ def process_image():
         print(f"Text lines: {lines}")
         
         # Межстрочный интервал
-        line_spacing = int(font_size * 0.85)
+        line_spacing = int(font_size * 1.10)
         
         # Начало текста
-        text_start_y = gradient_start + 100
+        text_start_y = gradient_start + 105
         
         # Рисуем текст с ВЫТЯГИВАНИЕМ + БИРЮЗОВЫМ СВЕЧЕНИЕМ
         for i, line in enumerate(lines):
@@ -190,7 +190,7 @@ def process_image():
             glow_color = (0, 255, 255)  # БИРЮЗОВЫЙ (Cyan)
             
             for offset in range(8, 0, -1):
-                opacity = int(150 - offset * 15)
+                opacity = int(150 - offset * 3)
                 glow_with_alpha = glow_color + (opacity,)
                 
                 temp_draw.text((padding + offset, padding), line, font=main_font, fill=glow_with_alpha)
@@ -205,14 +205,14 @@ def process_image():
             temp_draw.text((padding, padding), line, font=main_font, fill=(255, 255, 255))
             
             # ╔══════════════════════════════════════════════════╗
-            # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+20%)           ║
+            # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+15%)           ║
             # ╚══════════════════════════════════════════════════╝
             
             original_width = text_width + padding*2
             original_height = text_height + padding*2
             
-            # УВЕЛИЧИВАЕМ ВЫСОТУ НА 10%
-            stretched_height = int(original_height * 1.10)
+            # УВЕЛИЧИВАЕМ ВЫСОТУ НА 15%
+            stretched_height = int(original_height * 1.15)
             
             print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+20%)")
             
@@ -228,9 +228,9 @@ def process_image():
         
         # ===== 5. СТРЕЛКА → =====
         arrow_size = 80
-        arrow_margin = 20
+        arrow_margin = 30
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 40
+        arrow_y = height - 50
         
         line_width = 7
         draw.line(
