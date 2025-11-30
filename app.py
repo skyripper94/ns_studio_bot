@@ -7,21 +7,22 @@ import os
 app = Flask(__name__)
 
 def get_font(size):
-    """Загрузка шрифта с кириллицей"""
+    """Загрузка ТОЛЬКО DejaVu Sans Bold"""
     font_paths = [
-        os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
         os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ]
     
     for font_path in font_paths:
         try:
             if os.path.exists(font_path):
+                print(f"✓ Using font: {font_path}")
                 return ImageFont.truetype(font_path, size)
-        except:
+        except Exception as e:
+            print(f"✗ Failed {font_path}: {e}")
             continue
     
+    print("WARNING: Using default font")
     return ImageFont.load_default()
 
 @app.route('/process', methods=['POST'])
@@ -35,8 +36,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 35) / 100  # 35% изображения
-        font_size = config.get('fontSize', 48)  # Уменьшил с 60 до 48
+        gradient_percent = config.get('gradientPercent', 40) / 100  # 40% чтобы скрыть желтые полосы
+        font_size = config.get('fontSize', 42)  # Еще меньше: с 48 до 42
         
         print(f"Processing: {text}")
         
@@ -60,24 +61,24 @@ def process_image():
         brightness = ImageEnhance.Brightness(img)
         img = brightness.enhance(0.95)
         
-        # ===== 2. ГРАДИЕНТ (30% СПЛОШНОЙ + 5% ПЕРЕХОД) =====
+        # ===== 2. ГРАДИЕНТ (35% СПЛОШНОЙ + 5% ПЕРЕХОД) =====
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
-        gradient_height = int(height * gradient_percent)  # 35% от высоты
+        gradient_height = int(height * gradient_percent)  # 40% от высоты
         gradient_start = height - gradient_height
         
-        # 30% полностью черные (от 70% до 100% высоты)
-        solid_black_height = int(height * 0.30)
+        # 35% полностью черные (чтобы скрыть желтые полосы)
+        solid_black_height = int(height * 0.35)
         solid_black_start = height - solid_black_height
         
-        # Рисуем СПЛОШНОЙ черный (нижние 30%)
+        # Рисуем СПЛОШНОЙ черный (нижние 35%)
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
         )
         
-        # Градиент только в зоне 5% (от 65% до 70% высоты)
+        # Градиент только в зоне 5% (от 60% до 65% высоты)
         gradient_zone_start = gradient_start
         gradient_zone_height = solid_black_start - gradient_start
         
@@ -97,39 +98,28 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (САМЫЙ ВЕРХ ИЗОБРАЖЕНИЯ) =====
-        logo_font = get_font(26)
+        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ПОДЛОЖКИ) =====
+        logo_font = get_font(24)  # Чуть меньше
         logo_text = "NEUROSTEP"
         
-        # Позиция: самый верх изображения (над градиентом)
-        logo_y = 25  # 25px от верхнего края
+        # Позиция: самый верх изображения
+        logo_y = 20
         
         # Центрируем по X
         bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Рамка вокруг логотипа (как на примере)
-        padding = 12
-        box_x1 = logo_x - padding
-        box_y1 = logo_y - padding
-        box_x2 = logo_x + logo_width + padding
-        box_y2 = logo_y + 26 + padding
-        
-        # Черный фон под логотипом
-        draw.rectangle(
-            [(box_x1, box_y1), (box_x2, box_y2)],
+        # Тень для читаемости на светлом фоне
+        shadow_offset = 2
+        draw.text(
+            (logo_x + shadow_offset, logo_y + shadow_offset),
+            logo_text,
+            font=logo_font,
             fill=(0, 0, 0, 200)
         )
         
-        # Белая рамка
-        draw.rectangle(
-            [(box_x1, box_y1), (box_x2, box_y2)],
-            outline=(255, 255, 255),
-            width=2
-        )
-        
-        # Логотип (белый текст)
+        # Логотип - белый текст (БЕЗ рамки и подложки)
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
