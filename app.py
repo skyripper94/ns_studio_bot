@@ -6,12 +6,20 @@ import os
 
 app = Flask(__name__)
 
-def get_font(size):
-    """Загрузка ТОЛЬКО DejaVu Sans Bold"""
-    font_paths = [
-        os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    ]
+def get_font(size, bold=True):
+    """Загрузка Liberation Sans (более современный шрифт)"""
+    if bold:
+        font_paths = [
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
+            os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+    else:
+        font_paths = [
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
     
     for font_path in font_paths:
         try:
@@ -36,8 +44,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 40) / 100  # 40% чтобы скрыть желтые полосы
-        font_size = config.get('fontSize', 40)  # Уменьшил с 42 до 40 (компактнее)
+        gradient_percent = config.get('gradientPercent', 40) / 100
+        font_size = config.get('fontSize', 28)  # Уменьшил до 28
         
         print(f"Processing: {text}")
         
@@ -98,8 +106,8 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (С ЛЕГКОЙ ПОДЛОЖКОЙ) =====
-        logo_font = get_font(24)
+        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ПОДЛОЖКИ) =====
+        logo_font = get_font(22)  # Меньше для компактности
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -110,13 +118,17 @@ def process_image():
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Полупрозрачная темная подложка для читаемости
-        padding = 10
-        draw.rectangle(
-            [(logo_x - padding, logo_y - 8), 
-             (logo_x + logo_width + padding, logo_y + 32)],
-            fill=(0, 0, 0, 150)  # Черный с прозрачностью 60%
-        )
+        # Жирная тень для читаемости на любом фоне
+        shadow_offset = 3
+        for dx in range(-shadow_offset, shadow_offset + 1):
+            for dy in range(-shadow_offset, shadow_offset + 1):
+                if dx != 0 or dy != 0:
+                    draw.text(
+                        (logo_x + dx, logo_y + dy),
+                        logo_text,
+                        font=logo_font,
+                        fill=(0, 0, 0)
+                    )
         
         # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
