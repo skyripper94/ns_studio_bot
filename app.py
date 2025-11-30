@@ -44,8 +44,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 40) / 100
-        font_size = config.get('fontSize', 24)  # Уменьшил до 24
+        gradient_percent = config.get('gradientPercent', 45) / 100  # Увеличил с 40% до 45%
+        font_size = config.get('fontSize', 20)  # Уменьшил с 24 до 20
         
         print(f"Processing: {text}")
         
@@ -73,20 +73,20 @@ def process_image():
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
-        gradient_height = int(height * gradient_percent)  # 40% от высоты
+        gradient_height = int(height * gradient_percent)  # 45% от высоты
         gradient_start = height - gradient_height
         
-        # 30% полностью черные
-        solid_black_height = int(height * 0.30)
+        # 35% полностью черные (вместо 30%)
+        solid_black_height = int(height * 0.35)
         solid_black_start = height - solid_black_height
         
-        # Рисуем СПЛОШНОЙ черный (нижние 30%)
+        # Рисуем СПЛОШНОЙ черный (нижние 35%)
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
         )
         
-        # ПЛАВНЫЙ градиент в зоне 10% (от 60% до 70% высоты)
+        # ПЛАВНЫЙ градиент в зоне 10% (от 55% до 65% высоты)
         gradient_zone_start = gradient_start
         gradient_zone_height = solid_black_start - gradient_start
         
@@ -95,7 +95,6 @@ def process_image():
             progress = (y - gradient_zone_start) / gradient_zone_height
             
             # Используем квадратичную функцию для плавности
-            # progress^2 дает более гладкий переход
             alpha = int(255 * (progress ** 2))
             
             draw_overlay.rectangle(
