@@ -45,9 +45,9 @@ def process_image():
         text = data.get('text', 'ЗАГОЛОВОК')
         config = data.get('config', {})
         
-        # Параметры ИЗ CONFIG (не жестко прописанные!)
+        # Параметры ИЗ CONFIG
         gradient_percent = config.get('gradientPercent', 45) / 100
-        font_size = config.get('fontSize', 40)  # Значение по умолчанию, но берется из config
+        font_size = config.get('fontSize', 40)
         
         print(f"Processing: {text}")
         print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
@@ -68,7 +68,7 @@ def process_image():
         contrast = ImageEnhance.Contrast(img)
         img = contrast.enhance(1.2)
         
-        # Яркость -5% (чуть темнее для контраста с текстом)
+        # Яркость -5%
         brightness = ImageEnhance.Brightness(img)
         img = brightness.enhance(0.95)
         
@@ -76,10 +76,10 @@ def process_image():
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
-        gradient_height = int(height * gradient_percent)  # 45% от высоты
+        gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        # 35% полностью черные (вместо 30%)
+        # 35% полностью черные
         solid_black_height = int(height * 0.35)
         solid_black_start = height - solid_black_height
         
@@ -89,15 +89,12 @@ def process_image():
             fill=(0, 0, 0, 255)
         )
         
-        # ПЛАВНЫЙ градиент в зоне 10% (от 55% до 65% высоты)
+        # ПЛАВНЫЙ градиент в зоне 10%
         gradient_zone_start = gradient_start
         gradient_zone_height = solid_black_start - gradient_start
         
         for y in range(gradient_zone_start, solid_black_start):
-            # Плавный переход с использованием кривой
             progress = (y - gradient_zone_start) / gradient_zone_height
-            
-            # Используем квадратичную функцию для плавности
             alpha = int(255 * (progress ** 2))
             
             draw_overlay.rectangle(
@@ -111,19 +108,17 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ОБВОДКИ) =====
+        # ===== 3. ЛОГОТИП "NEUROSTEP" =====
         logo_font = get_font(20)
         logo_text = "NEUROSTEP"
         
-        # Позиция: самый верх изображения
         logo_y = 20
         
-        # Центрируем по X
         bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Легкая тень (только смещение, без обводки)
+        # Легкая тень
         shadow_offset = 2
         draw.text(
             (logo_x + shadow_offset, logo_y + shadow_offset),
@@ -132,12 +127,12 @@ def process_image():
             fill=(0, 0, 0, 180)
         )
         
-        # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
-        # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
-        # Преобразуем в заглавные
+        # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
+        
+        print(f"Text: {text}")
         
         main_font = get_font(font_size)
         words = text.split()
@@ -165,46 +160,78 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.03x - еще компактнее)
-        line_spacing = int(font_size * 1.03)
+        # Межстрочный интервал
+        line_spacing = int(font_size * 0.85)
         
-        # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 100  # Было 40, теперь 20
+        # Начало текста
+        text_start_y = gradient_start + 100
         
-        # Тень для текста (БЕЗ обводки, только смещение)
-        shadow_offset = 3
-        shadow_opacity = 180
-        
+        # Рисуем текст с ВЫТЯГИВАНИЕМ + БИРЮЗОВЫМ СВЕЧЕНИЕМ
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
             text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
             text_x = (width - text_width) // 2
             
             y_pos = text_start_y + i * line_spacing
             
-            # Простая тень (смещение)
-            draw.text(
-                (text_x + shadow_offset, y_pos + shadow_offset),
-                line,
-                font=main_font,
-                fill=(0, 0, 0, shadow_opacity)
+            print(f"[DEBUG] Line {i}: width={text_width}, height={text_height}")
+            
+            # Создаем временное изображение для текста
+            padding = 40
+            temp_img = Image.new('RGBA', (text_width + padding*2, text_height + padding*2), (0, 0, 0, 0))
+            temp_draw = ImageDraw.Draw(temp_img)
+            
+            # ╔══════════════════════════════════════════════════╗
+            # ║  БИРЮЗОВОЕ СВЕЧЕНИЕ (CYAN GLOW)                 ║
+            # ╚══════════════════════════════════════════════════╝
+            
+            # Рисуем размытое свечение
+            glow_color = (0, 255, 255)  # БИРЮЗОВЫЙ (Cyan)
+            
+            for offset in range(8, 0, -1):
+                opacity = int(150 - offset * 15)
+                glow_with_alpha = glow_color + (opacity,)
+                
+                temp_draw.text((padding + offset, padding), line, font=main_font, fill=glow_with_alpha)
+                temp_draw.text((padding - offset, padding), line, font=main_font, fill=glow_with_alpha)
+                temp_draw.text((padding, padding + offset), line, font=main_font, fill=glow_with_alpha)
+                temp_draw.text((padding, padding - offset), line, font=main_font, fill=glow_with_alpha)
+            
+            # Черная тень снизу
+            temp_draw.text((padding + 3, padding + 3), line, font=main_font, fill=(0, 0, 0, 200))
+            
+            # Белый текст
+            temp_draw.text((padding, padding), line, font=main_font, fill=(255, 255, 255))
+            
+            # ╔══════════════════════════════════════════════════╗
+            # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+20%)           ║
+            # ╚══════════════════════════════════════════════════╝
+            
+            original_width = text_width + padding*2
+            original_height = text_height + padding*2
+            
+            # УВЕЛИЧИВАЕМ ВЫСОТУ НА 10%
+            stretched_height = int(original_height * 1.10)
+            
+            print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+20%)")
+            
+            stretched = temp_img.resize(
+                (original_width, stretched_height), 
+                Image.Resampling.LANCZOS
             )
             
-            # Основной белый текст
-            draw.text(
-                (text_x, y_pos),
-                line,
-                font=main_font,
-                fill=(255, 255, 255)
-            )
+            # Накладываем на основное изображение
+            img.paste(stretched, (text_x - padding, y_pos - padding), stretched)
+            
+            print(f"[DEBUG] Line '{line}' rendered with CYAN glow and 20% stretch")
         
-        # ===== 5. СТРЕЛКА → (НИЖЕ, ЧТОБЫ НЕ НАКЛАДЫВАЛАСЬ) =====
-        arrow_size = 100
-        arrow_margin = 25
+        # ===== 5. СТРЕЛКА → =====
+        arrow_size = 80
+        arrow_margin = 20
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 40  # Поднял ближе к низу (было 60)
+        arrow_y = height - 40
         
-        # Линия стрелки (ТОЛСТАЯ - 8px)
         line_width = 7
         draw.line(
             [(arrow_x, arrow_y), (arrow_x + arrow_size - 25, arrow_y)],
@@ -212,8 +239,7 @@ def process_image():
             width=line_width
         )
         
-        # Наконечник (треугольник)
-        tip_size = 26
+        tip_size = 24
         tip_points = [
             (arrow_x + arrow_size, arrow_y),
             (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
@@ -221,7 +247,7 @@ def process_image():
         ]
         draw.polygon(tip_points, fill=(255, 255, 255))
         
-        # ===== СОХРАНЕНИЕ =====
+        # Сохраняем
         output = io.BytesIO()
         img.save(output, format='JPEG', quality=95)
         output.seek(0)
@@ -249,15 +275,12 @@ def health():
     
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v2',
+        'version': 'NEUROSTEP_v3_CYAN_GLOW',
         'features': [
-            'UPPERCASE text',
-            'Shadow instead of outline',
-            'Solid black gradient',
-            'Sharp enhancement x3.5',
-            'Compact line spacing',
-            'Big arrow',
-            'Logo with shadow'
+            'CYAN glow effect',
+            '20% vertical text stretch',
+            'No emoji',
+            'Liberation Sans Bold',
         ],
         'fonts': fonts_available
     }
