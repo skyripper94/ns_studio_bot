@@ -106,8 +106,8 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ПОДЛОЖКИ) =====
-        logo_font = get_font(22)  # Меньше для компактности
+        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ОБВОДКИ) =====
+        logo_font = get_font(22)
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -118,17 +118,14 @@ def process_image():
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Жирная тень для читаемости на любом фоне
-        shadow_offset = 3
-        for dx in range(-shadow_offset, shadow_offset + 1):
-            for dy in range(-shadow_offset, shadow_offset + 1):
-                if dx != 0 or dy != 0:
-                    draw.text(
-                        (logo_x + dx, logo_y + dy),
-                        logo_text,
-                        font=logo_font,
-                        fill=(0, 0, 0)
-                    )
+        # Легкая тень (только смещение, без обводки)
+        shadow_offset = 2
+        draw.text(
+            (logo_x + shadow_offset, logo_y + shadow_offset),
+            logo_text,
+            font=logo_font,
+            fill=(0, 0, 0, 180)
+        )
         
         # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
@@ -169,9 +166,9 @@ def process_image():
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
         text_start_y = gradient_start + 20  # Было 40, теперь 20
         
-        # Тень для текста (легкая)
-        shadow_offset = 4
-        shadow_opacity = 160  # 0-255, чем больше - тем темнее
+        # Тень для текста (БЕЗ обводки, только смещение)
+        shadow_offset = 3
+        shadow_opacity = 180
         
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
@@ -180,7 +177,7 @@ def process_image():
             
             y_pos = text_start_y + i * line_spacing
             
-            # Легкая тень (смещение вправо-вниз)
+            # Простая тень (смещение)
             draw.text(
                 (text_x + shadow_offset, y_pos + shadow_offset),
                 line,
@@ -188,7 +185,7 @@ def process_image():
                 fill=(0, 0, 0, shadow_opacity)
             )
             
-            # Основной белый текст (БЕЗ обводки)
+            # Основной белый текст
             draw.text(
                 (text_x, y_pos),
                 line,
