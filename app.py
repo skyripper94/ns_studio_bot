@@ -36,7 +36,7 @@ def process_image():
         
         # Параметры
         gradient_percent = config.get('gradientPercent', 60) / 100  # 50% изображения
-        font_size = config.get('fontSize', 48)
+        font_size = config.get('fontSize', 42)
         
         print(f"Processing: {text}")
         
@@ -73,7 +73,7 @@ def process_image():
             
             # Очень быстрое затемнение (progress^0.2)
             # К середине градиента уже почти черный
-            alpha = int(255 * (progress ** 0.3))
+            alpha = int(255 * (progress ** 0.1))
             
             draw_overlay.rectangle(
                 [(0, y), (width, y + 1)],
@@ -81,7 +81,7 @@ def process_image():
             )
         
         # Дополнительно: нижние 20% ПОЛНОСТЬЮ черные (100% opacity)
-        solid_black_start = int(height * 0.80)  # С 80% до низа - сплошной черный
+        solid_black_start = int(height * 0.90)  # С 90% до низа - сплошной черный
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
@@ -94,10 +94,10 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" (САМЫЙ ВЕРХ ИЗОБРАЖЕНИЯ) =====
-        logo_font = get_font(26)
+        logo_font = get_font(22)
         logo_text = "NEUROSTEP"
         
-        # Позиция: самый верх изображения (над градиентом)
+        # Позиция: самый верх изображения
         logo_y = 25  # 25px от верхнего края
         
         # Центрируем по X
@@ -169,10 +169,10 @@ def process_image():
             )
         
         # ===== 5. СТРЕЛКА → (ЖИРНАЯ, БОЛЬШАЯ) =====
-        arrow_size = 80  # Увеличил до 100
+        arrow_size = 80  # Увеличил до 80
         arrow_margin = 25
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 60  # Фиксированная позиция от низа
+        arrow_y = height - 40  # Фиксированная позиция от низа
         
         # Линия стрелки (ТОЛСТАЯ - 8px)
         line_width = 6  # Было 5, теперь 6
@@ -183,7 +183,7 @@ def process_image():
         )
         
         # Наконечник (треугольник, БОЛЬШОЙ и ЖИРНЫЙ)
-        tip_size = 32  # Было 18, теперь 32
+        tip_size = 24  # Было 18, теперь 24
         tip_points = [
             (arrow_x + arrow_size, arrow_y),
             (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
