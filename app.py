@@ -45,7 +45,7 @@ def process_image():
         
         # Параметры
         gradient_percent = config.get('gradientPercent', 40) / 100
-        font_size = config.get('fontSize', 28)  # Уменьшил до 28
+        font_size = config.get('fontSize', 24)  # Уменьшил до 24
         
         print(f"Processing: {text}")
         
@@ -69,31 +69,34 @@ def process_image():
         brightness = ImageEnhance.Brightness(img)
         img = brightness.enhance(0.95)
         
-        # ===== 2. ГРАДИЕНТ (35% СПЛОШНОЙ + 5% ПЕРЕХОД) =====
+        # ===== 2. ГРАДИЕНТ (ПЛАВНЫЙ ПЕРЕХОД) =====
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
         gradient_height = int(height * gradient_percent)  # 40% от высоты
         gradient_start = height - gradient_height
         
-        # 35% полностью черные (чтобы скрыть желтые полосы)
-        solid_black_height = int(height * 0.35)
+        # 30% полностью черные
+        solid_black_height = int(height * 0.30)
         solid_black_start = height - solid_black_height
         
-        # Рисуем СПЛОШНОЙ черный (нижние 35%)
+        # Рисуем СПЛОШНОЙ черный (нижние 30%)
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
         )
         
-        # Градиент только в зоне 5% (от 60% до 65% высоты)
+        # ПЛАВНЫЙ градиент в зоне 10% (от 60% до 70% высоты)
         gradient_zone_start = gradient_start
         gradient_zone_height = solid_black_start - gradient_start
         
         for y in range(gradient_zone_start, solid_black_start):
-            # Быстрый переход от прозрачного к черному за 5%
+            # Плавный переход с использованием кривой
             progress = (y - gradient_zone_start) / gradient_zone_height
-            alpha = int(255 * progress)  # Линейный переход
+            
+            # Используем квадратичную функцию для плавности
+            # progress^2 дает более гладкий переход
+            alpha = int(255 * (progress ** 2))
             
             draw_overlay.rectangle(
                 [(0, y), (width, y + 1)],
