@@ -7,12 +7,15 @@ import os
 app = Flask(__name__)
 
 def get_font(size, bold=True):
+    """Загрузка шрифта с приоритетом Liberation Sans"""
     if bold:
         font_paths = [
+            # Liberation Sans - приоритет 1
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            # Можно попробовать Black/ExtraBold если есть
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",  
             os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
+            # DejaVu Sans - fallback
+            os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
     else:
         font_paths = [
@@ -59,7 +62,7 @@ def process_image():
         # ===== 1. УЛУЧШЕНИЕ ФОТО =====
         # Резкость x3
         sharpness = ImageEnhance.Sharpness(img)
-        img = sharpness.enhance(3.5)
+        img = sharpness.enhance(3.7)
         
         # Контраст +20%
         contrast = ImageEnhance.Contrast(img)
@@ -132,27 +135,9 @@ def process_image():
         # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
-        # ===== 4. ОСНОВНОЙ ТЕКСТ (С EMOJI) =====
+        # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
+        # Преобразуем в заглавные
         text = text.upper()
-        
-        # Добавляем emoji
-        if 'ДОЛЛАРОВ' in text or '$' in text or 'ДЕНЬГ' in text:
-            import re
-            text = re.sub(r'(\d+[\s\d]*)\s*(ДОЛЛАРОВ?)', r'💰 \1 \2', text)
-            if '💰' not in text and ('ДЕНЬГ' in text or 'ДОЛЛАРОВ' in text):
-                text = text.replace('ДОЛЛАРОВ', '💰 ДОЛЛАРОВ')
-                text = text.replace('ДЕНЬГИ', '💰 ДЕНЬГИ')
-        
-        if 'НАГРА' in text or 'ПОЛУЧИЛ' in text or 'ПРЕМ' in text:
-            text = text.replace('НАГРАДУ', '🎁 НАГРАДУ')
-            text = text.replace('ПРЕМИЮ', '🎁 ПРЕМИЮ')
-            text = text.replace('ПОЛУЧИЛ', 'ПОЛУЧИЛ 🎁')
-        
-        if 'НАШЁЛ' in text or 'НАШЕЛ' in text:
-            text = text.replace('НАШЁЛ', '💼 НАШЁЛ')
-            text = text.replace('НАШЕЛ', '💼 НАШЕЛ')
-        
-        print(f"Text with emoji: {text}")
         
         main_font = get_font(font_size)
         words = text.split()
@@ -180,13 +165,15 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # ВЫТЯНУТО ВВЕРХ: межстрочный 0.85x
-        line_spacing = int(font_size * 0.85)
+        # МИНИМАЛЬНЫЙ межстрочный интервал (1.03x - еще компактнее)
+        line_spacing = int(font_size * 1.03)
         
-        text_start_y = gradient_start + 30
+        # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
+        text_start_y = gradient_start + 120  
         
-        # ОБВОДКА для толщины букв
-        outline = 1
+        # Тень для текста (БЕЗ обводки, только смещение)
+        shadow_offset = 3
+        shadow_opacity = 180
         
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
@@ -195,20 +182,27 @@ def process_image():
             
             y_pos = text_start_y + i * line_spacing
             
-            # Черная обводка
-            for dx in range(-outline, outline + 1):
-                for dy in range(-outline, outline + 1):
-                    if dx != 0 or dy != 0:
-                        draw.text((text_x + dx, y_pos + dy), line, font=main_font, fill=(0, 0, 0))
+            # Простая тень (смещение)
+            draw.text(
+                (text_x + shadow_offset, y_pos + shadow_offset),
+                line,
+                font=main_font,
+                fill=(0, 0, 0, shadow_opacity)
+            )
             
-            # Белый текст
-            draw.text((text_x, y_pos), line, font=main_font, fill=(255, 255, 255))
+            # Основной белый текст
+            draw.text(
+                (text_x, y_pos),
+                line,
+                font=main_font,
+                fill=(255, 255, 255)
+            )
         
         # ===== 5. СТРЕЛКА → (НИЖЕ, ЧТОБЫ НЕ НАКЛАДЫВАЛАСЬ) =====
-        arrow_size = 100
+        arrow_size = 80
         arrow_margin = 25
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 40  # Поднял ближе к низу (было 60)
+        arrow_y = height - 60  # Поднял ближе к низу (было 80)
         
         # Линия стрелки (ТОЛСТАЯ - 8px)
         line_width = 8
@@ -219,7 +213,7 @@ def process_image():
         )
         
         # Наконечник (треугольник)
-        tip_size = 24
+        tip_size = 26
         tip_points = [
             (arrow_x + arrow_size, arrow_y),
             (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
