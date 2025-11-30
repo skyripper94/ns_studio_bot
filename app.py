@@ -35,8 +35,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 60) / 100  # 50% изображения
-        font_size = config.get('fontSize', 42)
+        gradient_percent = config.get('gradientPercent', 35) / 100  # 35% изображения
+        font_size = config.get('fontSize', 48)  # Уменьшил с 60 до 48
         
         print(f"Processing: {text}")
         
@@ -52,40 +52,44 @@ def process_image():
         sharpness = ImageEnhance.Sharpness(img)
         img = sharpness.enhance(3.5)
         
-        # Контраст +20%
+        # Контраст +40%
         contrast = ImageEnhance.Contrast(img)
-        img = contrast.enhance(1.2)
+        img = contrast.enhance(1.4)
         
         # Яркость -5% (чуть темнее для контраста с текстом)
         brightness = ImageEnhance.Brightness(img)
         img = brightness.enhance(0.95)
         
-        # ===== 2. ГРАДИЕНТ (ПОЛНОСТЬЮ ЧЕРНЫЙ) =====
+        # ===== 2. ГРАДИЕНТ (30% СПЛОШНОЙ + 5% ПЕРЕХОД) =====
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
-        gradient_height = int(height * gradient_percent)
+        gradient_height = int(height * gradient_percent)  # 35% от высоты
         gradient_start = height - gradient_height
         
-        # Градиент: сверху прозрачный → быстро → внизу ПОЛНОСТЬЮ черный
-        for y in range(gradient_start, height):
-            progress = (y - gradient_start) / gradient_height
-            
-            # Очень быстрое затемнение (progress^0.2)
-            # К середине градиента уже почти черный
-            alpha = int(255 * (progress ** 0.1))
+        # 30% полностью черные (от 70% до 100% высоты)
+        solid_black_height = int(height * 0.30)
+        solid_black_start = height - solid_black_height
+        
+        # Рисуем СПЛОШНОЙ черный (нижние 30%)
+        draw_overlay.rectangle(
+            [(0, solid_black_start), (width, height)],
+            fill=(0, 0, 0, 255)
+        )
+        
+        # Градиент только в зоне 5% (от 65% до 70% высоты)
+        gradient_zone_start = gradient_start
+        gradient_zone_height = solid_black_start - gradient_start
+        
+        for y in range(gradient_zone_start, solid_black_start):
+            # Быстрый переход от прозрачного к черному за 5%
+            progress = (y - gradient_zone_start) / gradient_zone_height
+            alpha = int(255 * progress)  # Линейный переход
             
             draw_overlay.rectangle(
                 [(0, y), (width, y + 1)],
                 fill=(0, 0, 0, alpha)
             )
-        
-        # Дополнительно: нижние 20% ПОЛНОСТЬЮ черные (100% opacity)
-        solid_black_start = int(height * 0.90)  # С 90% до низа - сплошной черный
-        draw_overlay.rectangle(
-            [(0, solid_black_start), (width, height)],
-            fill=(0, 0, 0, 255)
-        )
         
         img = img.convert('RGBA')
         img = Image.alpha_composite(img, overlay)
@@ -94,16 +98,39 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" (САМЫЙ ВЕРХ ИЗОБРАЖЕНИЯ) =====
-        logo_font = get_font(22)
+        logo_font = get_font(26)
         logo_text = "NEUROSTEP"
         
-        # Позиция: самый верх изображения
+        # Позиция: самый верх изображения (над градиентом)
         logo_y = 25  # 25px от верхнего края
         
         # Центрируем по X
         bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
+        
+        # Рамка вокруг логотипа (как на примере)
+        padding = 12
+        box_x1 = logo_x - padding
+        box_y1 = logo_y - padding
+        box_x2 = logo_x + logo_width + padding
+        box_y2 = logo_y + 26 + padding
+        
+        # Черный фон под логотипом
+        draw.rectangle(
+            [(box_x1, box_y1), (box_x2, box_y2)],
+            fill=(0, 0, 0, 200)
+        )
+        
+        # Белая рамка
+        draw.rectangle(
+            [(box_x1, box_y1), (box_x2, box_y2)],
+            outline=(255, 255, 255),
+            width=2
+        )
+        
+        # Логотип (белый текст)
+        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
         # Преобразуем в заглавные
@@ -135,11 +162,11 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.05x вместо 1.0x)
-        line_spacing = int(font_size * 1.00)
+        # МИНИМАЛЬНЫЙ межстрочный интервал (1.03x - еще компактнее)
+        line_spacing = int(font_size * 1.03)
         
-        # Начало текста: начало градиента + отступ
-        text_start_y = gradient_start + 40
+        # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
+        text_start_y = gradient_start + 20  # Было 40, теперь 20
         
         # Тень для текста (легкая)
         shadow_offset = 4
@@ -168,22 +195,22 @@ def process_image():
                 fill=(255, 255, 255)
             )
         
-        # ===== 5. СТРЕЛКА → (ЖИРНАЯ, БОЛЬШАЯ) =====
-        arrow_size = 80  # Увеличил до 80
+        # ===== 5. СТРЕЛКА → (НИЖЕ, ЧТОБЫ НЕ НАКЛАДЫВАЛАСЬ) =====
+        arrow_size = 100
         arrow_margin = 25
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 40  # Фиксированная позиция от низа
+        arrow_y = height - 40  # Поднял ближе к низу (было 60)
         
         # Линия стрелки (ТОЛСТАЯ - 8px)
-        line_width = 6  # Было 5, теперь 6
+        line_width = 8
         draw.line(
-            [(arrow_x, arrow_y), (arrow_x + arrow_size - 18, arrow_y)],
+            [(arrow_x, arrow_y), (arrow_x + arrow_size - 25, arrow_y)],
             fill=(255, 255, 255),
             width=line_width
         )
         
-        # Наконечник (треугольник, БОЛЬШОЙ и ЖИРНЫЙ)
-        tip_size = 24  # Было 18, теперь 24
+        # Наконечник (треугольник)
+        tip_size = 24
         tip_points = [
             (arrow_x + arrow_size, arrow_y),
             (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
