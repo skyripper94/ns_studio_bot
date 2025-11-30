@@ -149,25 +149,25 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" =====
-logo_font = get_font(22)
-logo_text = "NEUROSTEP"
+        logo_font = get_font_for_logo(36)
+        logo_text = "NEUROSTEP"
 
-logo_y = 20
+        logo_y = 20
 
-bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
-logo_width = bbox[2] - bbox[0]
-logo_x = (width - logo_width) // 2
+        bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
+        logo_width = bbox[2] - bbox[0]
+        logo_x = (width - logo_width) // 2
 
-# Легкая тень
-shadow_offset = 2
-draw.text(
-    (logo_x + shadow_offset, logo_y + shadow_offset),
-    logo_text,
-    font=logo_font,
-    fill=(0, 0, 0, 180)
-)
+        # Меньшая тень для логотипа
+        shadow_offset = 1
+        draw.text(
+            (logo_x + shadow_offset, logo_y + shadow_offset),
+            logo_text,
+            font=logo_font,
+            fill=(0, 0, 0, 100)
+        )
 
-draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
+        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
