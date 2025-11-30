@@ -47,7 +47,7 @@ def process_image():
         
         # Параметры
         gradient_percent = config.get('gradientPercent', 45) / 100  # Увеличил с 40% до 45%
-        font_size = config.get('fontSize', 20)  # Уменьшил с 24 до 20
+        font_size = config.get('fontSize', 16)  # Уменьшил с 24 до 16
         
         print(f"Processing: {text}")
         
