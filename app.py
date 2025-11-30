@@ -10,8 +10,9 @@ def get_font(size, bold=True):
     """Загрузка шрифта с приоритетом Ouroboros Rus By Cop"""
     if bold:
         font_paths = [
-            os.path.join(os.path.dirname(__file__), "fonts", "ouroborosrusbycop.otf"),
-            # Liberation Sans - приоритет 1
+            # Exo 2 - приоритет для основного текста
+            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
+            # Liberation Sans - приоритет 2
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
             os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
             # DejaVu Sans - fallback
@@ -20,6 +21,7 @@ def get_font(size, bold=True):
         ]
     else:
         font_paths = [
+            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
@@ -137,24 +139,21 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" =====
-        logo_font = get_font_for_logo(20)
+        logo_font_size = 36
+        logo_font = get_font_for_logo(logo_font_size)
         logo_text = "NEUROSTEP"
-        
         logo_y = 20
-        
         bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
-        
-        # Легкая тень
-        shadow_offset = 2
+        # Меньшая тень
+        shadow_offset = 1
         draw.text(
             (logo_x + shadow_offset, logo_y + shadow_offset),
             logo_text,
             font=logo_font,
-            fill=(0, 0, 0, 180)
+            fill=(0, 0, 0, 100)
         )
-        
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
