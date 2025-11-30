@@ -169,7 +169,7 @@ def process_image():
         line_spacing = int(font_size * 1.03)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 20  # Было 40, теперь 20
+        text_start_y = gradient_start + 40  # Было 40
         
         # Тень для текста (БЕЗ обводки, только смещение)
         shadow_offset = 3
