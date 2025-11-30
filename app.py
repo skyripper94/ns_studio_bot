@@ -161,10 +161,10 @@ def process_image():
         print(f"Text lines: {lines}")
         
         # Межстрочный интервал
-        line_spacing = int(font_size * 1.10)
+        line_spacing = int(font_size * 1.02)
         
         # Начало текста
-        text_start_y = gradient_start + 105
+        text_start_y = gradient_start + 100
         
         # Рисуем текст с ВЫТЯГИВАНИЕМ + БИРЮЗОВЫМ СВЕЧЕНИЕМ
         for i, line in enumerate(lines):
@@ -181,22 +181,6 @@ def process_image():
             padding = 40
             temp_img = Image.new('RGBA', (text_width + padding*2, text_height + padding*2), (0, 0, 0, 0))
             temp_draw = ImageDraw.Draw(temp_img)
-            
-            # ╔══════════════════════════════════════════════════╗
-            # ║  БИРЮЗОВОЕ СВЕЧЕНИЕ (CYAN GLOW)                 ║
-            # ╚══════════════════════════════════════════════════╝
-            
-            # Рисуем размытое свечение
-            glow_color = (0, 255, 255)  # БИРЮЗОВЫЙ (Cyan)
-            
-            for offset in range(8, 0, -1):
-                opacity = int(150 - offset * 3)
-                glow_with_alpha = glow_color + (opacity,)
-                
-                temp_draw.text((padding + offset, padding), line, font=main_font, fill=glow_with_alpha)
-                temp_draw.text((padding - offset, padding), line, font=main_font, fill=glow_with_alpha)
-                temp_draw.text((padding, padding + offset), line, font=main_font, fill=glow_with_alpha)
-                temp_draw.text((padding, padding - offset), line, font=main_font, fill=glow_with_alpha)
             
             # Черная тень снизу
             temp_draw.text((padding + 3, padding + 3), line, font=main_font, fill=(0, 0, 0, 200))
