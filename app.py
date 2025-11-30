@@ -169,7 +169,7 @@ def process_image():
         line_spacing = int(font_size * 1.03)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 120  
+        text_start_y = gradient_start + 100  # Было 40, теперь 20
         
         # Тень для текста (БЕЗ обводки, только смещение)
         shadow_offset = 3
@@ -199,13 +199,13 @@ def process_image():
             )
         
         # ===== 5. СТРЕЛКА → (НИЖЕ, ЧТОБЫ НЕ НАКЛАДЫВАЛАСЬ) =====
-        arrow_size = 80
+        arrow_size = 100
         arrow_margin = 25
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - 60  # Поднял ближе к низу (было 80)
+        arrow_y = height - 40  # Поднял ближе к низу (было 60)
         
         # Линия стрелки (ТОЛСТАЯ - 8px)
-        line_width = 8
+        line_width = 7
         draw.line(
             [(arrow_x, arrow_y), (arrow_x + arrow_size - 25, arrow_y)],
             fill=(255, 255, 255),
