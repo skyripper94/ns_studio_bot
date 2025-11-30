@@ -149,22 +149,25 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" =====
-        logo_font_size = 36
-        logo_font = get_font_for_logo(logo_font_size)
-        logo_text = "NEUROSTEP"
-        logo_y = 20
-        bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
-        logo_width = bbox[2] - bbox[0]
-        logo_x = (width - logo_width) // 2
-        # Меньшая тень
-        shadow_offset = 1
-        draw.text(
-            (logo_x + shadow_offset, logo_y + shadow_offset),
-            logo_text,
-            font=logo_font,
-            fill=(0, 0, 0, 100)
-        )
-        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
+logo_font = get_font(22)
+logo_text = "NEUROSTEP"
+
+logo_y = 20
+
+bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
+logo_width = bbox[2] - bbox[0]
+logo_x = (width - logo_width) // 2
+
+# Легкая тень
+shadow_offset = 2
+draw.text(
+    (logo_x + shadow_offset, logo_y + shadow_offset),
+    logo_text,
+    font=logo_font,
+    fill=(0, 0, 0, 180)
+)
+
+draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
@@ -198,10 +201,10 @@ def process_image():
         print(f"Text lines: {lines}")
         
         # Межстрочный интервал
-        line_spacing = int(font_size * 1.02)
+        line_spacing = int(font_size * 0.9)
         
         # Начало текста
-        text_start_y = gradient_start + 60
+        text_start_y = gradient_start + 40
         
         # Рисуем текст с ВЫТЯГИВАНИЕМ
         for i, line in enumerate(lines):
