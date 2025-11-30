@@ -7,11 +7,13 @@ import os
 app = Flask(__name__)
 
 def get_font(size, bold=True):
-    """Загрузка Liberation Sans (более современный шрифт)"""
+    """Загрузка шрифта с приоритетом Liberation Sans"""
     if bold:
         font_paths = [
+            # Liberation Sans - приоритет 1
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
             os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
+            # DejaVu Sans - fallback
             os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
@@ -24,13 +26,13 @@ def get_font(size, bold=True):
     for font_path in font_paths:
         try:
             if os.path.exists(font_path):
-                print(f"✓ Using font: {font_path}")
+                print(f"✓ Font loaded: {font_path} (size: {size})")
                 return ImageFont.truetype(font_path, size)
         except Exception as e:
-            print(f"✗ Failed {font_path}: {e}")
+            print(f"✗ Failed to load {font_path}: {e}")
             continue
     
-    print("WARNING: Using default font")
+    print(f"⚠️ WARNING: Using default font (size: {size})")
     return ImageFont.load_default()
 
 @app.route('/process', methods=['POST'])
@@ -44,8 +46,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 55) / 100  # Увеличил с 40% до 55%
-        font_size = config.get('fontSize', 16)  # Уменьшил с 24 до 16
+        gradient_percent = config.get('gradientPercent', 45) / 100  # Увеличил с 40% до 45%
+        font_size = config.get('fontSize', 20)  # Уменьшил с 24 до 20
         
         print(f"Processing: {text}")
         
@@ -63,7 +65,7 @@ def process_image():
         
         # Контраст +40%
         contrast = ImageEnhance.Contrast(img)
-        img = contrast.enhance(1.2)
+        img = contrast.enhance(1.4)
         
         # Яркость -5% (чуть темнее для контраста с текстом)
         brightness = ImageEnhance.Brightness(img)
@@ -77,7 +79,7 @@ def process_image():
         gradient_start = height - gradient_height
         
         # 35% полностью черные (вместо 30%)
-        solid_black_height = int(height * 0.37)
+        solid_black_height = int(height * 0.35)
         solid_black_start = height - solid_black_height
         
         # Рисуем СПЛОШНОЙ черный (нижние 35%)
@@ -109,7 +111,7 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ОБВОДКИ) =====
-        logo_font = get_font(20)
+        logo_font = get_font(22)
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -121,7 +123,7 @@ def process_image():
         logo_x = (width - logo_width) // 2
         
         # Легкая тень (только смещение, без обводки)
-        shadow_offset = 1
+        shadow_offset = 2
         draw.text(
             (logo_x + shadow_offset, logo_y + shadow_offset),
             logo_text,
@@ -162,11 +164,11 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.02x - еще компактнее)
-        line_spacing = int(font_size * 1.02)
+        # МИНИМАЛЬНЫЙ межстрочный интервал (1.03x - еще компактнее)
+        line_spacing = int(font_size * 1.03)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 15  # Было 40, теперь 15
+        text_start_y = gradient_start + 20  # Было 40, теперь 20
         
         # Тень для текста (БЕЗ обводки, только смещение)
         shadow_offset = 3
