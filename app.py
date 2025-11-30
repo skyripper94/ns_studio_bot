@@ -7,15 +7,12 @@ import os
 app = Flask(__name__)
 
 def get_font(size, bold=True):
-    """Загрузка шрифта с приоритетом Liberation Sans"""
     if bold:
         font_paths = [
-            # Liberation Sans - приоритет 1
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            # Можно попробовать Black/ExtraBold если есть
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",  
             os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
-            # DejaVu Sans - fallback
-            os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
     else:
         font_paths = [
@@ -112,7 +109,7 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ОБВОДКИ) =====
-        logo_font = get_font(22)
+        logo_font = get_font(20)
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -166,7 +163,7 @@ def process_image():
         print(f"Text lines: {lines}")
         
         # МИНИМАЛЬНЫЙ межстрочный интервал (1.02x - еще компактнее)
-        line_spacing = int(font_size * 1.02)
+        line_spacing = int(font_size * 1.04)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
         text_start_y = gradient_start + 120
@@ -189,6 +186,13 @@ def process_image():
                 font=main_font,
                 fill=(0, 0, 0, shadow_opacity)
             )
+
+            # Жирная обводка (3px)
+outline = 1
+for dx in range(-outline, outline + 1):
+    for dy in range(-outline, outline + 1):
+        if dx != 0 or dy != 0:
+            draw.text((text_x + dx, y_pos + dy), line, font=main_font, fill=(0, 0, 0))
             
             # Основной белый текст
             draw.text(
