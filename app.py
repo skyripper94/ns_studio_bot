@@ -47,7 +47,7 @@ def process_image():
         
         # Параметры ИЗ CONFIG (не жестко прописанные!)
         gradient_percent = config.get('gradientPercent', 45) / 100
-        font_size = config.get('fontSize', 42)  # Значение по умолчанию, но берется из config
+        font_size = config.get('fontSize', 40)  # Значение по умолчанию, но берется из config
         
         print(f"Processing: {text}")
         print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
@@ -169,7 +169,7 @@ def process_image():
         line_spacing = int(font_size * 1.02)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 60
+        text_start_y = gradient_start + 90
         
         # Тень для текста (БЕЗ обводки, только смещение)
         shadow_offset = 3
