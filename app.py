@@ -7,13 +7,11 @@ import os
 app = Flask(__name__)
 
 def get_font(size, bold=True):
-    """Загрузка шрифта с приоритетом Liberation Sans"""
+    """Загрузка Liberation Sans (более современный шрифт)"""
     if bold:
         font_paths = [
-            # Liberation Sans - приоритет 1
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
             os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
-            # DejaVu Sans - fallback
             os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
@@ -26,13 +24,13 @@ def get_font(size, bold=True):
     for font_path in font_paths:
         try:
             if os.path.exists(font_path):
-                print(f"✓ Font loaded: {font_path} (size: {size})")
+                print(f"✓ Using font: {font_path}")
                 return ImageFont.truetype(font_path, size)
         except Exception as e:
-            print(f"✗ Failed to load {font_path}: {e}")
+            print(f"✗ Failed {font_path}: {e}")
             continue
     
-    print(f"⚠️ WARNING: Using default font (size: {size})")
+    print("WARNING: Using default font")
     return ImageFont.load_default()
 
 @app.route('/process', methods=['POST'])
@@ -45,12 +43,11 @@ def process_image():
         text = data.get('text', 'ЗАГОЛОВОК')
         config = data.get('config', {})
         
-        # Параметры ИЗ CONFIG (не жестко прописанные!)
-        gradient_percent = config.get('gradientPercent', 45) / 100
-        font_size = config.get('fontSize', 20)  # Значение по умолчанию, но берется из config
+        # Параметры
+        gradient_percent = config.get('gradientPercent', 40) / 100
+        font_size = config.get('fontSize', 28)  # Уменьшил до 28
         
         print(f"Processing: {text}")
-        print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
         
         # Декодируем изображение
         image_data = base64.b64decode(image_base64)
@@ -72,14 +69,14 @@ def process_image():
         brightness = ImageEnhance.Brightness(img)
         img = brightness.enhance(0.95)
         
-        # ===== 2. ГРАДИЕНТ (ПЛАВНЫЙ ПЕРЕХОД) =====
+        # ===== 2. ГРАДИЕНТ (35% СПЛОШНОЙ + 5% ПЕРЕХОД) =====
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
-        gradient_height = int(height * gradient_percent)  # 45% от высоты
+        gradient_height = int(height * gradient_percent)  # 40% от высоты
         gradient_start = height - gradient_height
         
-        # 35% полностью черные (вместо 30%)
+        # 35% полностью черные (чтобы скрыть желтые полосы)
         solid_black_height = int(height * 0.35)
         solid_black_start = height - solid_black_height
         
@@ -89,16 +86,14 @@ def process_image():
             fill=(0, 0, 0, 255)
         )
         
-        # ПЛАВНЫЙ градиент в зоне 10% (от 55% до 65% высоты)
+        # Градиент только в зоне 5% (от 60% до 65% высоты)
         gradient_zone_start = gradient_start
         gradient_zone_height = solid_black_start - gradient_start
         
         for y in range(gradient_zone_start, solid_black_start):
-            # Плавный переход с использованием кривой
+            # Быстрый переход от прозрачного к черному за 5%
             progress = (y - gradient_zone_start) / gradient_zone_height
-            
-            # Используем квадратичную функцию для плавности
-            alpha = int(255 * (progress ** 2))
+            alpha = int(255 * progress)  # Линейный переход
             
             draw_overlay.rectangle(
                 [(0, y), (width, y + 1)],
@@ -111,8 +106,8 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ОБВОДКИ) =====
-        logo_font = get_font(22)
+        # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ПОДЛОЖКИ) =====
+        logo_font = get_font(22)  # Меньше для компактности
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -123,14 +118,17 @@ def process_image():
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Легкая тень (только смещение, без обводки)
-        shadow_offset = 2
-        draw.text(
-            (logo_x + shadow_offset, logo_y + shadow_offset),
-            logo_text,
-            font=logo_font,
-            fill=(0, 0, 0, 180)
-        )
+        # Жирная тень для читаемости на любом фоне
+        shadow_offset = 3
+        for dx in range(-shadow_offset, shadow_offset + 1):
+            for dy in range(-shadow_offset, shadow_offset + 1):
+                if dx != 0 or dy != 0:
+                    draw.text(
+                        (logo_x + dx, logo_y + dy),
+                        logo_text,
+                        font=logo_font,
+                        fill=(0, 0, 0)
+                    )
         
         # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
@@ -171,9 +169,9 @@ def process_image():
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
         text_start_y = gradient_start + 20  # Было 40, теперь 20
         
-        # Тень для текста (БЕЗ обводки, только смещение)
-        shadow_offset = 3
-        shadow_opacity = 180
+        # Тень для текста (легкая)
+        shadow_offset = 4
+        shadow_opacity = 160  # 0-255, чем больше - тем темнее
         
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
@@ -182,7 +180,7 @@ def process_image():
             
             y_pos = text_start_y + i * line_spacing
             
-            # Простая тень (смещение)
+            # Легкая тень (смещение вправо-вниз)
             draw.text(
                 (text_x + shadow_offset, y_pos + shadow_offset),
                 line,
@@ -190,7 +188,7 @@ def process_image():
                 fill=(0, 0, 0, shadow_opacity)
             )
             
-            # Основной белый текст
+            # Основной белый текст (БЕЗ обводки)
             draw.text(
                 (text_x, y_pos),
                 line,
