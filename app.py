@@ -45,11 +45,12 @@ def process_image():
         text = data.get('text', 'ЗАГОЛОВОК')
         config = data.get('config', {})
         
-        # Параметры
-        gradient_percent = config.get('gradientPercent', 45) / 100  # Увеличил с 40% до 45%
-        font_size = config.get('fontSize', 16)  # Уменьшил с 24 до 16
+        # Параметры ИЗ CONFIG (не жестко прописанные!)
+        gradient_percent = config.get('gradientPercent', 45) / 100
+        font_size = config.get('fontSize', 20)  # Значение по умолчанию, но берется из config
         
         print(f"Processing: {text}")
+        print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
         
         # Декодируем изображение
         image_data = base64.b64decode(image_base64)
