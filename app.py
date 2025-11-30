@@ -44,8 +44,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 45) / 100  # Увеличил с 40% до 45%
-        font_size = config.get('fontSize', 20)  # Уменьшил с 24 до 20
+        gradient_percent = config.get('gradientPercent', 55) / 100  # Увеличил с 40% до 55%
+        font_size = config.get('fontSize', 16)  # Уменьшил с 24 до 16
         
         print(f"Processing: {text}")
         
@@ -63,7 +63,7 @@ def process_image():
         
         # Контраст +40%
         contrast = ImageEnhance.Contrast(img)
-        img = contrast.enhance(1.4)
+        img = contrast.enhance(1.2)
         
         # Яркость -5% (чуть темнее для контраста с текстом)
         brightness = ImageEnhance.Brightness(img)
@@ -77,7 +77,7 @@ def process_image():
         gradient_start = height - gradient_height
         
         # 35% полностью черные (вместо 30%)
-        solid_black_height = int(height * 0.35)
+        solid_black_height = int(height * 0.37)
         solid_black_start = height - solid_black_height
         
         # Рисуем СПЛОШНОЙ черный (нижние 35%)
@@ -109,7 +109,7 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" (БЕЗ ОБВОДКИ) =====
-        logo_font = get_font(22)
+        logo_font = get_font(20)
         logo_text = "NEUROSTEP"
         
         # Позиция: самый верх изображения
@@ -121,7 +121,7 @@ def process_image():
         logo_x = (width - logo_width) // 2
         
         # Легкая тень (только смещение, без обводки)
-        shadow_offset = 2
+        shadow_offset = 1
         draw.text(
             (logo_x + shadow_offset, logo_y + shadow_offset),
             logo_text,
@@ -162,11 +162,11 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.03x - еще компактнее)
-        line_spacing = int(font_size * 1.03)
+        # МИНИМАЛЬНЫЙ межстрочный интервал (1.02x - еще компактнее)
+        line_spacing = int(font_size * 1.02)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 20  # Было 40, теперь 20
+        text_start_y = gradient_start + 15  # Было 40, теперь 15
         
         # Тень для текста (БЕЗ обводки, только смещение)
         shadow_offset = 3
