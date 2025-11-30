@@ -1,2 +1,3 @@
 [phases.setup]
-aptPkgs = ["fonts-dejavu-core", "fonts-liberation", "fontconfig"]
+aptPkgs = ["fonts-dejavu-core", "fonts-liberation", "fontconfig", "fonts-noto"]
+

@@ -7,9 +7,10 @@ import os
 app = Flask(__name__)
 
 def get_font(size, bold=True):
-    """Загрузка шрифта с приоритетом Liberation Sans"""
+    """Загрузка шрифта с приоритетом Ouroboros Rus By Cop"""
     if bold:
         font_paths = [
+            os.path.join(os.path.dirname(__file__), "fonts", "ouroborosrusbycop.otf"),
             # Liberation Sans - приоритет 1
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
             os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
@@ -33,6 +34,33 @@ def get_font(size, bold=True):
             continue
     
     print(f"⚠️ WARNING: Using default font (size: {size})")
+    return ImageFont.load_default()
+
+def get_font_for_logo(size, bold=True):
+    """Загрузка шрифта для логотипа - Montserrat"""
+    if bold:
+        font_paths = [
+            # Montserrat - приоритет для логотипа
+            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
+            # Fallback
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+    else:
+        font_paths = [
+            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+    
+    for font_path in font_paths:
+        try:
+            if os.path.exists(font_path):
+                print(f"✓ Logo font loaded: {font_path} (size: {size})")
+                return ImageFont.truetype(font_path, size)
+        except Exception as e:
+            print(f"✗ Failed to load {font_path}: {e}")
+            continue
+    
+    print(f"⚠️ WARNING: Using default font for logo (size: {size})")
     return ImageFont.load_default()
 
 @app.route('/process', methods=['POST'])
@@ -109,7 +137,7 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП "NEUROSTEP" =====
-        logo_font = get_font(20)
+        logo_font = get_font_for_logo(20)
         logo_text = "NEUROSTEP"
         
         logo_y = 20
