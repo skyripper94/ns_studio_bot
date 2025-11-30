@@ -132,9 +132,27 @@ def process_image():
         # Логотип - белый текст
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
-        # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
-        # Преобразуем в заглавные
+        # ===== 4. ОСНОВНОЙ ТЕКСТ (С EMOJI) =====
         text = text.upper()
+        
+        # Добавляем emoji
+        if 'ДОЛЛАРОВ' in text or '$' in text or 'ДЕНЬГ' in text:
+            import re
+            text = re.sub(r'(\d+[\s\d]*)\s*(ДОЛЛАРОВ?)', r'💰 \1 \2', text)
+            if '💰' not in text and ('ДЕНЬГ' in text or 'ДОЛЛАРОВ' in text):
+                text = text.replace('ДОЛЛАРОВ', '💰 ДОЛЛАРОВ')
+                text = text.replace('ДЕНЬГИ', '💰 ДЕНЬГИ')
+        
+        if 'НАГРА' in text or 'ПОЛУЧИЛ' in text or 'ПРЕМ' in text:
+            text = text.replace('НАГРАДУ', '🎁 НАГРАДУ')
+            text = text.replace('ПРЕМИЮ', '🎁 ПРЕМИЮ')
+            text = text.replace('ПОЛУЧИЛ', 'ПОЛУЧИЛ 🎁')
+        
+        if 'НАШЁЛ' in text or 'НАШЕЛ' in text:
+            text = text.replace('НАШЁЛ', '💼 НАШЁЛ')
+            text = text.replace('НАШЕЛ', '💼 НАШЕЛ')
+        
+        print(f"Text with emoji: {text}")
         
         main_font = get_font(font_size)
         words = text.split()
@@ -162,15 +180,13 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.02x - еще компактнее)
-        line_spacing = int(font_size * 1.04)
+        # ВЫТЯНУТО ВВЕРХ: межстрочный 0.85x
+        line_spacing = int(font_size * 0.85)
         
-        # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 120
+        text_start_y = gradient_start + 30
         
-        # Тень для текста (БЕЗ обводки, только смещение)
-        shadow_offset = 3
-        shadow_opacity = 180
+        # ОБВОДКА для толщины букв
+        outline = 1
         
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
@@ -179,28 +195,14 @@ def process_image():
             
             y_pos = text_start_y + i * line_spacing
             
-            # Простая тень (смещение)
-            draw.text(
-                (text_x + shadow_offset, y_pos + shadow_offset),
-                line,
-                font=main_font,
-                fill=(0, 0, 0, shadow_opacity)
-            )
-
-            # Жирная обводка (3px)
-outline = 1
-for dx in range(-outline, outline + 1):
-    for dy in range(-outline, outline + 1):
-        if dx != 0 or dy != 0:
-            draw.text((text_x + dx, y_pos + dy), line, font=main_font, fill=(0, 0, 0))
+            # Черная обводка
+            for dx in range(-outline, outline + 1):
+                for dy in range(-outline, outline + 1):
+                    if dx != 0 or dy != 0:
+                        draw.text((text_x + dx, y_pos + dy), line, font=main_font, fill=(0, 0, 0))
             
-            # Основной белый текст
-            draw.text(
-                (text_x, y_pos),
-                line,
-                font=main_font,
-                fill=(255, 255, 255)
-            )
+            # Белый текст
+            draw.text((text_x, y_pos), line, font=main_font, fill=(255, 255, 255))
         
         # ===== 5. СТРЕЛКА → (НИЖЕ, ЧТОБЫ НЕ НАКЛАДЫВАЛАСЬ) =====
         arrow_size = 100
