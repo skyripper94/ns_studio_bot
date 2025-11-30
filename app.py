@@ -35,8 +35,8 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 50) / 100  # 50% изображения
-        font_size = config.get('fontSize', 60)
+        gradient_percent = config.get('gradientPercent', 60) / 100  # 50% изображения
+        font_size = config.get('fontSize', 48)
         
         print(f"Processing: {text}")
         
@@ -52,9 +52,9 @@ def process_image():
         sharpness = ImageEnhance.Sharpness(img)
         img = sharpness.enhance(3.5)
         
-        # Контраст +40%
+        # Контраст +20%
         contrast = ImageEnhance.Contrast(img)
-        img = contrast.enhance(1.4)
+        img = contrast.enhance(1.2)
         
         # Яркость -5% (чуть темнее для контраста с текстом)
         brightness = ImageEnhance.Brightness(img)
@@ -73,7 +73,7 @@ def process_image():
             
             # Очень быстрое затемнение (progress^0.2)
             # К середине градиента уже почти черный
-            alpha = int(255 * (progress ** 0.2))
+            alpha = int(255 * (progress ** 0.3))
             
             draw_overlay.rectangle(
                 [(0, y), (width, y + 1)],
@@ -105,29 +105,6 @@ def process_image():
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Рамка вокруг логотипа (как на примере)
-        padding = 12
-        box_x1 = logo_x - padding
-        box_y1 = logo_y - padding
-        box_x2 = logo_x + logo_width + padding
-        box_y2 = logo_y + 26 + padding
-        
-        # Черный фон под логотипом
-        draw.rectangle(
-            [(box_x1, box_y1), (box_x2, box_y2)],
-            fill=(0, 0, 0, 200)
-        )
-        
-        # Белая рамка
-        draw.rectangle(
-            [(box_x1, box_y1), (box_x2, box_y2)],
-            outline=(255, 255, 255),
-            width=2
-        )
-        
-        # Логотип (белый текст)
-        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
-        
         # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
         # Преобразуем в заглавные
         text = text.upper()
@@ -158,8 +135,8 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.05x вместо 1.1x)
-        line_spacing = int(font_size * 1.05)
+        # МИНИМАЛЬНЫЙ межстрочный интервал (1.05x вместо 1.0x)
+        line_spacing = int(font_size * 1.00)
         
         # Начало текста: начало градиента + отступ
         text_start_y = gradient_start + 40
@@ -192,21 +169,21 @@ def process_image():
             )
         
         # ===== 5. СТРЕЛКА → (ЖИРНАЯ, БОЛЬШАЯ) =====
-        arrow_size = 100  # Увеличил до 100
+        arrow_size = 80  # Увеличил до 100
         arrow_margin = 25
         arrow_x = width - arrow_size - arrow_margin
         arrow_y = height - 60  # Фиксированная позиция от низа
         
         # Линия стрелки (ТОЛСТАЯ - 8px)
-        line_width = 8  # Было 5, теперь 8
+        line_width = 6  # Было 5, теперь 6
         draw.line(
-            [(arrow_x, arrow_y), (arrow_x + arrow_size - 25, arrow_y)],
+            [(arrow_x, arrow_y), (arrow_x + arrow_size - 18, arrow_y)],
             fill=(255, 255, 255),
             width=line_width
         )
         
         # Наконечник (треугольник, БОЛЬШОЙ и ЖИРНЫЙ)
-        tip_size = 24  # Было 18, теперь 24
+        tip_size = 32  # Было 18, теперь 32
         tip_points = [
             (arrow_x + arrow_size, arrow_y),
             (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
