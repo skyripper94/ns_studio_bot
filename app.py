@@ -7,20 +7,22 @@ import os
 app = Flask(__name__)
 
 def get_font(size, bold=True):
-    """Загрузка шрифта с приоритетом Ouroboros Rus By Cop"""
+    """Загрузка шрифта с приоритетом Schist Black (основной текст)"""
     if bold:
         font_paths = [
-            # Exo 2 - приоритет для основного текста
+            # Schist Black (локальный файл с пробелом в имени)
+            os.path.join(os.path.dirname(__file__), "fonts", "Schist Black.ttf"),
+            # Exo2 - сильный локальный fallback
             os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
-            # Liberation Sans - приоритет 2
+            # Liberation Sans - системный fallback
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            os.path.join(os.path.dirname(__file__), "fonts", "LiberationSans-Bold.ttf"),
-            # DejaVu Sans - fallback
+            # DejaVu Sans - дополнительный fallback
             os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
     else:
         font_paths = [
+            os.path.join(os.path.dirname(__file__), "fonts", "Schist Black.ttf"),
             os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -39,17 +41,18 @@ def get_font(size, bold=True):
     return ImageFont.load_default()
 
 def get_font_for_logo(size, bold=True):
-    """Загрузка шрифта для логотипа - Montserrat"""
+    """Загрузка шрифта для логотипа - Exo 2 (более плотный для заголовка)"""
     if bold:
         font_paths = [
-            # Montserrat - приоритет для логотипа
-            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
+            # Exo2 - приоритет для логотипа
+            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             # Fallback
+            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
     else:
         font_paths = [
-            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
+            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
     
@@ -291,7 +294,8 @@ def health():
             'CYAN glow effect',
             '20% vertical text stretch',
             'No emoji',
-            'Liberation Sans Bold',
+            'Schist Black (main text)',
+            'Exo 2 (logo)',
         ],
         'fonts': fonts_available
     }
