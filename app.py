@@ -236,7 +236,7 @@ def process_image():
             original_height = text_height + padding*2
             
             # УВЕЛИЧИВАЕМ ВЫСОТУ НА 15%
-            stretched_height = int(original_height * 1.15)
+            stretched_height = int(original_height * 1.30)
             
             print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+20%)")
             
