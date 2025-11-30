@@ -204,7 +204,7 @@ def process_image():
         line_spacing = int(font_size * 1.10)
         
         # Начало текста
-        text_start_y = gradient_start + 40
+        text_start_y = gradient_start + 60
         
         # Рисуем текст с ВЫТЯГИВАНИЕМ
         for i, line in enumerate(lines):
