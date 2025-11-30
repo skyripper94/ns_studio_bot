@@ -164,9 +164,9 @@ def process_image():
         line_spacing = int(font_size * 1.02)
         
         # Начало текста
-        text_start_y = gradient_start + 100
+        text_start_y = gradient_start + 60
         
-        # Рисуем текст с ВЫТЯГИВАНИЕМ + БИРЮЗОВЫМ СВЕЧЕНИЕМ
+        # Рисуем текст с ВЫТЯГИВАНИЕМ
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
             text_width = bbox[2] - bbox[0]
