@@ -35,7 +35,7 @@ def process_image():
         config = data.get('config', {})
         
         # Параметры
-        gradient_percent = config.get('gradientPercent', 45) / 100
+        gradient_percent = config.get('gradientPercent', 50) / 100  # 50% изображения
         font_size = config.get('fontSize', 60)
         
         print(f"Processing: {text}")
@@ -80,8 +80,8 @@ def process_image():
                 fill=(0, 0, 0, alpha)
             )
         
-        # Дополнительно: нижние 15% ПОЛНОСТЬЮ черные (100% opacity)
-        solid_black_start = int(height * 0.85)
+        # Дополнительно: нижние 20% ПОЛНОСТЬЮ черные (100% opacity)
+        solid_black_start = int(height * 0.80)  # С 80% до низа - сплошной черный
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
@@ -93,28 +93,39 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" (СВЕРХУ, ПО ЦЕНТРУ) =====
-        logo_font = get_font(28)
+        # ===== 3. ЛОГОТИП "NEUROSTEP" (САМЫЙ ВЕРХ ИЗОБРАЖЕНИЯ) =====
+        logo_font = get_font(26)
         logo_text = "NEUROSTEP"
         
-        # Позиция: самый верх градиента + небольшой отступ
-        logo_y = gradient_start + 15
+        # Позиция: самый верх изображения (над градиентом)
+        logo_y = 25  # 25px от верхнего края
         
         # Центрируем по X
         bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
         logo_width = bbox[2] - bbox[0]
         logo_x = (width - logo_width) // 2
         
-        # Тень у логотипа (offset 3px, черная)
-        shadow_offset = 3
-        draw.text(
-            (logo_x + shadow_offset, logo_y + shadow_offset),
-            logo_text,
-            font=logo_font,
-            fill=(0, 0, 0, 180)
+        # Рамка вокруг логотипа (как на примере)
+        padding = 12
+        box_x1 = logo_x - padding
+        box_y1 = logo_y - padding
+        box_x2 = logo_x + logo_width + padding
+        box_y2 = logo_y + 26 + padding
+        
+        # Черный фон под логотипом
+        draw.rectangle(
+            [(box_x1, box_y1), (box_x2, box_y2)],
+            fill=(0, 0, 0, 200)
         )
         
-        # Логотип (белый)
+        # Белая рамка
+        draw.rectangle(
+            [(box_x1, box_y1), (box_x2, box_y2)],
+            outline=(255, 255, 255),
+            width=2
+        )
+        
+        # Логотип (белый текст)
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (ЗАГЛАВНЫМИ, БЕЗ ОБВОДКИ, С ТЕНЬЮ) =====
@@ -150,8 +161,8 @@ def process_image():
         # МИНИМАЛЬНЫЙ межстрочный интервал (1.05x вместо 1.1x)
         line_spacing = int(font_size * 1.05)
         
-        # Начало текста: ниже логотипа + отступ
-        text_start_y = logo_y + 55
+        # Начало текста: начало градиента + отступ
+        text_start_y = gradient_start + 40
         
         # Тень для текста (легкая)
         shadow_offset = 4
@@ -180,22 +191,22 @@ def process_image():
                 fill=(255, 255, 255)
             )
         
-        # ===== 5. СТРЕЛКА → (БОЛЬШЕ, НИЖЕ) =====
-        arrow_size = 90  # Было 50, теперь 90
+        # ===== 5. СТРЕЛКА → (ЖИРНАЯ, БОЛЬШАЯ) =====
+        arrow_size = 100  # Увеличил до 100
         arrow_margin = 25
         arrow_x = width - arrow_size - arrow_margin
-        arrow_y = height - arrow_size // 2 - 20  # Ниже на 20px
+        arrow_y = height - 60  # Фиксированная позиция от низа
         
-        # Линия стрелки (толще)
-        line_width = 5
+        # Линия стрелки (ТОЛСТАЯ - 8px)
+        line_width = 8  # Было 5, теперь 8
         draw.line(
-            [(arrow_x, arrow_y), (arrow_x + arrow_size - 20, arrow_y)],
+            [(arrow_x, arrow_y), (arrow_x + arrow_size - 25, arrow_y)],
             fill=(255, 255, 255),
             width=line_width
         )
         
-        # Наконечник (треугольник, больше)
-        tip_size = 18
+        # Наконечник (треугольник, БОЛЬШОЙ и ЖИРНЫЙ)
+        tip_size = 24  # Было 18, теперь 24
         tip_points = [
             (arrow_x + arrow_size, arrow_y),
             (arrow_x + arrow_size - tip_size, arrow_y - tip_size // 2),
