@@ -165,11 +165,11 @@ def process_image():
         
         print(f"Text lines: {lines}")
         
-        # МИНИМАЛЬНЫЙ межстрочный интервал (1.03x - еще компактнее)
+        # МИНИМАЛЬНЫЙ межстрочный интервал (1.02x - еще компактнее)
         line_spacing = int(font_size * 1.02)
         
         # Начало текста: начало градиента + небольшой отступ (ВЫШЕ)
-        text_start_y = gradient_start + 90
+        text_start_y = gradient_start + 120
         
         # Тень для текста (БЕЗ обводки, только смещение)
         shadow_offset = 3
