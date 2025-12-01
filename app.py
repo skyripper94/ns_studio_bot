@@ -138,7 +138,7 @@ def process_image():
         draw = ImageDraw.Draw(img)
         
         # ===== 3. ЛОГОТИП ВВЕРХУ =====
-        logo_text = "NEUROSTEP"
+        logo_text = "Neurostep"
         logo_font_size = 18
         logo_font = get_font(logo_font_size, bold=True)
         
