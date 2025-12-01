@@ -146,12 +146,12 @@ def process_image():
         logo_width = logo_bbox[2] - logo_bbox[0]
         logo_height = logo_bbox[3] - logo_bbox[1]
         
-        # Центрируем по горизонтали, отступ 20px сверху
-        logo_x = (width - logo_width) // 2
+        # Размещаем логотип в правом верхнем углу, отступ 20px
+        logo_x = width - logo_width - 20
         logo_y = 20
         
         # Тень логотипа (чёрный текст со смещением)
-        shadow_offset = 1
+        shadow_offset = 2
         draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
 
         # Рисуем логотип белым поверх тени. Усиливаем жирность при необходимости.
