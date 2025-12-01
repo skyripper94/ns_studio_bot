@@ -159,8 +159,8 @@ def process_image():
         # Если шрифт помечен как bold — эмулируем более выраженную жирность дополнительными отрисовками
         is_bold_logo = getattr(logo_font, 'is_bold', False)
         if is_bold_logo:
-            # более толстый вариант — рисуем несколько раз с небольшими смещениями
-            for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1), (-1,-1), (2,0), (0,2)]:
+            # толстый вариант — рисуем несколько раз с небольшими смещениями
+            for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1)]:
                 draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=white_fill)
         else:
             draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=white_fill)
