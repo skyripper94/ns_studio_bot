@@ -4,6 +4,7 @@ import io
 import base64
 import os
 import random
+import re
 
 app = Flask(__name__)
 
@@ -181,13 +182,32 @@ def process_image():
         text_start_y = gradient_start + 60
         
         # Выбираем случайные слова для бирюзового цвета (1-2 слова)
+        # Правило: окрашиваем ТОЛЬКО слова, которые:
+        #  - содержат буквы (кириллица/латиница),
+        #  - не содержат цифр,
+        #  - после удаления знаков препинания длина > 3 символов.
         all_words_in_lines = []
         for line in lines:
             all_words_in_lines.extend(line.split())
-        
+
+        # Фильтруем кандидатов по правилу
+        candidate_words = []
+        for w in all_words_in_lines:
+            # Оставляем только буквы (русские/латинские), убирая пунктуацию и прочие символы
+            cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", w)
+            if len(cleaned) > 3 and any(ch.isalpha() for ch in cleaned):
+                # также исключаем слова, содержащие цифры (уже удалены из cleaned)
+                if not any(ch.isdigit() for ch in w):
+                    candidate_words.append(w)
+
         num_cyan_words = random.randint(1, 2) if len(all_words_in_lines) >= 2 else 1
-        cyan_words = set(random.sample(all_words_in_lines, min(num_cyan_words, len(all_words_in_lines))))
-        
+        if candidate_words:
+            cyan_words = set(random.sample(candidate_words, min(num_cyan_words, len(candidate_words))))
+        else:
+            # Если подходящих слов нет — не красим ничего (пустой набор)
+            cyan_words = set()
+
+        print(f"[DEBUG] Candidate words for cyan: {candidate_words}")
         print(f"[DEBUG] Cyan words selected: {cyan_words}")
         
         # Рисуем текст с ВЫТЯГИВАНИЕМ
