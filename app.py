@@ -305,13 +305,13 @@ def process_image():
             print(f"[DEBUG] Line '{line}' rendered with cyan accents and black outline")
         
         # ===== 5. БИРЮЗОВАЯ ПОЛОСКА ВНИЗУ (ПОДВАЛ) =====
-        # Полоска выходит за нижний край, бирюзового цвета
-        bar_height = int(height * 0.08)  # 8% высоты изображения
-        bar_color = (0, 188, 212, 255)  # бирюзовый, как в тексте
+        # Полоска выходит за нижний край, бирюзового цвета (темнее)
+        bar_height = int(height * 0.04)  # 4% высоты изображения (меньше)
+        bar_color = (0, 150, 170, 255)  # бирюзовый темнее, чем в тексте
         
         # Рисуем полоску так, чтобы часть выходила за нижний край
-        bar_y_start = height - int(bar_height * 0.6)  # 60% полоски внутри, 40% за краем
-        bar_y_end = height + int(bar_height * 0.4)  # выходит на 40% за кадр
+        bar_y_start = height - int(bar_height * 0.5)  # 50% полоски внутри, 50% за краем
+        bar_y_end = height + int(bar_height * 0.5)  # выходит на 50% за кадр
         
         draw.rectangle(
             [(0, bar_y_start), (width, bar_y_end)],
