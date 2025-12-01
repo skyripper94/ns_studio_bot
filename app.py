@@ -3,6 +3,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import io
 import base64
 import os
+import random
 
 app = Flask(__name__)
 
@@ -175,6 +176,16 @@ def process_image():
         # Начало текста
         text_start_y = gradient_start + 60
         
+        # Выбираем случайные слова для бирюзового цвета (1-2 слова)
+        all_words_in_lines = []
+        for line in lines:
+            all_words_in_lines.extend(line.split())
+        
+        num_cyan_words = random.randint(1, 2) if len(all_words_in_lines) >= 2 else 1
+        cyan_words = set(random.sample(all_words_in_lines, min(num_cyan_words, len(all_words_in_lines))))
+        
+        print(f"[DEBUG] Cyan words selected: {cyan_words}")
+        
         # Рисуем текст с ВЫТЯГИВАНИЕМ
         for i, line in enumerate(lines):
             bbox = draw.textbbox((0, 0), line, font=main_font)
@@ -191,29 +202,44 @@ def process_image():
             temp_img = Image.new('RGBA', (text_width + padding*2, text_height + padding*2), (0, 0, 0, 0))
             temp_draw = ImageDraw.Draw(temp_img)
             
-            # Черная тень снизу
-            temp_draw.text((padding + 3, padding + 3), line, font=main_font, fill=(0, 0, 0, 200))
+            # Определяем цвет для каждого слова в этой линии
+            words_in_line = line.split()
+            word_colors = {}
+            for word in words_in_line:
+                if word in cyan_words:
+                    word_colors[word] = (0, 188, 212)  # Бирюзовый (cyan)
+                else:
+                    word_colors[word] = (255, 255, 255)  # Белый
             
-            # Белая обводка 1px (рисуем текст 8 раз со смещением на 1px в разные стороны)
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    if dx != 0 or dy != 0:  # пропускаем центр
-                        temp_draw.text((padding + dx, padding + dy), line, font=main_font, fill=(255, 255, 255, 150))
-            
-            # Основной текст (можно настроить через config.textColor)
-            temp_draw.text((padding, padding), line, font=main_font, fill=text_color)
+            # Рисуем каждое слово с чёрной обводкой
+            current_x = padding
+            for word in words_in_line:
+                word_bbox = temp_draw.textbbox((current_x, padding), word, font=main_font)
+                word_width = word_bbox[2] - word_bbox[0]
+                word_color = word_colors[word]
+                
+                # Чёрная обводка (рисуем текст 8 раз со смещением на 1px)
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        if dx != 0 or dy != 0:
+                            temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=(0, 0, 0, 200))
+                
+                # Основной цвет (белый или бирюзовый)
+                temp_draw.text((current_x, padding), word, font=main_font, fill=word_color)
+                
+                current_x += word_width + temp_draw.textbbox((0, 0), " ", font=main_font)[2]
             
             # ╔══════════════════════════════════════════════════╗
-            # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+15%)           ║
+            # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+30%)           ║
             # ╚══════════════════════════════════════════════════╝
             
             original_width = text_width + padding*2
             original_height = text_height + padding*2
             
-            # УВЕЛИЧИВАЕМ ВЫСОТУ НА 15%
+            # УВЕЛИЧИВАЕМ ВЫСОТУ НА 30%
             stretched_height = int(original_height * 1.30)
             
-            print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+20%)")
+            print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+30%)")
             
             stretched = temp_img.resize(
                 (original_width, stretched_height), 
@@ -223,7 +249,7 @@ def process_image():
             # Накладываем на основное изображение
             img.paste(stretched, (text_x - padding, y_pos - padding), stretched)
             
-            print(f"[DEBUG] Line '{line}' rendered with CYAN glow and 20% stretch")
+            print(f"[DEBUG] Line '{line}' rendered with cyan accents and black outline")
         
         # (arrow removed)
         
@@ -261,10 +287,11 @@ def health():
 
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v5',
+        'version': 'NEUROSTEP_v6',
         'features': [
             'NEUROSTEP logo (white, top-centered)',
-            'White 1px text outline',
+            'Main text: white with black outline',
+            'Random 1-2 words: cyan accent color',
             '30% vertical text stretch',
             'No emoji',
             'Schist Black (main text)',
