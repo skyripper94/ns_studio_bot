@@ -160,7 +160,7 @@ def process_image():
         is_bold_logo = getattr(logo_font, 'is_bold', False)
         if is_bold_logo:
             # более толстый вариант — рисуем несколько раз с небольшими смещениями
-            for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1)]:
+            for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1), (-1,-1), (2,0), (0,2)]:
                 draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=white_fill)
         else:
             draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=white_fill)
@@ -272,10 +272,11 @@ def process_image():
                             temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=(0, 0, 0, 200))
                 
                 # Основной цвет (белый или бирюзовый)
-                # Если шрифт помечен как bold — эмулируем жирность дорисовкой с небольшими смещениями
+                # Если шрифт помечен как bold — эмулируем жирность дорисовкой с дополнительными смещениями
                 is_bold_font = getattr(main_font, 'is_bold', False)
                 if is_bold_font:
-                    for dx, dy in [(0,0), (1,0), (0,1)]:
+                    bold_offsets = [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1), (-1,-1), (2,0), (0,2)]
+                    for dx, dy in bold_offsets:
                         temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=word_color)
                 else:
                     temp_draw.text((current_x, padding), word, font=main_font, fill=word_color)
