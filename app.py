@@ -154,18 +154,18 @@ def process_image():
         shadow_offset = 2
         draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
 
-        # Рисуем логотип бирюзовым поверх тени
-        cyan_fill = (0, 188, 212, 255)
-        # Если шрифт помечен как bold — эмулируем жирность дополнительными отрисовками
+        # Рисуем логотип белым поверх тени. Усиливаем жирность при необходимости.
+        white_fill = (255, 255, 255, 255)
+        # Если шрифт помечен как bold — эмулируем более выраженную жирность дополнительными отрисовками
         is_bold_logo = getattr(logo_font, 'is_bold', False)
         if is_bold_logo:
-            # толстый вариант — рисуем несколько раз с небольшими смещениями
-            for dx, dy in [(0,0), (1,0), (0,1)]:
-                draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=cyan_fill)
+            # более толстый вариант — рисуем несколько раз с небольшими смещениями
+            for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1)]:
+                draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=white_fill)
         else:
-            draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=cyan_fill)
+            draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=white_fill)
 
-        print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y}) with cyan color and shadow")
+        print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y}) as white bold with shadow")
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
