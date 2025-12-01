@@ -139,7 +139,7 @@ def process_image():
         
         # ===== 3. ЛОГОТИП ВВЕРХУ =====
         logo_text = "NEUROSTEP"
-        logo_font_size = 22
+        logo_font_size = 18
         logo_font = get_font(logo_font_size, bold=True)
         
         logo_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
@@ -151,7 +151,7 @@ def process_image():
         logo_y = 20
         
         # Тень логотипа (чёрный текст со смещением)
-        shadow_offset = 2
+        shadow_offset = 1
         draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
 
         # Рисуем логотип белым поверх тени. Усиливаем жирность при необходимости.
@@ -202,7 +202,7 @@ def process_image():
         line_spacing = int(font_size * 1.10)
         
         # Начало текста
-        text_start_y = gradient_start + 90
+        text_start_y = gradient_start + 110
         
         # Выбираем случайные слова для бирюзового цвета (1-2 слова)
         # Правило: окрашиваем ТОЛЬКО слова, которые:
