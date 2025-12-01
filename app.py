@@ -167,6 +167,17 @@ def process_image():
 
         print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y}) as white bold with shadow")
         
+        # Подчеркиваем логотип бирюзовой линией
+        underline_y = logo_y + logo_height + 5
+        underline_thickness = 2
+        cyan_underline = (0, 188, 212, 255)
+        draw.rectangle(
+            [(logo_x, underline_y), (logo_x + logo_width, underline_y + underline_thickness)],
+            fill=cyan_underline
+        )
+        
+        print(f"✓ Logo underline rendered at y={underline_y}")
+        
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
         
