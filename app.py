@@ -139,7 +139,7 @@ def process_image():
         
         # ===== 3. ЛОГОТИП ВВЕРХУ =====
         logo_text = "NEUROSTEP"
-        logo_font_size = 20
+        logo_font_size = 22
         logo_font = get_font(logo_font_size, bold=True)
         
         logo_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
@@ -289,7 +289,7 @@ def process_image():
             original_height = text_height + padding*2
             
             # УВЕЛИЧИВАЕМ ВЫСОТУ НА 30%
-            stretched_height = int(original_height * 1.30)
+            stretched_height = int(original_height * 1.15)
             
             print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+30%)")
             
