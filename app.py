@@ -12,6 +12,8 @@ def get_font(size, bold=True):
     """Загрузка шрифта с приоритетом Schist Black (основной текст)"""
     if bold:
         font_paths = [
+            # Rubik variable font (from Google Fonts)
+            os.path.join(os.path.dirname(__file__), "fonts", "Rubik[wght].ttf"),
             # Schist Black (локальный файл с пробелом в имени)
             os.path.join(os.path.dirname(__file__), "fonts", "Schist Black.ttf"),
             # Exo2 - сильный локальный fallback
@@ -24,6 +26,8 @@ def get_font(size, bold=True):
         ]
     else:
         font_paths = [
+            # Rubik variable font (from Google Fonts)
+            os.path.join(os.path.dirname(__file__), "fonts", "Rubik[wght].ttf"),
             os.path.join(os.path.dirname(__file__), "fonts", "Schist Black.ttf"),
             os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
