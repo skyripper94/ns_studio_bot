@@ -134,10 +134,14 @@ def process_image():
         logo_x = (width - logo_width) // 2
         logo_y = 20
         
-        # Рисуем логотип белым
+        # Тень логотипа (чёрный текст со смещением)
+        shadow_offset = 2
+        draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
+        
+        # Рисуем логотип белым поверх тени
         draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255, 255))
         
-        print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y})")
+        print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y}) with shadow")
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
