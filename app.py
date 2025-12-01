@@ -40,34 +40,6 @@ def get_font(size, bold=True):
     print(f"⚠️ WARNING: Using default font (size: {size})")
     return ImageFont.load_default()
 
-def get_font_for_logo(size, bold=True):
-    """Загрузка шрифта для логотипа - предпочитаем системный DejaVu (надежный в prod)."""
-    if bold:
-        font_paths = [
-            # System DejaVu first (reliable binary present in container)
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            # Local fallbacks
-            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
-            os.path.join(os.path.dirname(__file__), "fonts", "Montserrat-Bold.ttf"),
-        ]
-    else:
-        font_paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
-        ]
-    
-    for font_path in font_paths:
-        try:
-            if os.path.exists(font_path):
-                print(f"✓ Logo font loaded: {font_path} (size: {size})")
-                return ImageFont.truetype(font_path, size)
-        except Exception as e:
-            print(f"✗ Failed to load {font_path}: {e}")
-            continue
-    
-    print(f"⚠️ WARNING: Using default font for logo (size: {size})")
-    return ImageFont.load_default()
-
 @app.route('/process', methods=['POST'])
 def process_image():
     try:
@@ -148,28 +120,7 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ЛОГОТИП "NEUROSTEP" =====
-        logo_font = get_font_for_logo(36)
-        logo_text = "NEUROSTEP"
-
-        logo_y = 20
-
-        bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
-        logo_width = bbox[2] - bbox[0]
-        logo_x = (width - logo_width) // 2
-
-        # Меньшая тень для логотипа
-        shadow_offset = 1
-        draw.text(
-            (logo_x + shadow_offset, logo_y + shadow_offset),
-            logo_text,
-            font=logo_font,
-            fill=(0, 0, 0, 100)
-        )
-
-        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255))
-        
-        # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
+        # ===== 3. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
         
         print(f"Text: {text}")
@@ -224,6 +175,12 @@ def process_image():
             
             # Черная тень снизу
             temp_draw.text((padding + 3, padding + 3), line, font=main_font, fill=(0, 0, 0, 200))
+            
+            # Белая обводка 1px (рисуем текст 8 раз со смещением на 1px в разные стороны)
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx != 0 or dy != 0:  # пропускаем центр
+                        temp_draw.text((padding + dx, padding + dy), line, font=main_font, fill=(255, 255, 255, 150))
             
             # Основной текст (можно настроить через config.textColor)
             temp_draw.text((padding, padding), line, font=main_font, fill=text_color)
@@ -286,13 +243,12 @@ def health():
 
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v3_CYAN_GLOW',
+        'version': 'NEUROSTEP_v4',
         'features': [
-            'CYAN glow effect',
-            '20% vertical text stretch',
+            'White 1px text outline',
+            '30% vertical text stretch',
             'No emoji',
             'Schist Black (main text)',
-            'Exo 2 (logo)',
         ],
         'fonts': fonts_available,
         'local_fonts': local_fonts,
