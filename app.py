@@ -38,13 +38,24 @@ def get_font(size, bold=True):
         try:
             if os.path.exists(font_path):
                 print(f"✓ Font loaded: {font_path} (size: {size})")
-                return ImageFont.truetype(font_path, size)
+                f = ImageFont.truetype(font_path, size)
+                # mark font object with requested boldness so rendering code can emulate bold if needed
+                try:
+                    setattr(f, 'is_bold', bool(bold))
+                except Exception:
+                    pass
+                return f
         except Exception as e:
             print(f"✗ Failed to load {font_path}: {e}")
             continue
     
-    print(f"⚠️ WARNING: Using default font (size: {size})")
-    return ImageFont.load_default()
+        print(f"⚠️ WARNING: Using default font (size: {size})")
+    df = ImageFont.load_default()
+    try:
+        setattr(df, 'is_bold', bool(bold))
+    except Exception:
+        pass
+    return df
 
 @app.route('/process', methods=['POST'])
 def process_image():
@@ -142,9 +153,16 @@ def process_image():
         # Тень логотипа (чёрный текст со смещением)
         shadow_offset = 2
         draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
-        
+
         # Рисуем логотип белым поверх тени
-        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255, 255))
+        # Если шрифт помечен как bold — эмулируем жирность дополнительными отрисовками
+        is_bold_logo = getattr(logo_font, 'is_bold', False)
+        if is_bold_logo:
+            # толстый вариант — рисуем несколько раз с небольшими смещениями
+            for dx, dy in [(0,0), (1,0), (0,1)]:
+                draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=(255,255,255,255))
+        else:
+            draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255, 255))
         
         print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y}) with shadow")
         
@@ -253,7 +271,13 @@ def process_image():
                             temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=(0, 0, 0, 200))
                 
                 # Основной цвет (белый или бирюзовый)
-                temp_draw.text((current_x, padding), word, font=main_font, fill=word_color)
+                # Если шрифт помечен как bold — эмулируем жирность дорисовкой с небольшими смещениями
+                is_bold_font = getattr(main_font, 'is_bold', False)
+                if is_bold_font:
+                    for dx, dy in [(0,0), (1,0), (0,1)]:
+                        temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=word_color)
+                else:
+                    temp_draw.text((current_x, padding), word, font=main_font, fill=word_color)
                 
                 current_x += word_width + temp_draw.textbbox((0, 0), " ", font=main_font)[2]
             
