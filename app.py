@@ -120,7 +120,25 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
-        # ===== 3. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
+        # ===== 3. ЛОГОТИП ВВЕРХУ =====
+        logo_text = "NEUROSTEP"
+        logo_font_size = 20
+        logo_font = get_font(logo_font_size, bold=True)
+        
+        logo_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
+        logo_width = logo_bbox[2] - logo_bbox[0]
+        logo_height = logo_bbox[3] - logo_bbox[1]
+        
+        # Центрируем по горизонтали, отступ 20px сверху
+        logo_x = (width - logo_width) // 2
+        logo_y = 20
+        
+        # Рисуем логотип белым
+        draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255, 255))
+        
+        print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y})")
+        
+        # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
         
         print(f"Text: {text}")
@@ -243,8 +261,9 @@ def health():
 
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v4',
+        'version': 'NEUROSTEP_v5',
         'features': [
+            'NEUROSTEP logo (white, top-centered)',
             'White 1px text outline',
             '30% vertical text stretch',
             'No emoji',
