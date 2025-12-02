@@ -155,7 +155,7 @@ def process_image():
             # Размещаем логотип по центру горизонтально
             if add_logo:
                 logo_x = (width - logo_width) // 2                     # Центр по горизонтали
-                logo_y = max(0, text_start_y - logo_height - 7)       # Лого над текстом, отступ 20px
+                logo_y = max(0, text_start_y - logo_height - 3)       # Лого над текстом, отступ 20px
             else:
                 logo_y = 0
 
@@ -178,10 +178,10 @@ def process_image():
             line_y = logo_y + logo_height // 2  # Середина логотипа
             line_thickness = 1
             line_color = (0, 188, 212, 255)  # Бирюзовый
-            line_length = 180  # Длина линии в пикселях
+            line_length = 185  # Длина линии в пикселях
 
             # Левая линия
-            left_line_end = logo_x - 12  # Отступ от логотипа
+            left_line_end = logo_x - 8  # Отступ от логотипа
             left_line_start = left_line_end - line_length
             draw.rectangle(
                 [(left_line_start, line_y), (left_line_end, line_y + line_thickness)],
@@ -189,7 +189,7 @@ def process_image():
             )
 
             # Правая линия
-            right_line_start = logo_x + logo_width + 12  # Отступ от логотипа
+            right_line_start = logo_x + logo_width + 8  # Отступ от логотипа
             right_line_end = right_line_start + line_length
             draw.rectangle(
                 [(right_line_start, line_y), (right_line_end, line_y + line_thickness)],
