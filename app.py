@@ -138,6 +138,9 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
 
+        # Начало текста
+        text_start_y = gradient_start + 120
+
         # ===== 3. ЛОГОТИП ВВЕРХУ (УСЛОВНО) =====
 
         if add_logo:  # ПРОВЕРКА
@@ -239,9 +242,6 @@ def process_image():
         
         # Межстрочный интервал
         line_spacing = int(font_size * 1.10)
-        
-        # Начало текста
-        text_start_y = gradient_start + 120
         
         # Выбираем случайные слова для бирюзового цвета (1-2 слова)
         # Правило: окрашиваем ТОЛЬКО слова, которые:
