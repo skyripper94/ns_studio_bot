@@ -150,11 +150,14 @@ def process_image():
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             # Размещаем логотип по центру горизонтально
-            logo_x = (width - logo_width) // 2
-            logo_y = 40  # Отступ сверху
+            if add_logo:
+                logo_x = (width - logo_width) // 2                     # Центр по горизонтали
+                logo_y = max(0, text_start_y - logo_height - 20)       # Лого над текстом, отступ 20px
+            else:
+                logo_y = 0
 
             # Тень логотипа (чёрный текст со смещением)
-            shadow_offset = 2
+            shadow_offset = 1
             draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
 
             # Рисуем логотип белым поверх тени
@@ -170,9 +173,9 @@ def process_image():
 
             # Рисуем линии от логотипа
             line_y = logo_y + logo_height // 2  # Середина логотипа
-            line_thickness = 2
+            line_thickness = 1
             line_color = (0, 188, 212, 255)  # Бирюзовый
-            line_length = 100  # Длина линии в пикселях
+            line_length = 180  # Длина линии в пикселях
 
             # Левая линия
             left_line_end = logo_x - 20  # Отступ от логотипа
@@ -194,7 +197,7 @@ def process_image():
 
             # Подчеркиваем логотип бирюзовой линией
             underline_y = logo_y + logo_height + 5
-            underline_thickness = 2
+            underline_thickness = 1
             cyan_underline = (0, 188, 212, 255)
             draw.rectangle(
                 [(logo_x, underline_y), (logo_x + logo_width, underline_y + underline_thickness)],
