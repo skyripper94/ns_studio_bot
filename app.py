@@ -66,6 +66,7 @@ def process_image():
         image_base64 = data.get('image', '')
         text = data.get('text', 'ЗАГОЛОВОК')
         config = data.get('config', {})
+        add_logo = data.get('addLogo', False)  # НОВЫЙ ПАРАМЕТР
         
         # Параметры ИЗ CONFIG
         gradient_percent = config.get('gradientPercent', 40) / 100
@@ -79,7 +80,7 @@ def process_image():
             text_color = (0, 122, 255)
         
         print(f"Processing: {text}")
-        print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}")
+        print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}, addLogo={add_logo}")
         
         # Декодируем изображение
         image_data = base64.b64decode(image_base64)
@@ -91,7 +92,7 @@ def process_image():
         # ===== 1. УЛУЧШЕНИЕ ФОТО =====
         # Резкость x3
         sharpness = ImageEnhance.Sharpness(img)
-        img = sharpness.enhance(3.7)
+        img = sharpness.enhance(3.3)
         
         # Контраст +20%
         contrast = ImageEnhance.Contrast(img)
@@ -136,37 +137,61 @@ def process_image():
         img = img.convert('RGB')
         
         draw = ImageDraw.Draw(img)
+
+        # ===== 3. ЛОГОТИП ВВЕРХУ (УСЛОВНО) =====
         
-        # ===== 3. ЛОГОТИП ВВЕРХУ =====
+    if add_logo:  # ПРОВЕРКА
         logo_text = "Neurostep"
-        logo_font_size = 18
+        logo_font_size = 18  # Увеличил размер
         logo_font = get_font(logo_font_size, bold=True)
         
         logo_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
         logo_width = logo_bbox[2] - logo_bbox[0]
         logo_height = logo_bbox[3] - logo_bbox[1]
         
-        # Размещаем логотип в правом верхнем углу, отступ 20px
-        logo_x = width - logo_width - 20
-        logo_y = 20
+        # Размещаем логотип по центру горизонтально
+        logo_x = (width - logo_width) // 2
+        logo_y = 40  # Отступ сверху
         
         # Тень логотипа (чёрный текст со смещением)
         shadow_offset = 2
         draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
 
-        # Рисуем логотип белым поверх тени. Усиливаем жирность при необходимости.
+        # Рисуем логотип белым поверх тени
         white_fill = (255, 255, 255, 255)
-        # Если шрифт помечен как bold — эмулируем более выраженную жирность дополнительными отрисовками
         is_bold_logo = getattr(logo_font, 'is_bold', False)
         if is_bold_logo:
-            # толстый вариант — рисуем несколько раз с небольшими смещениями
             for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1)]:
                 draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=white_fill)
         else:
             draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=white_fill)
 
-        print(f"✓ Logo rendered: {logo_text} at ({logo_x}, {logo_y}) as white bold with shadow")
+        print(f"✓ Logo rendered: {logo_text} centered at ({logo_x}, {logo_y})")
+    
+        # Рисуем линии от логотипа
+        line_y = logo_y + logo_height // 2  # Середина логотипа
+        line_thickness = 2
+        line_color = (0, 188, 212, 255)  # Бирюзовый
+        line_length = 100  # Длина линии в пикселях
         
+        # Левая линия
+        left_line_end = logo_x - 20  # Отступ от логотипа
+        left_line_start = left_line_end - line_length
+        draw.rectangle(
+            [(left_line_start, line_y), (left_line_end, line_y + line_thickness)],
+            fill=line_color
+        )
+    
+        # Правая линия
+        right_line_start = logo_x + logo_width + 20  # Отступ от логотипа
+        right_line_end = right_line_start + line_length
+        draw.rectangle(
+        [(right_line_start, line_y), (right_line_end, line_y + line_thickness)],
+        fill=line_color
+        )
+    
+        print(f"✓ Logo lines rendered at y={line_y}, length={line_length}px")
+            
         # Подчеркиваем логотип бирюзовой линией
         underline_y = logo_y + logo_height + 5
         underline_thickness = 2
@@ -175,7 +200,7 @@ def process_image():
             [(logo_x, underline_y), (logo_x + logo_width, underline_y + underline_thickness)],
             fill=cyan_underline
         )
-        
+            
         print(f"✓ Logo underline rendered at y={underline_y}")
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
@@ -213,7 +238,7 @@ def process_image():
         line_spacing = int(font_size * 1.10)
         
         # Начало текста
-        text_start_y = gradient_start + 120
+        text_start_y = gradient_start + (160 if add_logo else 120)  # Больше отступ если есть лого
         
         # Выбираем случайные слова для бирюзового цвета (1-2 слова)
         # Правило: окрашиваем ТОЛЬКО слова, которые:
@@ -368,14 +393,15 @@ def health():
 
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v6',
+        'version': 'NEUROSTEP_v7_LOGO',
         'features': [
-            'NEUROSTEP logo (white, top-centered)',
+            'NEUROSTEP logo (conditional, white, top-right)',
             'Main text: white with black outline',
             'Random 1-2 words: cyan accent color',
             '30% vertical text stretch',
             'No emoji',
             'Schist Black (main text)',
+            'Logo controlled by addLogo parameter'
         ],
         'fonts': fonts_available,
         'local_fonts': local_fonts,
