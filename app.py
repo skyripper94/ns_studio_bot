@@ -181,7 +181,7 @@ def process_image():
             line_length = 180  # Длина линии в пикселях
 
             # Левая линия
-            left_line_end = logo_x - 20  # Отступ от логотипа
+            left_line_end = logo_x - 12  # Отступ от логотипа
             left_line_start = left_line_end - line_length
             draw.rectangle(
                 [(left_line_start, line_y), (left_line_end, line_y + line_thickness)],
@@ -189,7 +189,7 @@ def process_image():
             )
 
             # Правая линия
-            right_line_start = logo_x + logo_width + 20  # Отступ от логотипа
+            right_line_start = logo_x + logo_width + 12  # Отступ от логотипа
             right_line_end = right_line_start + line_length
             draw.rectangle(
                 [(right_line_start, line_y), (right_line_end, line_y + line_thickness)],
