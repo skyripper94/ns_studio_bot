@@ -138,9 +138,6 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
 
-    finally:
-        print("Process finished.")
-
         # ===== 3. ЛОГОТИП ВВЕРХУ (УСЛОВНО) =====
 
         if add_logo:  # ПРОВЕРКА
