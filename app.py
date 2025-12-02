@@ -155,7 +155,7 @@ def process_image():
             # Размещаем логотип по центру горизонтально
             if add_logo:
                 logo_x = (width - logo_width) // 2                     # Центр по горизонтали
-                logo_y = max(0, text_start_y - logo_height - 10)       # Лого над текстом, отступ 20px
+                logo_y = max(0, text_start_y - logo_height - 7)       # Лого над текстом, отступ 20px
             else:
                 logo_y = 0
 
@@ -178,7 +178,7 @@ def process_image():
             line_y = logo_y + logo_height // 2  # Середина логотипа
             line_thickness = 1
             line_color = (0, 188, 212, 255)  # Бирюзовый
-            line_length = 150  # Длина линии в пикселях
+            line_length = 180  # Длина линии в пикселях
 
             # Левая линия
             left_line_end = logo_x - 20  # Отступ от логотипа
@@ -199,15 +199,15 @@ def process_image():
             print(f"✓ Logo lines rendered at y={line_y}, length={line_length}px")
 
             # Подчеркиваем логотип бирюзовой линией
-            underline_y = logo_y + logo_height + 5
-            underline_thickness = 1
-            cyan_underline = (0, 188, 212, 255)
-            draw.rectangle(
-                [(logo_x, underline_y), (logo_x + logo_width, underline_y + underline_thickness)],
-                fill=cyan_underline
-            )
+            # underline_y = logo_y + logo_height + 5
+            # underline_thickness = 1
+            # cyan_underline = (0, 188, 212, 255)
+            # .rectangle(
+            #    [(logo_x, underline_y), (logo_x + logo_width, underline_y + underline_thickness)],
+            #    fill=cyan_underline
+            # )
 
-            print(f"✓ Logo underline rendered at y={underline_y}")
+           # print(f"✓ Logo underline rendered at y={underline_y}")
         
         # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
         text = text.upper()
