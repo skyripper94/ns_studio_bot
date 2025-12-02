@@ -139,12 +139,12 @@ def process_image():
         draw = ImageDraw.Draw(img)
 
         # Начало текста
-        text_start_y = gradient_start + 120
+        text_start_y = gradient_start + 130
 
         # ===== 3. ЛОГОТИП ВВЕРХУ (УСЛОВНО) =====
 
         if add_logo:  # ПРОВЕРКА
-            logo_text = "Neurostep"
+            logo_text = "@neurostep.media"
             logo_font_size = 18  # Увеличил размер
             logo_font = get_font(logo_font_size, bold=True)
 
@@ -155,7 +155,7 @@ def process_image():
             # Размещаем логотип по центру горизонтально
             if add_logo:
                 logo_x = (width - logo_width) // 2                     # Центр по горизонтали
-                logo_y = max(0, text_start_y - logo_height - 20)       # Лого над текстом, отступ 20px
+                logo_y = max(0, text_start_y - logo_height - 10)       # Лого над текстом, отступ 20px
             else:
                 logo_y = 0
 
@@ -178,7 +178,7 @@ def process_image():
             line_y = logo_y + logo_height // 2  # Середина логотипа
             line_thickness = 1
             line_color = (0, 188, 212, 255)  # Бирюзовый
-            line_length = 180  # Длина линии в пикселях
+            line_length = 150  # Длина линии в пикселях
 
             # Левая линия
             left_line_end = logo_x - 20  # Отступ от логотипа
