@@ -90,13 +90,13 @@ def process_image():
         print(f"Image size: {width}x{height}")
         
         # ===== 1. УЛУЧШЕНИЕ ФОТО =====
-        # Резкость x3
+        # Резкость x2
         sharpness = ImageEnhance.Sharpness(img)
-        img = sharpness.enhance(3.3)
+        img = sharpness.enhance(1.9)
         
-        # Контраст +20%
+        # Контраст +10%
         contrast = ImageEnhance.Contrast(img)
-        img = contrast.enhance(1.2)
+        img = contrast.enhance(1.1)
         
         # Яркость -5%
         brightness = ImageEnhance.Brightness(img)
@@ -109,11 +109,11 @@ def process_image():
         gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        # 35% полностью черные
-        solid_black_height = int(height * 0.35)
+        # 30% полностью черные
+        solid_black_height = int(height * 0.30)
         solid_black_start = height - solid_black_height
         
-        # Рисуем СПЛОШНОЙ черный (нижние 35%)
+        # Рисуем СПЛОШНОЙ черный (нижние 30%)
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
