@@ -109,28 +109,30 @@ def process_image():
         gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        # 35% полностью черные
-        solid_black_height = int(height * 0.35)
+        # Сплошной черный = 65% от общей высоты градиента
+        solid_portion = 0.65
+        solid_black_height = int(gradient_height * solid_portion)
         solid_black_start = height - solid_black_height
-        
-        # Рисуем СПЛОШНОЙ черный (нижние 30%)
+
+        # Рисуем СПЛОШНОЙ черный (нижняя часть)
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
         )
-        
-        # ПЛАВНЫЙ градиент в зоне 10%
+
+        # ПЛАВНЫЙ градиент (верхняя часть)
         gradient_zone_start = gradient_start
         gradient_zone_height = solid_black_start - gradient_start
-        
-        for y in range(gradient_zone_start, solid_black_start):
-            progress = (y - gradient_zone_start) / gradient_zone_height
-            alpha = int(255 * (progress ** 2))
-            
-            draw_overlay.rectangle(
-                [(0, y), (width, y + 1)],
-                fill=(0, 0, 0, alpha)
-            )
+
+        if gradient_zone_height > 0:  # ✅ Проверка на корректность
+            for y in range(gradient_zone_start, solid_black_start):
+                progress = (y - gradient_zone_start) / gradient_zone_height
+                alpha = int(255 * (progress ** 2))
+
+                draw_overlay.rectangle(
+                    [(0, y), (width, y + 1)],
+                    fill=(0, 0, 0, alpha)
+                )
         
         img = img.convert('RGBA')
         img = Image.alpha_composite(img, overlay)
