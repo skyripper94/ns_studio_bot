@@ -141,7 +141,7 @@ def process_image():
         draw = ImageDraw.Draw(img)
 
         # Начало текста
-        text_start_y = gradient_start + 100
+        text_start_y = gradient_start + 120
 
         # ===== 3. ЛОГОТИП ВВЕРХУ (УСЛОВНО) =====
 
