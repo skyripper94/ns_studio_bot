@@ -110,7 +110,7 @@ def process_image():
         gradient_start = height - gradient_height
         
         # 30% полностью черные
-        solid_black_height = int(height * 0.30)
+        solid_black_height = int(height * 0.35)
         solid_black_start = height - solid_black_height
         
         # Рисуем СПЛОШНОЙ черный (нижние 30%)
