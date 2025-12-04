@@ -47,17 +47,17 @@ def calculate_adaptive_gradient(img, has_long_text=False):
     pixels = list(gray.getdata())
     avg_brightness = sum(pixels) / len(pixels)
     
-    # Определяем высоту градиента
+    # ✅ УВЕЛИЧИЛИ базовые значения градиента
     if avg_brightness > 150:  # Светлое фото
-        gradient_percent = 0.45
+        gradient_percent = 0.50  # Было 0.45
     elif avg_brightness > 100:  # Среднее
-        gradient_percent = 0.35
+        gradient_percent = 0.45  # Было 0.35
     else:  # Темное
-        gradient_percent = 0.28
+        gradient_percent = 0.40  # Было 0.28
     
-    # ✅ НОВОЕ: Если текст длинный → увеличиваем градиент
+    # ✅ Если текст длинный → гарантируем минимум 50%
     if has_long_text:
-        gradient_percent = max(gradient_percent, 0.40)  # Минимум 40%
+        gradient_percent = max(gradient_percent, 0.50)
         print(f"[Adaptive Gradient] Long text detected, increased gradient")
     
     print(f"[Adaptive Gradient] Brightness: {avg_brightness:.0f}, Gradient: {gradient_percent*100:.0f}%")
@@ -160,17 +160,21 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         title = title.upper()
         title_color = cyan  # ✅ ВСЕГДА cyan
         
-        # Динамический размер
-        title_size = 56
+        # ✅ НОВОЕ: Начальный размер зависит от длины
+        if len(title) > 30:
+            title_size = 48  # Меньше для длинных заголовков
+        else:
+            title_size = 56
+        
         title_font = get_font(title_size, weight='bold')
         
-        # ✅ НОВОЕ: Разбиваем title на строки если не влезает
+        # ✅ Разбиваем title на строки
         max_width = width * 0.88
         title_lines = wrap_text(title, title_font, max_width, draw)
         
-        # Если не влезает в 2 строки → уменьшаем шрифт
-        while len(title_lines) > 2 and title_size > 36:
-            title_size -= 2
+        # ✅ НОВОЕ: Если >3 строк → уменьшаем агрессивнее
+        while len(title_lines) > 3 and title_size > 32:
+            title_size -= 3  # Было -2, теперь быстрее уменьшаем
             title_font = get_font(title_size, weight='bold')
             title_lines = wrap_text(title, title_font, max_width, draw)
         
@@ -182,7 +186,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             line_x = (width - line_width) // 2
             
             draw_text_with_outline(draw, (line_x, current_y), line, title_font, title_color)
-            current_y += line_height + 10  # Межстрочный интервал
+            current_y += line_height + 8  # ✅ Уменьшили межстрочный (было 10)
         
         print(f"[Title] Text: '{title}', Lines: {len(title_lines)}, Size: {title_size}px, Color: Cyan")
     
@@ -250,8 +254,8 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 2: АДАПТИВНЫЙ ГРАДИЕНТ
         # ═══════════════════════════════════════════════════
-        # ✅ НОВОЕ: Определяем, длинный ли текст
-        has_long_text = len(title) > 30  # Если >30 символов
+        # ✅ ОБНОВЛЕНО: Определяем длинный текст по title И subtitle
+        has_long_text = len(title) > 25 or len(subtitle) > 40
         gradient_percent = calculate_adaptive_gradient(img, has_long_text=has_long_text)
         
         # ═══════════════════════════════════════════════════
@@ -299,7 +303,11 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
-        start_y = gradient_start + 100  # Начальная позиция без лого
+        # ✅ НОВОЕ: Начальная позиция зависит от длины текста
+        if has_long_text:
+            start_y = gradient_start + 70  # Выше для длинных текстов
+        else:
+            start_y = gradient_start + 100  # Стандартная позиция
         
         if add_logo:
             logo_text = "@neurostep.media"
@@ -383,14 +391,15 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8_GOTHAM_FIXED',
+        'version': 'NEUROSTEP_v8.2_GRADIENT_FIX',
         'features': [
             'Title/Subtitle separation',
-            'Adaptive gradient (with long text detection)',
+            'Adaptive gradient (40-50%, up from 28-45%)',
             'Old text removal (increased padding)',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
-            'Multi-line text wrapping',
+            'Multi-line text wrapping (up to 3 lines)',
+            'Smart font sizing (48-56px based on length)',
         ]
     }
  
