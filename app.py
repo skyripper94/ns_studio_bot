@@ -254,15 +254,17 @@ def process_image():
         for line in lines:
             all_words_in_lines.extend(line.split())
 
-        # Фильтруем кандидатов по правилу
+        ## Слова, которые НИКОГДА не красим бирюзовым
+        exclude_words = {'люксы', 'номера', 'сервис', 'услуги', 'отели', 'отелей', 'года', 'году'}
+
         candidate_words = []
         for w in all_words_in_lines:
-            # Оставляем только буквы (русские/латинские), убирая пунктуацию и прочие символы
             cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", w)
             if len(cleaned) > 3 and any(ch.isalpha() for ch in cleaned):
-                # также исключаем слова, содержащие цифры (уже удалены из cleaned)
                 if not any(ch.isdigit() for ch in w):
-                    candidate_words.append(w)
+                    # ✅ НОВОЕ: Проверка на исключения
+                    if cleaned.lower() not in exclude_words:
+                        candidate_words.append(w)
 
         num_cyan_words = random.randint(1, 2) if len(all_words_in_lines) >= 2 else 1
         if candidate_words:
