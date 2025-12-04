@@ -10,14 +10,14 @@ def get_font(size, weight='bold'):
     """Загрузка шрифта с приоритетом Gotham"""
     if weight == 'bold':
         font_paths = [
-            os.path.join(os.path.dirname(__file__), "fonts", "gotham_bold.otf"),  # ✅ OTF
+            os.path.join(os.path.dirname(__file__), "fonts", "gotham_bold.otf"),
             os.path.join(os.path.dirname(__file__), "fonts", "Rubik[wght].ttf"),
             os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         ]
     else:  # medium
         font_paths = [
-            os.path.join(os.path.dirname(__file__), "fonts", "gotham_medium.otf"),  # ✅ OTF
+            os.path.join(os.path.dirname(__file__), "fonts", "gotham_medium.otf"),
             os.path.join(os.path.dirname(__file__), "fonts", "Rubik[wght].ttf"),
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         ]
@@ -35,7 +35,7 @@ def get_font(size, weight='bold'):
     return ImageFont.load_default()
 
 
-def calculate_adaptive_gradient(img):
+def calculate_adaptive_gradient(img, has_long_text=False):
     """Определяет оптимальную высоту градиента на основе яркости"""
     width, height = img.size
     
@@ -55,12 +55,17 @@ def calculate_adaptive_gradient(img):
     else:  # Темное
         gradient_percent = 0.28
     
+    # ✅ НОВОЕ: Если текст длинный → увеличиваем градиент
+    if has_long_text:
+        gradient_percent = max(gradient_percent, 0.40)  # Минимум 40%
+        print(f"[Adaptive Gradient] Long text detected, increased gradient")
+    
     print(f"[Adaptive Gradient] Brightness: {avg_brightness:.0f}, Gradient: {gradient_percent*100:.0f}%")
     return gradient_percent
 
 
 def remove_old_text(img, bounding_boxes):
-    """Закрашивает старый текст чёрным цветом"""
+    """Закрашивает старый текст чёрным цветом с увеличенным padding"""
     if not bounding_boxes:
         return img
     
@@ -83,16 +88,18 @@ def remove_old_text(img, bounding_boxes):
         xs = [v.get('x', 0) for v in vertices]
         ys = [v.get('y', 0) for v in vertices]
         
-        # Закрашиваем чёрным с небольшим padding
-        padding = 5
+        # ✅ УВЕЛИЧИЛИ padding для полного закрытия артефактов
+        padding_x = 15  # Горизонтальный padding
+        padding_y = 20  # Вертикальный padding (больше, чтобы закрыть тени)
+        
         draw.rectangle(
-            [(min(xs) - padding, min(ys) - padding), 
-             (max(xs) + padding, max(ys) + padding)],
+            [(min(xs) - padding_x, min(ys) - padding_y), 
+             (max(xs) + padding_x, max(ys) + padding_y)],
             fill=(0, 0, 0, 255)
         )
         removed_count += 1
     
-    print(f"[Text Removal] Removed {removed_count} text blocks")
+    print(f"[Text Removal] Removed {removed_count} text blocks with increased padding")
     return img
 
 
@@ -137,13 +144,14 @@ def draw_text_with_outline(draw, pos, text, font, color):
 
 
 def draw_title_subtitle(img, draw, title, subtitle, gradient_start, add_logo, width):
-    """Рисует заголовок и подзаголовок с правильной иерархией"""
+    """Рисует заголовок и подзаголовок с правильной иерархией и переносом строк"""
     
     # Цвета
     cyan = (0, 188, 212)  # Бирюзовый
     white = (255, 255, 255)
     
-    current_y = gradient_start + 80
+    # ✅ НОВОЕ: Начинаем выше, чтобы текст не вылезал
+    current_y = gradient_start + 60  # Было +80
     
     # ═══════════════════════════════════════════════════
     # TITLE (главное)
@@ -152,30 +160,31 @@ def draw_title_subtitle(img, draw, title, subtitle, gradient_start, add_logo, wi
         title = title.upper()
         title_color = cyan  # ✅ ВСЕГДА cyan
         
-        # Динамический размер (если не влезает)
+        # Динамический размер
         title_size = 56
         title_font = get_font(title_size, weight='bold')
         
-        bbox = draw.textbbox((0, 0), title, font=title_font)
-        title_width = bbox[2] - bbox[0]
+        # ✅ НОВОЕ: Разбиваем title на строки если не влезает
+        max_width = width * 0.88
+        title_lines = wrap_text(title, title_font, max_width, draw)
         
-        # Уменьшаем размер, если не влезает
-        while title_width > width * 0.88 and title_size > 36:
+        # Если не влезает в 2 строки → уменьшаем шрифт
+        while len(title_lines) > 2 and title_size > 36:
             title_size -= 2
             title_font = get_font(title_size, weight='bold')
-            bbox = draw.textbbox((0, 0), title, font=title_font)
-            title_width = bbox[2] - bbox[0]
+            title_lines = wrap_text(title, title_font, max_width, draw)
         
-        # Позиция
-        title_x = (width - title_width) // 2
+        # Рисуем каждую строку
+        for line in title_lines:
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            line_width = bbox[2] - bbox[0]
+            line_height = bbox[3] - bbox[1]
+            line_x = (width - line_width) // 2
+            
+            draw_text_with_outline(draw, (line_x, current_y), line, title_font, title_color)
+            current_y += line_height + 10  # Межстрочный интервал
         
-        # Рисуем с обводкой
-        draw_text_with_outline(draw, (title_x, current_y), title, title_font, title_color)
-        
-        title_height = bbox[3] - bbox[1]
-        current_y += title_height + 20  # Отступ до subtitle
-        
-        print(f"[Title] Text: '{title}', Size: {title_size}px, Color: Cyan")
+        print(f"[Title] Text: '{title}', Lines: {len(title_lines)}, Size: {title_size}px, Color: Cyan")
     
     # ═══════════════════════════════════════════════════
     # SUBTITLE (детали)
@@ -241,7 +250,9 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 2: АДАПТИВНЫЙ ГРАДИЕНТ
         # ═══════════════════════════════════════════════════
-        gradient_percent = calculate_adaptive_gradient(img)
+        # ✅ НОВОЕ: Определяем, длинный ли текст
+        has_long_text = len(title) > 30  # Если >30 символов
+        gradient_percent = calculate_adaptive_gradient(img, has_long_text=has_long_text)
         
         # ═══════════════════════════════════════════════════
         # ШАГ 3: "УДАЛЕНИЕ" СТАРОГО ТЕКСТА
@@ -366,13 +377,14 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8_GOTHAM',
+        'version': 'NEUROSTEP_v8_GOTHAM_FIXED',
         'features': [
             'Title/Subtitle separation',
-            'Adaptive gradient',
-            'Old text removal',
+            'Adaptive gradient (with long text detection)',
+            'Old text removal (increased padding)',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
+            'Multi-line text wrapping',
         ]
     }
  
