@@ -188,11 +188,22 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         title = title.upper()
         title_color = cyan  # ✅ ВСЕГДА cyan
         
-        # ✅ Начальный размер зависит от длины
-        if len(title) > 30:
-            title_size = 48  # Меньше для длинных заголовков
+        # ✅ НОВОЕ: Определяем режим по наличию subtitle
+        has_logo = (subtitle == '')  # Если subtitle пустой, значит режим с лого
+        
+        # ✅ НОВОЕ: Размер зависит от режима
+        if has_logo:
+            # С ЛОГО - увеличиваем шрифт
+            if len(title) > 30:
+                title_size = 54  # Было 48, увеличили
+            else:
+                title_size = 64  # Было 56, увеличили на 8px
         else:
-            title_size = 56
+            # БЕЗ ЛОГО - уменьшаем шрифт
+            if len(title) > 30:
+                title_size = 42  # Было 48, уменьшили
+            else:
+                title_size = 48  # Было 56, уменьшили на 8px
         
         title_font = get_font(title_size, weight='bold')
         
@@ -225,9 +236,13 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             
             # ✅ Рисуем с tracking
             draw_text_with_tracking(draw, (line_x, current_y), line, title_font, title_color, tracking=tracking)
-            current_y += line_height + 8
+            current_y += line_height + 5  # ✅ УМЕНЬШИЛИ межстрочный (было 8, теперь 5)
         
-        print(f"[Title] Text: '{title}', Lines: {len(title_lines)}, Size: {title_size}px, Color: Cyan")
+        # ✅ НОВОЕ: Если есть subtitle, добавляем gap 15px
+        if subtitle:
+            current_y += 15
+        
+        print(f"[Title] Text: '{title}', Lines: {len(title_lines)}, Size: {title_size}px, Mode: {'LOGO' if has_logo else 'NO-LOGO'}")
     
     # ═══════════════════════════════════════════════════
     # SUBTITLE (детали)
@@ -258,7 +273,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             
             # ✅ Рисуем с tracking
             draw_text_with_tracking(draw, (line_x, current_y), line, subtitle_font, subtitle_color, tracking=tracking)
-            current_y += line_height + 10
+            current_y += line_height + 5  # ✅ УМЕНЬШИЛИ межстрочный (было 10, теперь 5)
         
         print(f"[Subtitle] Text: '{subtitle}', Lines: {len(subtitle_lines)}")
 
@@ -358,11 +373,11 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
-        # ✅ ОБНОВЛЕНО: Для случая БЕЗ лого - опускаем еще ниже
+        # ✅ ОБНОВЛЕНО: Опускаем все на 50px ниже
         if has_long_text:
-            start_y = gradient_start + 110  # Для длинных текстов
+            start_y = gradient_start + 150  # Было 110, теперь 150
         else:
-            start_y = gradient_start + 150  # ✅ Еще ниже (было 130, теперь 150)
+            start_y = gradient_start + 200  # Было 150, теперь 200
         
         if add_logo:
             logo_text = "@neurostep.media"
@@ -373,8 +388,8 @@ def process_image():
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             logo_x = (width - logo_width) // 2
-            # ✅ Логотип на +110px
-            logo_y = max(0, gradient_start + 110)
+            # ✅ Логотип опущен на +50px (было +110, теперь +160)
+            logo_y = max(0, gradient_start + 160)
 
             # Тень логотипа
             shadow_offset = 1
@@ -407,7 +422,7 @@ def process_image():
 
             print(f"✓ Logo rendered at ({logo_x}, {logo_y})")
             
-            # ✅ ОБНОВЛЕНО: Title начинается на 1px от логотипа (было 2px)
+            # ✅ Title начинается на 1px от логотипа
             start_y = logo_y + logo_height + 1
         
         # ═══════════════════════════════════════════════════
@@ -446,19 +461,20 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8.5_FINAL',
+        'version': 'NEUROSTEP_v8.6_FINAL',
         'features': [
-            'Logo mode: fullText as title (no split)',
-            'No-logo mode: title + subtitle split',
+            'Logo mode: fullText as title, larger font (64px)',
+            'No-logo mode: title+subtitle, smaller font (48px)',
             'Adaptive gradient (40-50%)',
             'Old text removal',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
             'Letter spacing: -1px (tighter)',
+            'Line spacing: 5px (tighter)',
+            'Gap between title/subtitle: 15px',
             'Logo to title: 1px gap',
-            'No-logo position: +150px (lowered)',
+            'All lowered by +50px',
             'Multi-line text wrapping',
-            'Smart font sizing (48-56px)',
             'No text outline',
             'Bottom bar: 2% height',
         ]
