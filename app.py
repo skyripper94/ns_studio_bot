@@ -103,16 +103,30 @@ def remove_old_text(img, bounding_boxes):
     return img
 
 
-def wrap_text(text, font, max_width, draw):
-    """Разбивает текст на строки по ширине"""
+def wrap_text(text, font, max_width, draw, tracking=-1):
+    """Разбивает текст на строки по ширине с учетом tracking"""
     words = text.split()
     lines = []
     current_line = []
     
     for word in words:
         test_line = ' '.join(current_line + [word])
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        text_width = bbox[2] - bbox[0]
+        
+        # ✅ НОВОЕ: Вычисляем ширину с учетом tracking
+        if tracking != 0:
+            # Считаем ширину с tracking вручную
+            text_width = 0
+            for char in test_line:
+                bbox = draw.textbbox((0, 0), char, font=font)
+                char_width = bbox[2] - bbox[0]
+                if char == ' ':
+                    text_width += char_width
+                else:
+                    text_width += char_width + tracking
+        else:
+            # Стандартный расчет
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            text_width = bbox[2] - bbox[0]
         
         if text_width > max_width:
             if current_line:
@@ -137,6 +151,26 @@ def draw_text_with_outline(draw, pos, text, font, color):
     draw.text((x, y), text, font=font, fill=color)
 
 
+def draw_text_with_tracking(draw, pos, text, font, color, tracking=-1):
+    """Рисует текст с уменьшенным межбуквенным интервалом (tracking)"""
+    x, y = pos
+    
+    for char in text:
+        if char == ' ':
+            # Пробел - используем стандартную ширину
+            bbox = draw.textbbox((0, 0), char, font=font)
+            char_width = bbox[2] - bbox[0]
+            x += char_width
+        else:
+            # Буква - рисуем с уменьшенным tracking
+            draw.text((x, y), char, font=font, fill=color)
+            bbox = draw.textbbox((0, 0), char, font=font)
+            char_width = bbox[2] - bbox[0]
+            x += char_width + tracking  # Уменьшенный интервал
+    
+    return x  # Возвращаем финальную X позицию
+
+
 def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
     """Рисует заголовок и подзаголовок с правильной иерархией и переносом строк"""
     
@@ -154,7 +188,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         title = title.upper()
         title_color = cyan  # ✅ ВСЕГДА cyan
         
-        # ✅ НОВОЕ: Начальный размер зависит от длины
+        # ✅ Начальный размер зависит от длины
         if len(title) > 30:
             title_size = 48  # Меньше для длинных заголовков
         else:
@@ -162,25 +196,36 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         
         title_font = get_font(title_size, weight='bold')
         
-        # ✅ Разбиваем title на строки
+        # ✅ Разбиваем title на строки с tracking
         max_width = width * 0.88
-        title_lines = wrap_text(title, title_font, max_width, draw)
+        tracking = -1  # Уменьшенный межбуквенный интервал
+        title_lines = wrap_text(title, title_font, max_width, draw, tracking=tracking)
         
-        # ✅ НОВОЕ: Если >3 строк → уменьшаем агрессивнее
+        # ✅ Если >3 строк → уменьшаем агрессивнее
         while len(title_lines) > 3 and title_size > 32:
-            title_size -= 3  # Было -2, теперь быстрее уменьшаем
+            title_size -= 3
             title_font = get_font(title_size, weight='bold')
-            title_lines = wrap_text(title, title_font, max_width, draw)
+            title_lines = wrap_text(title, title_font, max_width, draw, tracking=tracking)
         
-        # Рисуем каждую строку
+        # Рисуем каждую строку с tracking
         for line in title_lines:
+            # Вычисляем ширину с tracking для центрирования
+            line_width = 0
+            for char in line:
+                bbox = draw.textbbox((0, 0), char, font=title_font)
+                char_width = bbox[2] - bbox[0]
+                if char == ' ':
+                    line_width += char_width
+                else:
+                    line_width += char_width + tracking
+            
             bbox = draw.textbbox((0, 0), line, font=title_font)
-            line_width = bbox[2] - bbox[0]
             line_height = bbox[3] - bbox[1]
             line_x = (width - line_width) // 2
             
-            draw_text_with_outline(draw, (line_x, current_y), line, title_font, title_color)
-            current_y += line_height + 8  # ✅ Уменьшили межстрочный (было 10)
+            # ✅ Рисуем с tracking
+            draw_text_with_tracking(draw, (line_x, current_y), line, title_font, title_color, tracking=tracking)
+            current_y += line_height + 8
         
         print(f"[Title] Text: '{title}', Lines: {len(title_lines)}, Size: {title_size}px, Color: Cyan")
     
@@ -190,21 +235,32 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
     if subtitle:
         subtitle_color = white  # ✅ ВСЕГДА white
         subtitle_font = get_font(32, weight='medium')
+        tracking = -1  # ✅ Уменьшенный интервал
         
-        # Разбиваем на строки (если длинное)
-        subtitle_lines = wrap_text(subtitle, subtitle_font, width * 0.88, draw)
+        # Разбиваем на строки с tracking
+        subtitle_lines = wrap_text(subtitle, subtitle_font, width * 0.88, draw, tracking=tracking)
         
-        # Рисуем каждую строку
+        # Рисуем каждую строку с tracking
         for line in subtitle_lines:
+            # Вычисляем ширину с tracking
+            line_width = 0
+            for char in line:
+                bbox = draw.textbbox((0, 0), char, font=subtitle_font)
+                char_width = bbox[2] - bbox[0]
+                if char == ' ':
+                    line_width += char_width
+                else:
+                    line_width += char_width + tracking
+            
             bbox = draw.textbbox((0, 0), line, font=subtitle_font)
-            line_width = bbox[2] - bbox[0]
             line_height = bbox[3] - bbox[1]
             line_x = (width - line_width) // 2
             
-            draw_text_with_outline(draw, (line_x, current_y), line, subtitle_font, subtitle_color)
-            current_y += line_height + 10  # Межстрочный интервал
+            # ✅ Рисуем с tracking
+            draw_text_with_tracking(draw, (line_x, current_y), line, subtitle_font, subtitle_color, tracking=tracking)
+            current_y += line_height + 10
         
-        print(f"[Subtitle] Text: '{subtitle}', Lines: {len(subtitle_lines)}, Color: White")
+        print(f"[Subtitle] Text: '{subtitle}', Lines: {len(subtitle_lines)}")
 
 
 @app.route('/process', methods=['POST'])
@@ -302,11 +358,11 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
-        # ✅ ОБНОВЛЕНО: Для случая БЕЗ лого - опускаем текст ниже
+        # ✅ ОБНОВЛЕНО: Для случая БЕЗ лого - опускаем еще ниже
         if has_long_text:
-            start_y = gradient_start + 100  # Для длинных текстов
+            start_y = gradient_start + 110  # Для длинных текстов
         else:
-            start_y = gradient_start + 130  # Для коротких (опустили на 30px)
+            start_y = gradient_start + 150  # ✅ Еще ниже (было 130, теперь 150)
         
         if add_logo:
             logo_text = "@neurostep.media"
@@ -317,7 +373,7 @@ def process_image():
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             logo_x = (width - logo_width) // 2
-            # ✅ НОВОЕ: Опускаем логотип ниже (было +10, стало +110)
+            # ✅ Логотип на +110px
             logo_y = max(0, gradient_start + 110)
 
             # Тень логотипа
@@ -351,8 +407,8 @@ def process_image():
 
             print(f"✓ Logo rendered at ({logo_x}, {logo_y})")
             
-            # ✅ НОВОЕ: Title начинается на 2px от логотипа
-            start_y = logo_y + logo_height + 2
+            # ✅ ОБНОВЛЕНО: Title начинается на 1px от логотипа (было 2px)
+            start_y = logo_y + logo_height + 1
         
         # ═══════════════════════════════════════════════════
         # ШАГ 6: РИСУЕМ TITLE И SUBTITLE
@@ -390,18 +446,20 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8.4_FINAL',
+        'version': 'NEUROSTEP_v8.5_FINAL',
         'features': [
-            'Title/Subtitle separation',
-            'Logo mode: title only (subtitle disabled)',
-            'No-logo mode: title + subtitle',
+            'Logo mode: fullText as title (no split)',
+            'No-logo mode: title + subtitle split',
             'Adaptive gradient (40-50%)',
             'Old text removal',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
-            'Multi-line text wrapping (up to 3 lines)',
+            'Letter spacing: -1px (tighter)',
+            'Logo to title: 1px gap',
+            'No-logo position: +150px (lowered)',
+            'Multi-line text wrapping',
             'Smart font sizing (48-56px)',
-            'No text outline (clean look)',
+            'No text outline',
             'Bottom bar: 2% height',
         ]
     }
