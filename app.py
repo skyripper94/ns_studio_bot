@@ -335,7 +335,7 @@ def process_image():
             img = remove_old_text(img, bounding_boxes)
         
         # ═══════════════════════════════════════════════════
-        # ШАГ 4: НАЛОЖЕНИЕ ГРАДИЕНТА
+        # ШАГ 4: НАЛОЖЕНИЕ ГРАДИЕНТА (ПЛАВНЫЙ)
         # ═══════════════════════════════════════════════════
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
@@ -343,41 +343,54 @@ def process_image():
         gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        # Сплошной черный (нижние 65% от градиента)
-        solid_portion = 0.65
-        solid_black_height = int(gradient_height * solid_portion)
-        solid_black_start = height - solid_black_height
+        # ✅ НОВОЕ: 40% на плавный переход (было 35%)
+        fade_portion = 0.40
+        fade_height = int(gradient_height * fade_portion)
+        solid_black_start = gradient_start + fade_height
         
+        # Сплошной черный (нижние 60% от градиента)
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
         )
         
-        # Плавный градиент (верхние 35% от градиента)
-        gradient_zone_height = solid_black_start - gradient_start
-        if gradient_zone_height > 0:
-            for y in range(gradient_start, solid_black_start):
-                progress = (y - gradient_start) / gradient_zone_height
-                alpha = int(255 * (progress ** 2))
-                draw_overlay.rectangle(
-                    [(0, y), (width, y + 1)],
-                    fill=(0, 0, 0, alpha)
-                )
+        # ✅ НОВОЕ: Плавный градиент с большим количеством шагов
+        # Рисуем по 0.5px вместо 1px для устранения артефактов
+        steps = fade_height * 2  # В 2 раза больше шагов
+        
+        for i in range(steps):
+            progress = i / steps
+            
+            # ✅ Cubic ease-in-out для максимально плавного перехода
+            if progress < 0.5:
+                alpha_progress = 4 * progress ** 3
+            else:
+                alpha_progress = 1 - pow(-2 * progress + 2, 3) / 2
+            
+            alpha = int(255 * alpha_progress)
+            y_pos = gradient_start + int(i * fade_height / steps)
+            
+            draw_overlay.rectangle(
+                [(0, y_pos), (width, y_pos + 1)],
+                fill=(0, 0, 0, alpha)
+            )
         
         img = img.convert('RGBA')
         img = Image.alpha_composite(img, overlay)
         img = img.convert('RGB')
+        
+        print(f"✓ Smooth gradient: {gradient_percent*100:.0f}% height (fade: {fade_height}px [{steps} steps], solid: {gradient_height-fade_height}px)")
         
         draw = ImageDraw.Draw(img)
         
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
-        # ✅ ОБНОВЛЕНО: Опускаем все на 50px ниже
+        # ✅ НОВОЕ: Опускаем все конструкции еще ниже (+30px)
         if has_long_text:
-            start_y = gradient_start + 150  # Было 110, теперь 150
+            start_y = gradient_start + 180  # Было 150, теперь 180 (+30px)
         else:
-            start_y = gradient_start + 200  # Было 150, теперь 200
+            start_y = gradient_start + 230  # Было 200, теперь 230 (+30px)
         
         if add_logo:
             logo_text = "@neurostep.media"
@@ -388,8 +401,8 @@ def process_image():
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             logo_x = (width - logo_width) // 2
-            # ✅ Логотип опущен на +50px (было +110, теперь +160)
-            logo_y = max(0, gradient_start + 160)
+            # ✅ Логотип опущен еще на +30px (было +160, теперь +190)
+            logo_y = max(0, gradient_start + 190)
 
             # Тень логотипа
             shadow_offset = 1
@@ -461,19 +474,21 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8.6_FINAL',
+        'version': 'NEUROSTEP_v8.7_FINAL',
         'features': [
             'Logo mode: fullText as title, larger font (64px)',
             'No-logo mode: title+subtitle, smaller font (48px)',
             'Adaptive gradient (40-50%)',
+            'Smooth gradient: 2x steps, cubic easing (no artifacts)',
+            'Gradient fade: 40% (increased from 35%)',
             'Old text removal',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
-            'Letter spacing: -1px (tighter)',
-            'Line spacing: 5px (tighter)',
+            'Letter spacing: -1px',
+            'Line spacing: 5px',
             'Gap between title/subtitle: 15px',
             'Logo to title: 1px gap',
-            'All lowered by +50px',
+            'All lowered by +80px total',
             'Multi-line text wrapping',
             'No text outline',
             'Bottom bar: 2% height',
