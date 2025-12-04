@@ -3,59 +3,202 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import io
 import base64
 import os
-import random
-import re
 
 app = Flask(__name__)
 
-def get_font(size, bold=True):
-    """Загрузка шрифта с приоритетом Schist Black (основной текст)"""
-    if bold:
+def get_font(size, weight='bold'):
+    """Загрузка шрифта с приоритетом Gotham"""
+    if weight == 'bold':
         font_paths = [
-            # Rubik variable font (from Google Fonts)
+            os.path.join(os.path.dirname(__file__), "fonts", "gotham_bold.otf"),  # ✅ OTF
             os.path.join(os.path.dirname(__file__), "fonts", "Rubik[wght].ttf"),
-            # Schist Black (локальный файл с пробелом в имени)
-            os.path.join(os.path.dirname(__file__), "fonts", "Schist Black.ttf"),
-            # Exo2 - сильный локальный fallback
             os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
-            # Liberation Sans - системный fallback
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            # DejaVu Sans - дополнительный fallback
-            os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         ]
-    else:
+    else:  # medium
         font_paths = [
-            # Rubik variable font (from Google Fonts)
+            os.path.join(os.path.dirname(__file__), "fonts", "gotham_medium.otf"),  # ✅ OTF
             os.path.join(os.path.dirname(__file__), "fonts", "Rubik[wght].ttf"),
-            os.path.join(os.path.dirname(__file__), "fonts", "Schist Black.ttf"),
-            os.path.join(os.path.dirname(__file__), "fonts", "Exo2-Bold.ttf"),
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
     
     for font_path in font_paths:
         try:
             if os.path.exists(font_path):
                 print(f"✓ Font loaded: {font_path} (size: {size})")
-                f = ImageFont.truetype(font_path, size)
-                # mark font object with requested boldness so rendering code can emulate bold if needed
-                try:
-                    setattr(f, 'is_bold', bool(bold))
-                except Exception:
-                    pass
-                return f
+                return ImageFont.truetype(font_path, size)
         except Exception as e:
             print(f"✗ Failed to load {font_path}: {e}")
             continue
     
-        print(f"⚠️ WARNING: Using default font (size: {size})")
-    df = ImageFont.load_default()
-    try:
-        setattr(df, 'is_bold', bool(bold))
-    except Exception:
-        pass
-    return df
+    print(f"⚠️ WARNING: Using default font (size: {size})")
+    return ImageFont.load_default()
+
+
+def calculate_adaptive_gradient(img):
+    """Определяет оптимальную высоту градиента на основе яркости"""
+    width, height = img.size
+    
+    # Анализируем нижние 50% изображения
+    bottom_half = img.crop((0, height // 2, width, height))
+    
+    # Конвертируем в grayscale и считаем среднюю яркость
+    gray = bottom_half.convert('L')
+    pixels = list(gray.getdata())
+    avg_brightness = sum(pixels) / len(pixels)
+    
+    # Определяем высоту градиента
+    if avg_brightness > 150:  # Светлое фото
+        gradient_percent = 0.45
+    elif avg_brightness > 100:  # Среднее
+        gradient_percent = 0.35
+    else:  # Темное
+        gradient_percent = 0.28
+    
+    print(f"[Adaptive Gradient] Brightness: {avg_brightness:.0f}, Gradient: {gradient_percent*100:.0f}%")
+    return gradient_percent
+
+
+def remove_old_text(img, bounding_boxes):
+    """Закрашивает старый текст чёрным цветом"""
+    if not bounding_boxes:
+        return img
+    
+    draw = ImageDraw.Draw(img)
+    height = img.size[1]
+    removed_count = 0
+    
+    # Обрабатываем только текст из нижней половины
+    for box in bounding_boxes:
+        vertices = box.get('vertices', [])
+        if len(vertices) < 4:
+            continue
+        
+        # Проверяем, что текст в нижней половине
+        min_y = min(v.get('y', 0) for v in vertices)
+        if min_y < height * 0.5:
+            continue
+        
+        # Преобразуем vertices в координаты для rectangle
+        xs = [v.get('x', 0) for v in vertices]
+        ys = [v.get('y', 0) for v in vertices]
+        
+        # Закрашиваем чёрным с небольшим padding
+        padding = 5
+        draw.rectangle(
+            [(min(xs) - padding, min(ys) - padding), 
+             (max(xs) + padding, max(ys) + padding)],
+            fill=(0, 0, 0, 255)
+        )
+        removed_count += 1
+    
+    print(f"[Text Removal] Removed {removed_count} text blocks")
+    return img
+
+
+def wrap_text(text, font, max_width, draw):
+    """Разбивает текст на строки по ширине"""
+    words = text.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        text_width = bbox[2] - bbox[0]
+        
+        if text_width > max_width:
+            if current_line:
+                lines.append(' '.join(current_line))
+                current_line = [word]
+            else:
+                lines.append(word)
+        else:
+            current_line.append(word)
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    return lines
+
+
+def draw_text_with_outline(draw, pos, text, font, color):
+    """Рисует текст с чёрной обводкой"""
+    x, y = pos
+    
+    # Обводка (8 направлений)
+    for dx in [-1, 0, 1]:
+        for dy in [-1, 0, 1]:
+            if dx != 0 or dy != 0:
+                draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 200))
+    
+    # Основной текст
+    draw.text((x, y), text, font=font, fill=color)
+
+
+def draw_title_subtitle(img, draw, title, subtitle, gradient_start, add_logo, width):
+    """Рисует заголовок и подзаголовок с правильной иерархией"""
+    
+    # Цвета
+    cyan = (0, 188, 212)  # Бирюзовый
+    white = (255, 255, 255)
+    
+    current_y = gradient_start + 80
+    
+    # ═══════════════════════════════════════════════════
+    # TITLE (главное)
+    # ═══════════════════════════════════════════════════
+    if title:
+        title = title.upper()
+        title_color = cyan  # ✅ ВСЕГДА cyan
+        
+        # Динамический размер (если не влезает)
+        title_size = 56
+        title_font = get_font(title_size, weight='bold')
+        
+        bbox = draw.textbbox((0, 0), title, font=title_font)
+        title_width = bbox[2] - bbox[0]
+        
+        # Уменьшаем размер, если не влезает
+        while title_width > width * 0.88 and title_size > 36:
+            title_size -= 2
+            title_font = get_font(title_size, weight='bold')
+            bbox = draw.textbbox((0, 0), title, font=title_font)
+            title_width = bbox[2] - bbox[0]
+        
+        # Позиция
+        title_x = (width - title_width) // 2
+        
+        # Рисуем с обводкой
+        draw_text_with_outline(draw, (title_x, current_y), title, title_font, title_color)
+        
+        title_height = bbox[3] - bbox[1]
+        current_y += title_height + 20  # Отступ до subtitle
+        
+        print(f"[Title] Text: '{title}', Size: {title_size}px, Color: Cyan")
+    
+    # ═══════════════════════════════════════════════════
+    # SUBTITLE (детали)
+    # ═══════════════════════════════════════════════════
+    if subtitle:
+        subtitle_color = white  # ✅ ВСЕГДА white
+        subtitle_font = get_font(32, weight='medium')
+        
+        # Разбиваем на строки (если длинное)
+        subtitle_lines = wrap_text(subtitle, subtitle_font, width * 0.88, draw)
+        
+        # Рисуем каждую строку
+        for line in subtitle_lines:
+            bbox = draw.textbbox((0, 0), line, font=subtitle_font)
+            line_width = bbox[2] - bbox[0]
+            line_height = bbox[3] - bbox[1]
+            line_x = (width - line_width) // 2
+            
+            draw_text_with_outline(draw, (line_x, current_y), line, subtitle_font, subtitle_color)
+            current_y += line_height + 10  # Межстрочный интервал
+        
+        print(f"[Subtitle] Text: '{subtitle}', Lines: {len(subtitle_lines)}, Color: White")
+
 
 @app.route('/process', methods=['POST'])
 def process_image():
@@ -64,71 +207,73 @@ def process_image():
         
         # Получаем данные
         image_base64 = data.get('image', '')
-        text = data.get('text', 'ЗАГОЛОВОК')
-        config = data.get('config', {})
-        add_logo = data.get('addLogo', False)  # НОВЫЙ ПАРАМЕТР
+        title = data.get('title', '')
+        subtitle = data.get('subtitle', '')
+        bounding_boxes = data.get('boundingBoxes', [])
+        add_logo = data.get('addLogo', False)
         
-        # Параметры ИЗ CONFIG
-        gradient_percent = config.get('gradientPercent', 40) / 100
-        font_size = config.get('fontSize', 42)
-        # Цвет основного текста: можно передать как [r,g,b] в config.textColor
-        text_color_cfg = config.get('textColor', None)
-        if text_color_cfg and isinstance(text_color_cfg, (list, tuple)) and len(text_color_cfg) == 3:
-            text_color = tuple(int(c) for c in text_color_cfg)
-        else:
-            # default blue (bright)
-            text_color = (0, 122, 255)
+        # Обратная совместимость со старым API
+        if not title and not subtitle:
+            text = data.get('text', 'ЗАГОЛОВОК')
+            title = text
         
-        print(f"Processing: {text}")
-        print(f"Config received: gradient={gradient_percent*100}%, fontSize={font_size}, addLogo={add_logo}")
+        print(f"[Processing] Title: '{title}', Subtitle: '{subtitle}', Logo: {add_logo}")
         
         # Декодируем изображение
         image_data = base64.b64decode(image_base64)
         img = Image.open(io.BytesIO(image_data)).convert('RGB')
         width, height = img.size
         
-        print(f"Image size: {width}x{height}")
+        print(f"[Image] Size: {width}x{height}")
         
-        # ===== 1. УЛУЧШЕНИЕ ФОТО =====
-        # Резкость x2
+        # ═══════════════════════════════════════════════════
+        # ШАГ 1: УЛУЧШЕНИЕ ФОТО
+        # ═══════════════════════════════════════════════════
         sharpness = ImageEnhance.Sharpness(img)
         img = sharpness.enhance(1.9)
         
-        # Контраст +10%
         contrast = ImageEnhance.Contrast(img)
         img = contrast.enhance(1.1)
         
-        # Яркость -5%
         brightness = ImageEnhance.Brightness(img)
         img = brightness.enhance(0.95)
         
-        # ===== 2. ГРАДИЕНТ (ПЛАВНЫЙ ПЕРЕХОД) =====
+        # ═══════════════════════════════════════════════════
+        # ШАГ 2: АДАПТИВНЫЙ ГРАДИЕНТ
+        # ═══════════════════════════════════════════════════
+        gradient_percent = calculate_adaptive_gradient(img)
+        
+        # ═══════════════════════════════════════════════════
+        # ШАГ 3: "УДАЛЕНИЕ" СТАРОГО ТЕКСТА
+        # ═══════════════════════════════════════════════════
+        if bounding_boxes:
+            img = remove_old_text(img, bounding_boxes)
+        
+        # ═══════════════════════════════════════════════════
+        # ШАГ 4: НАЛОЖЕНИЕ ГРАДИЕНТА
+        # ═══════════════════════════════════════════════════
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         
         gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        # Сплошной черный = 65% от общей высоты градиента
+        # Сплошной черный (нижние 65% от градиента)
         solid_portion = 0.65
         solid_black_height = int(gradient_height * solid_portion)
         solid_black_start = height - solid_black_height
-
-        # Рисуем СПЛОШНОЙ черный (нижняя часть)
+        
         draw_overlay.rectangle(
             [(0, solid_black_start), (width, height)],
             fill=(0, 0, 0, 255)
         )
-
-        # ПЛАВНЫЙ градиент (верхняя часть)
-        gradient_zone_start = gradient_start
+        
+        # Плавный градиент (верхние 35% от градиента)
         gradient_zone_height = solid_black_start - gradient_start
-
-        if gradient_zone_height > 0:  # ✅ Проверка на корректность
-            for y in range(gradient_zone_start, solid_black_start):
-                progress = (y - gradient_zone_start) / gradient_zone_height
+        if gradient_zone_height > 0:
+            for y in range(gradient_start, solid_black_start):
+                progress = (y - gradient_start) / gradient_zone_height
                 alpha = int(255 * (progress ** 2))
-
                 draw_overlay.rectangle(
                     [(0, y), (width, y + 1)],
                     fill=(0, 0, 0, alpha)
@@ -139,51 +284,36 @@ def process_image():
         img = img.convert('RGB')
         
         draw = ImageDraw.Draw(img)
-
-        # Начало текста
-        text_start_y = gradient_start + 120
-
-        # ===== 3. ЛОГОТИП ВВЕРХУ (УСЛОВНО) =====
-
-        if add_logo:  # ПРОВЕРКА
+        
+        # ═══════════════════════════════════════════════════
+        # ШАГ 5: ЛОГОТИП (если нужен)
+        # ═══════════════════════════════════════════════════
+        if add_logo:
             logo_text = "@neurostep.media"
-            logo_font_size = 18  # Увеличил размер
-            logo_font = get_font(logo_font_size, bold=True)
+            logo_font = get_font(18, weight='bold')
 
             logo_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
             logo_width = logo_bbox[2] - logo_bbox[0]
             logo_height = logo_bbox[3] - logo_bbox[1]
 
-            # Размещаем логотип по центру горизонтально
-            if add_logo:
-                logo_x = (width - logo_width) // 2                     # Центр по горизонтали
-                logo_y = max(0, text_start_y - logo_height - 3)       # Лого над текстом, отступ 20px
-            else:
-                logo_y = 0
+            logo_x = (width - logo_width) // 2
+            logo_y = max(0, gradient_start + 10)
 
-            # Тень логотипа (чёрный текст со смещением)
+            # Тень логотипа
             shadow_offset = 1
             draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
 
-            # Рисуем логотип белым поверх тени
-            white_fill = (255, 255, 255, 255)
-            is_bold_logo = getattr(logo_font, 'is_bold', False)
-            if is_bold_logo:
-                for dx, dy in [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1)]:
-                    draw.text((logo_x + dx, logo_y + dy), logo_text, font=logo_font, fill=white_fill)
-            else:
-                draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=white_fill)
+            # Рисуем логотип белым
+            draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255, 255))
 
-            print(f"✓ Logo rendered: {logo_text} centered at ({logo_x}, {logo_y})")
-
-            # Рисуем линии от логотипа
-            line_y = logo_y + logo_height // 2  # Середина логотипа
+            # Линии от логотипа
+            line_y = logo_y + logo_height // 2
             line_thickness = 1
-            line_color = (0, 188, 212, 255)  # Бирюзовый
-            line_length = 185  # Длина линии в пикселях
+            line_color = (0, 188, 212, 255)
+            line_length = 185
 
             # Левая линия
-            left_line_end = logo_x - 8  # Отступ от логотипа
+            left_line_end = logo_x - 8
             left_line_start = left_line_end - line_length
             draw.rectangle(
                 [(left_line_start, line_y), (left_line_end, line_y + line_thickness)],
@@ -191,180 +321,32 @@ def process_image():
             )
 
             # Правая линия
-            right_line_start = logo_x + logo_width + 8  # Отступ от логотипа
+            right_line_start = logo_x + logo_width + 8
             right_line_end = right_line_start + line_length
             draw.rectangle(
                 [(right_line_start, line_y), (right_line_end, line_y + line_thickness)],
                 fill=line_color
             )
 
-            print(f"✓ Logo lines rendered at y={line_y}, length={line_length}px")
-
-            # Подчеркиваем логотип бирюзовой линией
-            # underline_y = logo_y + logo_height + 5
-            # underline_thickness = 1
-            # cyan_underline = (0, 188, 212, 255)
-            # .rectangle(
-            #    [(logo_x, underline_y), (logo_x + logo_width, underline_y + underline_thickness)],
-            #    fill=cyan_underline
-            # )
-
-           # print(f"✓ Logo underline rendered at y={underline_y}")
+            print(f"✓ Logo rendered at ({logo_x}, {logo_y})")
         
-        # ===== 4. ОСНОВНОЙ ТЕКСТ (БЕЗ EMOJI, ВЫТЯНУТЫЕ БУКВЫ) =====
-        text = text.upper()
+        # ═══════════════════════════════════════════════════
+        # ШАГ 6: РИСУЕМ TITLE И SUBTITLE
+        # ═══════════════════════════════════════════════════
+        draw_title_subtitle(img, draw, title, subtitle, gradient_start, add_logo, width)
         
-        print(f"Text: {text}")
-        
-        main_font = get_font(font_size)
-        words = text.split()
-        lines = []
-        current_line = []
-        
-        max_width = int(width * 0.88)
-        
-        for word in words:
-            test_line = ' '.join(current_line + [word])
-            bbox = draw.textbbox((0, 0), test_line, font=main_font)
-            text_width = bbox[2] - bbox[0]
-            
-            if text_width > max_width:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                    current_line = [word]
-                else:
-                    lines.append(word)
-            else:
-                current_line.append(word)
-        
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        print(f"Text lines: {lines}")
-        
-        # Межстрочный интервал
-        line_spacing = int(font_size * 1.10)
-        
-        # Выбираем случайные слова для бирюзового цвета (1-2 слова)
-        # Правило: окрашиваем ТОЛЬКО слова, которые:
-        #  - содержат буквы (кириллица/латиница),
-        #  - не содержат цифр,
-        #  - после удаления знаков препинания длина > 3 символов.
-        all_words_in_lines = []
-        for line in lines:
-            all_words_in_lines.extend(line.split())
-
-        ## Слова, которые НИКОГДА не красим бирюзовым
-        exclude_words = {'люксы', 'номера', 'сервис', 'услуги', 'отели', 'отелей', 'года', 'году'}
-
-        candidate_words = []
-        for w in all_words_in_lines:
-            cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", w)
-            if len(cleaned) > 3 and any(ch.isalpha() for ch in cleaned):
-                if not any(ch.isdigit() for ch in w):
-                    # ✅ НОВОЕ: Проверка на исключения
-                    if cleaned.lower() not in exclude_words:
-                        candidate_words.append(w)
-
-        num_cyan_words = random.randint(1, 2) if len(all_words_in_lines) >= 2 else 1
-        if candidate_words:
-            cyan_words = set(random.sample(candidate_words, min(num_cyan_words, len(candidate_words))))
-        else:
-            # Если подходящих слов нет — не красим ничего (пустой набор)
-            cyan_words = set()
-
-        print(f"[DEBUG] Candidate words for cyan: {candidate_words}")
-        print(f"[DEBUG] Cyan words selected: {cyan_words}")
-        
-        # Рисуем текст с ВЫТЯГИВАНИЕМ
-        for i, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=main_font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            text_x = (width - text_width) // 2
-            
-            y_pos = text_start_y + i * line_spacing
-            
-            print(f"[DEBUG] Line {i}: width={text_width}, height={text_height}")
-            
-            # Создаем временное изображение для текста
-            padding = 40
-            temp_img = Image.new('RGBA', (text_width + padding*2, text_height + padding*2), (0, 0, 0, 0))
-            temp_draw = ImageDraw.Draw(temp_img)
-            
-            # Определяем цвет для каждого слова в этой линии
-            words_in_line = line.split()
-            word_colors = {}
-            for word in words_in_line:
-                if word in cyan_words:
-                    word_colors[word] = (0, 188, 212)  # Бирюзовый (cyan)
-                else:
-                    word_colors[word] = (255, 255, 255)  # Белый
-            
-            # Рисуем каждое слово с чёрной обводкой
-            current_x = padding
-            for word in words_in_line:
-                word_bbox = temp_draw.textbbox((current_x, padding), word, font=main_font)
-                word_width = word_bbox[2] - word_bbox[0]
-                word_color = word_colors[word]
-                
-                # Чёрная обводка (рисуем текст 8 раз со смещением на 1px)
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
-                        if dx != 0 or dy != 0:
-                            temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=(0, 0, 0, 200))
-                
-                # Основной цвет (белый или бирюзовый)
-                # Если шрифт помечен как bold — эмулируем жирность дорисовкой с дополнительными смещениями
-                is_bold_font = getattr(main_font, 'is_bold', False)
-                if is_bold_font:
-                    bold_offsets = [(0,0), (1,0), (0,1), (1,1), (-1,0), (0,-1), (-1,-1), (2,0), (0,2)]
-                    for dx, dy in bold_offsets:
-                        temp_draw.text((current_x + dx, padding + dy), word, font=main_font, fill=word_color)
-                else:
-                    temp_draw.text((current_x, padding), word, font=main_font, fill=word_color)
-                
-                current_x += word_width + temp_draw.textbbox((0, 0), " ", font=main_font)[2]
-            
-            # ╔══════════════════════════════════════════════════╗
-            # ║  ВЫТЯГИВАНИЕ БУКВ ПО ВЕРТИКАЛИ (+30%)           ║
-            # ╚══════════════════════════════════════════════════╝
-            
-            original_width = text_width + padding*2
-            original_height = text_height + padding*2
-            
-            # УВЕЛИЧИВАЕМ ВЫСОТУ НА 30%
-            stretched_height = int(original_height * 1.15)
-            
-            print(f"[DEBUG] Stretching: {original_height}px -> {stretched_height}px (+30%)")
-            
-            stretched = temp_img.resize(
-                (original_width, stretched_height), 
-                Image.Resampling.LANCZOS
-            )
-            
-            # Накладываем на основное изображение
-            img.paste(stretched, (text_x - padding, y_pos - padding), stretched)
-            
-            print(f"[DEBUG] Line '{line}' rendered with cyan accents and black outline")
-        
-        # ===== 5. БИРЮЗОВАЯ ПОЛОСКА ВНИЗУ (ПОДВАЛ) =====
-        # Полоска выходит за нижний край, бирюзового цвета (темнее)
-        bar_height = int(height * 0.04)  # 4% высоты изображения (меньше)
-        bar_color = (0, 150, 170, 255)  # бирюзовый темнее, чем в тексте
-        
-        # Рисуем полоску так, чтобы часть выходила за нижний край
-        bar_y_start = height - int(bar_height * 0.5)  # 50% полоски внутри, 50% за краем
-        bar_y_end = height + int(bar_height * 0.5)  # выходит на 50% за кадр
+        # ═══════════════════════════════════════════════════
+        # ШАГ 7: БИРЮЗОВАЯ ПОЛОСКА ВНИЗУ
+        # ═══════════════════════════════════════════════════
+        bar_height = int(height * 0.04)
+        bar_color = (0, 150, 170, 255)
+        bar_y_start = height - int(bar_height * 0.5)
+        bar_y_end = height + int(bar_height * 0.5)
         
         draw.rectangle(
             [(0, bar_y_start), (width, bar_y_end)],
             fill=bar_color
         )
-        
-        print(f"✓ Cyan bottom bar rendered: y={bar_y_start}-{bar_y_end}, height={bar_height}px")
-        
-        # (arrow removed)
         
         # Сохраняем
         output = io.BytesIO()
@@ -382,36 +364,16 @@ def process_image():
 
 @app.route('/health', methods=['GET'])
 def health():
-    fonts_available = []
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans-Bold.ttf"),
-    ]
-    
-    for fp in font_paths:
-        if os.path.exists(fp):
-            fonts_available.append(fp)
-    # also list local fonts directory contents for easier debugging
-    local_fonts = []
-    fonts_dir = os.path.join(os.path.dirname(__file__), "fonts")
-    if os.path.isdir(fonts_dir):
-        for fn in sorted(os.listdir(fonts_dir)):
-            local_fonts.append(fn)
-
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v7_LOGO',
+        'version': 'NEUROSTEP_v8_GOTHAM',
         'features': [
-            'NEUROSTEP logo (conditional, white, top-right)',
-            'Main text: white with black outline',
-            'Random 1-2 words: cyan accent color',
-            '30% vertical text stretch',
-            'No emoji',
-            'Schist Black (main text)',
-            'Logo controlled by addLogo parameter'
-        ],
-        'fonts': fonts_available,
-        'local_fonts': local_fonts,
+            'Title/Subtitle separation',
+            'Adaptive gradient',
+            'Old text removal',
+            'Gotham Bold/Medium fonts',
+            'Title: Cyan, Subtitle: White',
+        ]
     }
  
 if __name__ == '__main__':
