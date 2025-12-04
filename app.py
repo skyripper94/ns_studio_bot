@@ -47,17 +47,17 @@ def calculate_adaptive_gradient(img, has_long_text=False):
     pixels = list(gray.getdata())
     avg_brightness = sum(pixels) / len(pixels)
     
-    # ✅ УВЕЛИЧИЛИ базовые значения градиента
+    # ✅ УМЕНЬШИЛИ градиент на 5% (было 40-50%, теперь 35-45%)
     if avg_brightness > 150:  # Светлое фото
-        gradient_percent = 0.50  # Было 0.45
+        gradient_percent = 0.45  # Было 0.50
     elif avg_brightness > 100:  # Среднее
-        gradient_percent = 0.45  # Было 0.35
+        gradient_percent = 0.40  # Было 0.45
     else:  # Темное
-        gradient_percent = 0.40  # Было 0.28
+        gradient_percent = 0.35  # Было 0.40
     
-    # ✅ Если текст длинный → гарантируем минимум 50%
+    # ✅ Если текст длинный → гарантируем минимум 45% (было 50%)
     if has_long_text:
-        gradient_percent = max(gradient_percent, 0.50)
+        gradient_percent = max(gradient_percent, 0.45)
         print(f"[Adaptive Gradient] Long text detected, increased gradient")
     
     print(f"[Adaptive Gradient] Brightness: {avg_brightness:.0f}, Gradient: {gradient_percent*100:.0f}%")
@@ -188,22 +188,22 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         title = title.upper()
         title_color = cyan  # ✅ ВСЕГДА cyan
         
-        # ✅ НОВОЕ: Определяем режим по наличию subtitle
+        # ✅ Определяем режим по наличию subtitle
         has_logo = (subtitle == '')  # Если subtitle пустой, значит режим с лого
         
-        # ✅ НОВОЕ: Размер зависит от режима
+        # ✅ НОВОЕ: Увеличен шрифт для режима с лого
         if has_logo:
-            # С ЛОГО - увеличиваем шрифт
+            # С ЛОГО - крупный шрифт
             if len(title) > 30:
-                title_size = 54  # Было 48, увеличили
+                title_size = 60  # Было 54, увеличили до 60
             else:
-                title_size = 64  # Было 56, увеличили на 8px
+                title_size = 72  # Было 64, увеличили до 72 (+8px)
         else:
-            # БЕЗ ЛОГО - уменьшаем шрифт
+            # БЕЗ ЛОГО - стандартный
             if len(title) > 30:
-                title_size = 42  # Было 48, уменьшили
+                title_size = 42  # Без изменений
             else:
-                title_size = 48  # Было 56, уменьшили на 8px
+                title_size = 48  # Без изменений
         
         title_font = get_font(title_size, weight='bold')
         
@@ -236,9 +236,9 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             
             # ✅ Рисуем с tracking
             draw_text_with_tracking(draw, (line_x, current_y), line, title_font, title_color, tracking=tracking)
-            current_y += line_height + 5  # ✅ УМЕНЬШИЛИ межстрочный (было 8, теперь 5)
+            current_y += line_height + 5  # ✅ Межстрочный 5px
         
-        # ✅ НОВОЕ: Если есть subtitle, добавляем gap 15px
+        # ✅ Если есть subtitle, добавляем gap 15px
         if subtitle:
             current_y += 15
         
@@ -386,11 +386,11 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
-        # ✅ НОВОЕ: Опускаем все конструкции еще ниже (+30px)
+        # ✅ НОВОЕ: Поднимаем все конструкции вверх (-40px от v8.7)
         if has_long_text:
-            start_y = gradient_start + 180  # Было 150, теперь 180 (+30px)
+            start_y = gradient_start + 140  # Было 180, теперь 140 (-40px)
         else:
-            start_y = gradient_start + 230  # Было 200, теперь 230 (+30px)
+            start_y = gradient_start + 190  # Было 230, теперь 190 (-40px)
         
         if add_logo:
             logo_text = "@neurostep.media"
@@ -401,8 +401,8 @@ def process_image():
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             logo_x = (width - logo_width) // 2
-            # ✅ Логотип опущен еще на +30px (было +160, теперь +190)
-            logo_y = max(0, gradient_start + 190)
+            # ✅ Логотип поднят на -40px (было +190, теперь +150)
+            logo_y = max(0, gradient_start + 150)
 
             # Тень логотипа
             shadow_offset = 1
@@ -474,13 +474,13 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8.7_FINAL',
+        'version': 'NEUROSTEP_v8.8_FINAL',
         'features': [
-            'Logo mode: fullText as title, larger font (64px)',
-            'No-logo mode: title+subtitle, smaller font (48px)',
-            'Adaptive gradient (40-50%)',
+            'Logo mode: fullText as title, LARGE font (72px)',
+            'No-logo mode: title+subtitle, standard font (48px)',
+            'Adaptive gradient (35-45%, reduced from 40-50%)',
             'Smooth gradient: 2x steps, cubic easing (no artifacts)',
-            'Gradient fade: 40% (increased from 35%)',
+            'Gradient fade: 40%',
             'Old text removal',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
@@ -488,7 +488,7 @@ def health():
             'Line spacing: 5px',
             'Gap between title/subtitle: 15px',
             'Logo to title: 1px gap',
-            'All lowered by +80px total',
+            'All lifted up: logo +150px, no-logo +140/190px',
             'Multi-line text wrapping',
             'No text outline',
             'Bottom bar: 2% height',
