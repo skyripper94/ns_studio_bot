@@ -343,8 +343,8 @@ def process_image():
         gradient_height = int(height * gradient_percent)
         gradient_start = height - gradient_height
         
-        # ✅ НОВОЕ: 25% на плавный переход
-        fade_portion = 0.25
+        # ✅ НОВОЕ: 80% на плавный переход
+        fade_portion = 0.8
         fade_height = int(gradient_height * fade_portion)
         solid_black_start = gradient_start + fade_height
         
@@ -388,9 +388,9 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ✅ НОВОЕ: Поднимаем все конструкции вверх (-40px от v8.7)
         if has_long_text:
-            start_y = gradient_start + 120  # Было 180, теперь 140 (-40px)
+            start_y = gradient_start + 100  # Было 180, теперь 140 (-40px)
         else:
-            start_y = gradient_start + 170  # Было 230, теперь 190 (-40px)
+            start_y = gradient_start + 150  # Было 230, теперь 190 (-40px)
         
         if add_logo:
             logo_text = "@neurostep.media"
