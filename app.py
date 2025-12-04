@@ -130,16 +130,10 @@ def wrap_text(text, font, max_width, draw):
 
 
 def draw_text_with_outline(draw, pos, text, font, color):
-    """Рисует текст с чёрной обводкой"""
+    """Рисует текст БЕЗ обводки (для чистого вида)"""
     x, y = pos
     
-    # Обводка (8 направлений)
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            if dx != 0 or dy != 0:
-                draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 200))
-    
-    # Основной текст
+    # ✅ УБРАЛИ обводку - только основной текст
     draw.text((x, y), text, font=font, fill=color)
 
 
@@ -225,6 +219,11 @@ def process_image():
         bounding_boxes = data.get('boundingBoxes', [])
         add_logo = data.get('addLogo', False)
         
+        # ✅ НОВОЕ: С логотипом - игнорируем subtitle (только title)
+        if add_logo:
+            subtitle = ''
+            print("[Processing] Logo mode: subtitle disabled, showing only title")
+        
         # Обратная совместимость со старым API
         if not title and not subtitle:
             text = data.get('text', 'ЗАГОЛОВОК')
@@ -303,11 +302,11 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
-        # ✅ НОВОЕ: Начальная позиция зависит от длины текста
+        # ✅ ОБНОВЛЕНО: Для случая БЕЗ лого - опускаем текст ниже
         if has_long_text:
-            start_y = gradient_start + 70  # Выше для длинных текстов
+            start_y = gradient_start + 100  # Для длинных текстов
         else:
-            start_y = gradient_start + 100  # Стандартная позиция
+            start_y = gradient_start + 130  # Для коротких (опустили на 30px)
         
         if add_logo:
             logo_text = "@neurostep.media"
@@ -363,7 +362,7 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 7: БИРЮЗОВАЯ ПОЛОСКА ВНИЗУ
         # ═══════════════════════════════════════════════════
-        bar_height = int(height * 0.04)
+        bar_height = int(height * 0.02)  # ✅ УМЕНЬШИЛИ: было 0.04, теперь 0.02 (в 2 раза короче)
         bar_color = (0, 150, 170, 255)
         bar_y_start = height - int(bar_height * 0.5)
         bar_y_end = height + int(bar_height * 0.5)
@@ -391,15 +390,19 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8.2_GRADIENT_FIX',
+        'version': 'NEUROSTEP_v8.4_FINAL',
         'features': [
             'Title/Subtitle separation',
-            'Adaptive gradient (40-50%, up from 28-45%)',
-            'Old text removal (increased padding)',
+            'Logo mode: title only (subtitle disabled)',
+            'No-logo mode: title + subtitle',
+            'Adaptive gradient (40-50%)',
+            'Old text removal',
             'Gotham Bold/Medium fonts',
             'Title: Cyan, Subtitle: White',
             'Multi-line text wrapping (up to 3 lines)',
-            'Smart font sizing (48-56px based on length)',
+            'Smart font sizing (48-56px)',
+            'No text outline (clean look)',
+            'Bottom bar: 2% height',
         ]
     }
  
