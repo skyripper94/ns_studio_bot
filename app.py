@@ -143,15 +143,15 @@ def draw_text_with_outline(draw, pos, text, font, color):
     draw.text((x, y), text, font=font, fill=color)
 
 
-def draw_title_subtitle(img, draw, title, subtitle, gradient_start, add_logo, width):
+def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
     """Рисует заголовок и подзаголовок с правильной иерархией и переносом строк"""
     
     # Цвета
     cyan = (0, 188, 212)  # Бирюзовый
     white = (255, 255, 255)
     
-    # ✅ НОВОЕ: Начинаем выше, чтобы текст не вылезал
-    current_y = gradient_start + 60  # Было +80
+    # ✅ НОВОЕ: Используем переданный start_y
+    current_y = start_y
     
     # ═══════════════════════════════════════════════════
     # TITLE (главное)
@@ -299,6 +299,8 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ШАГ 5: ЛОГОТИП (если нужен)
         # ═══════════════════════════════════════════════════
+        start_y = gradient_start + 100  # Начальная позиция без лого
+        
         if add_logo:
             logo_text = "@neurostep.media"
             logo_font = get_font(18, weight='bold')
@@ -308,7 +310,8 @@ def process_image():
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             logo_x = (width - logo_width) // 2
-            logo_y = max(0, gradient_start + 10)
+            # ✅ НОВОЕ: Опускаем логотип ниже (было +10, стало +110)
+            logo_y = max(0, gradient_start + 110)
 
             # Тень логотипа
             shadow_offset = 1
@@ -340,11 +343,14 @@ def process_image():
             )
 
             print(f"✓ Logo rendered at ({logo_x}, {logo_y})")
+            
+            # ✅ НОВОЕ: Title начинается на 2px от логотипа
+            start_y = logo_y + logo_height + 2
         
         # ═══════════════════════════════════════════════════
         # ШАГ 6: РИСУЕМ TITLE И SUBTITLE
         # ═══════════════════════════════════════════════════
-        draw_title_subtitle(img, draw, title, subtitle, gradient_start, add_logo, width)
+        draw_title_subtitle(img, draw, title, subtitle, start_y, width)
         
         # ═══════════════════════════════════════════════════
         # ШАГ 7: БИРЮЗОВАЯ ПОЛОСКА ВНИЗУ
