@@ -40,19 +40,19 @@ def get_font(size, weight="bold"):
 # ----------------------------- Helpers -----------------------------
 
 def calculate_adaptive_gradient(img, long_text=False):
-    """Возвращает процент высоты фейда снизу (мягкий тёплый градиент)."""
+    """Возвращает процент высоты фейда снизу (мягкий тёплый градиент Instagram-style)."""
     w, h = img.size
     bottom = img.crop((0, h//2, w, h)).convert("L")
     arr = np.array(bottom, dtype=np.uint8)
     avg = float(arr.mean())
 
-    # Немного уменьшили высоты, чтобы не «лить» 30–40% всегда.
-    if avg > 150:      gp = 0.30
-    elif avg > 100:    gp = 0.26
-    else:              gp = 0.23
+    # Увеличенная зона градиента для более плавного Instagram-style перехода
+    if avg > 150:      gp = 0.38
+    elif avg > 100:    gp = 0.35
+    else:              gp = 0.32
 
     if long_text:
-        gp = max(gp, 0.28)
+        gp = max(gp, 0.36)
 
     print(f"[Adaptive Gradient] Brightness: {avg:.0f}, Gradient: {gp*100:.0f}%")
     return gp
@@ -106,7 +106,7 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
     return out
 
 def draw_soft_warm_fade(img: Image.Image, percent: float):
-    """Мягкий тёплый фейд без сплошной плиты. Cubic ease-in-out."""
+    """Мягкий Instagram-style тёплый градиент с коричнево-оранжевым подтоном."""
     w, h = img.size
     g_h = int(h * percent)
     y0 = h - g_h
@@ -114,20 +114,21 @@ def draw_soft_warm_fade(img: Image.Image, percent: float):
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
 
-    # Тёплый оттенок (как на примере с жёлтыми буквами), но очень легкий.
-    warm = (20, 12, 8)  # почти чёрный с тёплым уклоном
-    steps = max(1, g_h*2)  # по 0.5px
+    # Instagram-style тёплый тон: коричнево-оранжевый подтон вместо чисто чёрного
+    warm = (28, 18, 12)  # тёплый коричневато-оранжевый оттенок
+    steps = max(1, int(g_h*2.5))  # больше шагов для плавности
 
     for i in range(steps):
         t = i/steps
-        # cubic ease-in-out
+        # Более мягкий cubic ease-in-out для Instagram-эффекта
         a = 4*t**3 if t<0.5 else 1 - ((-2*t+2)**3)/2
-        alpha = int(220 * a)  # верх фейда 0 → низ до ~220
+        # Увеличенная максимальная прозрачность для заметности
+        alpha = int(235 * a)  # верх фейда 0 → низ до ~235
         y = y0 + int(i * g_h / steps)
         d.rectangle([(0,y),(w,y+1)], fill=(*warm, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    print(f"✓ Warm gradient applied: {percent*100:.0f}% height")
+    print(f"✓ Instagram-style warm gradient: {percent*100:.0f}% height")
     return out, y0, g_h  # вернём позицию начала фейда
 
 # ----------------------------- Text Layout -----------------------------
@@ -187,7 +188,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             draw_with_tracking(draw, (x,y), line, fnt, cyan, tracking)
             y += lh + 5
         if subtitle:
-            y += 14
+            y += 16  # увеличенный отступ между заголовком и подзаголовком
         print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo else 'NO-LOGO'}")
 
     if subtitle:
@@ -248,21 +249,21 @@ def process_image():
 
         d = ImageDraw.Draw(img)
 
-        # 3) Раскладка: якоримся ВНУТРИ фейда, но не у самого края.
-        #    По просьбе — сдвигаем НИЖЕ (центр нижней половины фейда).
-        center_in_fade = fade_top + int(fade_h*0.60)
-        top_in_fade    = fade_top + int(fade_h*0.35)
+        # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
+        #    Текст должен быть ближе к верхней части градиента, не к краю.
+        center_in_fade = fade_top + int(fade_h*0.35)  # верхняя треть фейда
+        top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
 
-        start_y = center_in_fade  # по умолчанию — ниже
+        start_y = center_in_fade  # по умолчанию — в верхней части фейда
 
-        # 4) Логотип (если нужен) — на ~40% фейда
+        # 4) Логотип (если нужен) — в верхней части фейда с большим отступом от заголовка
         if add_logo:
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
             lw, lh = bb[2]-bb[0], bb[3]-bb[1]
             lx = (w-lw)//2
-            ly = fade_top + int(fade_h*0.40)
+            ly = fade_top + int(fade_h*0.25)  # логотип в верхней части фейда
             # Тень + белый логотип
             d.text((lx+1, ly+1), logo_text, font=f, fill=(0,0,0,150))
             d.text((lx, ly), logo_text, font=f, fill=(255,255,255,255))
@@ -272,10 +273,10 @@ def process_image():
             d.rectangle([(lx-8-line_len, line_y), (lx-8, line_y+1)], fill=(0,188,212,255))
             d.rectangle([(lx+lw+8, line_y), (lx+lw+8+line_len, line_y+1)], fill=(0,188,212,255))
             print(f"✓ Logo at ({lx},{ly})")
-            start_y = ly + lh + 6  # заголовок под лого
+            start_y = ly + lh + 18  # увеличенный отступ между лого и заголовком
 
-        # Гарантия, что текст не упрётся в край
-        bottom_guard = h - int(fade_h*0.18)
+        # Гарантия, что текст не упрётся в край (с большим запасом)
+        bottom_guard = h - int(fade_h*0.25)
         start_y = min(start_y, bottom_guard)
 
         # 5) Текст
@@ -300,12 +301,14 @@ def process_image():
 def health():
     return {
         "status": "ok",
-        "version": "NEUROSTEP_v9.1_SOFTFADE",
+        "version": "NEUROSTEP_v10.0_INSTAGRAM_STYLE",
         "features": [
             "OpenCV inpaint (optional) + PIL soft cover fallback",
-            "Warm pure-fade bottom gradient (cubic), no black slab",
-            "Smart anchoring inside fade (lower center) + logo mode",
-            "Adaptive fade height (23–30%, 28% min for long text)",
+            "Instagram-style warm gradient (brownish-orange undertone, 32-38%)",
+            "Smoother fade transition with extended gradient zone",
+            "Text positioned in upper fade area for better visibility",
+            "Harmonious spacing: logo→title (18px), title→subtitle (16px)",
+            "Adaptive fade height based on image brightness and text length",
             "Tighter cyan/white typography, tracking -1, wrap & line gap",
             "Safety bottom guard; tiny bottom bar (1.2%)",
         ],
