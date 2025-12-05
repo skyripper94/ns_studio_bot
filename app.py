@@ -182,18 +182,24 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         # Фиксированный межстрочный интервал независимо от размера шрифта
         line_spacing = 12
         
-        for line in lines:
+        # Вычисляем высоту одной строки (используем первую строку как эталон)
+        bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
+        line_height = bb[3]-bb[1]
+        
+        for i, line in enumerate(lines):
             # ширина с учётом tracking
             lw = 0
             for ch in line:
                 bb = draw.textbbox((0,0), ch, font=fnt)
                 cw = bb[2]-bb[0]
                 lw += cw if ch==" " else cw + tracking
-            bb = draw.textbbox((0,0), line, font=fnt)
-            lh = bb[3]-bb[1]
             x = (width - lw)//2
-            draw_with_tracking(draw, (x,y), line, fnt, cyan, tracking)
-            y += lh + line_spacing
+            # Используем фиксированную высоту строки для всех линий
+            line_y = y + i * (line_height + line_spacing)
+            draw_with_tracking(draw, (x,line_y), line, fnt, cyan, tracking)
+        
+        # Переходим к следующему элементу
+        y += len(lines) * (line_height + line_spacing) - line_spacing
         if subtitle:
             y += 8  # уменьшенный отступ между заголовком и подзаголовком
         print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo else 'NO-LOGO'}")
@@ -202,17 +208,22 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         fnt = get_font(32, "medium")
         tracking = -1
         lines = wrap_text(subtitle, fnt, width*0.88, draw, tracking)
-        for line in lines:
+        
+        # Вычисляем высоту одной строки subtitle
+        bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
+        sub_line_height = bb[3]-bb[1]
+        sub_line_spacing = 5
+        
+        for i, line in enumerate(lines):
             lw = 0
             for ch in line:
                 bb = draw.textbbox((0,0), ch, font=fnt)
                 cw = bb[2]-bb[0]
                 lw += cw if ch==" " else cw + tracking
-            bb = draw.textbbox((0,0), line, font=fnt)
-            lh = bb[3]-bb[1]
             x = (width - lw)//2
-            draw_with_tracking(draw, (x,y), line, fnt, white, tracking)
-            y += lh + 5
+            # Используем фиксированную высоту строки
+            line_y = y + i * (sub_line_height + sub_line_spacing)
+            draw_with_tracking(draw, (x,line_y), line, fnt, white, tracking)
         print(f"[Subtitle] Lines:{len(lines)}")
 
 # ----------------------------- API -----------------------------
@@ -277,21 +288,22 @@ def process_image():
                     size -= 3
                     fnt = get_font(size, "bold")
                     lines = wrap_text(t, fnt, width*0.88, draw, -1)
-                for line in lines:
-                    bb = draw.textbbox((0,0), line, font=fnt)
-                    lh = bb[3]-bb[1]
-                    total_h += lh + 12  # фиксированный интервал
-                total_h -= 12  # убираем последний интервал
+                
+                # Используем высоту первой строки как эталон для всех
+                if lines:
+                    bb = draw.textbbox((0,0), lines[0], font=fnt)
+                    line_height = bb[3]-bb[1]
+                    total_h = len(lines) * line_height + (len(lines)-1) * 12
+                
                 if subtitle:
                     total_h += 8  # отступ между title и subtitle
             if subtitle:
                 fnt = get_font(32, "medium")
                 lines = wrap_text(subtitle, fnt, width*0.88, draw, -1)
-                for line in lines:
-                    bb = draw.textbbox((0,0), line, font=fnt)
-                    lh = bb[3]-bb[1]
-                    total_h += lh + 5
-                total_h -= 5  # убираем последний интервал
+                if lines:
+                    bb = draw.textbbox((0,0), lines[0], font=fnt)
+                    sub_line_height = bb[3]-bb[1]
+                    total_h += len(lines) * sub_line_height + (len(lines)-1) * 5
             return total_h
 
         text_height = calculate_text_height(title, subtitle, w, d)
