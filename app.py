@@ -265,8 +265,8 @@ def process_image():
 
         # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
         #    Текст должен быть ближе к верхней части градиента, не к краю.
-        # Для изображений БЕЗ лого опускаем ниже на 90px (60+30)
-        center_offset = 90 if not add_logo else 60
+        # Для изображений БЕЗ лого опускаем ниже на 80px (90-10)
+        center_offset = 80 if not add_logo else 60
         center_in_fade = fade_top + int(fade_h*0.35) + center_offset
         top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
 
