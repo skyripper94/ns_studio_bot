@@ -47,9 +47,9 @@ def calculate_adaptive_gradient(img, long_text=False):
     avg = float(arr.mean())
 
     # Увеличенная зона градиента для более плавного Instagram-style перехода
-    if avg > 150:      gp = 0.38
-    elif avg > 100:    gp = 0.35
-    else:              gp = 0.32
+    if avg > 150:      gp = 0.48
+    elif avg > 100:    gp = 0.45
+    else:              gp = 0.42
 
     if long_text:
         gp = max(gp, 0.36)
@@ -273,7 +273,7 @@ def process_image():
             d.rectangle([(lx-8-line_len, line_y), (lx-8, line_y+1)], fill=(0,188,212,255))
             d.rectangle([(lx+lw+8, line_y), (lx+lw+8+line_len, line_y+1)], fill=(0,188,212,255))
             print(f"✓ Logo at ({lx},{ly})")
-            start_y = ly + lh + 18  # увеличенный отступ между лого и заголовком
+            start_y = ly + lh + 14  # отступ между лого и заголовком
 
         # Гарантия, что текст не упрётся в край (с большим запасом)
         bottom_guard = h - int(fade_h*0.25)
@@ -301,13 +301,13 @@ def process_image():
 def health():
     return {
         "status": "ok",
-        "version": "NEUROSTEP_v10.0_INSTAGRAM_STYLE",
+        "version": "NEUROSTEP_v10.1_ELEVATED_FADE",
         "features": [
             "OpenCV inpaint (optional) + PIL soft cover fallback",
-            "Instagram-style warm gradient (brownish-orange undertone, 32-38%)",
+            "Instagram-style warm gradient (brownish-orange undertone, 42-48%)",
             "Smoother fade transition with extended gradient zone",
             "Text positioned in upper fade area for better visibility",
-            "Harmonious spacing: logo→title (18px), title→subtitle (16px)",
+            "Harmonious spacing: logo→title (14px), title→subtitle (16px)",
             "Adaptive fade height based on image brightness and text length",
             "Tighter cyan/white typography, tracking -1, wrap & line gap",
             "Safety bottom guard; tiny bottom bar (1.2%)",
