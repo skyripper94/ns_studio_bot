@@ -437,61 +437,47 @@ def process_image():
         
         draw = ImageDraw.Draw(img)
         
+        # ШАГ 5: ЛОГОТИП / ТЕКСТ — корректное позиционирование
         # ═══════════════════════════════════════════════════
-        # ШАГ 5: ЛОГОТИП (если нужен)
-        # ═══════════════════════════════════════════════════
-        # ✅ НОВОЕ: Поднимаем все конструкции вверх (-40px от v8.7)
-        if has_long_text:
-            start_y = gradient_start + 400
-        else:
-            start_y = gradient_start + 20
-        
+        # Привязываем к верхней половине фейда, чтобы текст не уходил вниз
+        center_in_fade_y = gradient_start - int(gradient_height * 0.55)
+        top_in_fade_y    = gradient_start - int(gradient_height * 0.95)
+
         if add_logo:
             logo_text = "@neurostep.media"
             logo_font = get_font(18, weight='bold')
 
-            logo_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
-            logo_width = logo_bbox[2] - logo_bbox[0]
+            logo_bbox   = draw.textbbox((0, 0), logo_text, font=logo_font)
+            logo_width  = logo_bbox[2] - logo_bbox[0]
             logo_height = logo_bbox[3] - logo_bbox[1]
 
             logo_x = (width - logo_width) // 2
-            # ✅ Логотип поднят на -40px (было +190, теперь +150)
-            logo_y = max(0, gradient_start + 130)
+            # логотип почти вверху градиента
+            logo_y = max(0, top_in_fade_y)
 
-            # Тень логотипа
-            shadow_offset = 1
-            draw.text((logo_x + shadow_offset, logo_y + shadow_offset), logo_text, font=logo_font, fill=(0, 0, 0, 150))
+            # тень + логотип
+            draw.text((logo_x + 1, logo_y + 1), logo_text, font=logo_font, fill=(0, 0, 0, 150))
+            draw.text((logo_x,       logo_y),     logo_text, font=logo_font, fill=(255, 255, 255, 255))
 
-            # Рисуем логотип белым
-            draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=(255, 255, 255, 255))
-
-            # Линии от логотипа
-            line_y = logo_y + logo_height // 2
-            line_thickness = 1
-            line_color = (0, 188, 212, 255)
-            line_length = 185
-
-            # Левая линия
-            left_line_end = logo_x - 8
-            left_line_start = left_line_end - line_length
-            draw.rectangle(
-                [(left_line_start, line_y), (left_line_end, line_y + line_thickness)],
-                fill=line_color
-            )
-
-            # Правая линия
-            right_line_start = logo_x + logo_width + 8
-            right_line_end = right_line_start + line_length
-            draw.rectangle(
-                [(right_line_start, line_y), (right_line_end, line_y + line_thickness)],
-                fill=line_color
-            )
+            # линии-акценты
+            line_y      = logo_y + logo_height // 2
+            line_color  = (0, 188, 212, 255)
+            line_len    = 185
+            draw.rectangle([(logo_x - 8 - line_len, line_y), (logo_x - 8, line_y + 1)], fill=line_color)
+            draw.rectangle([(logo_x + logo_width + 8, line_y),
+                            (logo_x + logo_width + 8 + line_len, line_y + 1)],           fill=line_color)
 
             print(f"✓ Logo rendered at ({logo_x}, {logo_y})")
-            
-            # ✅ Title начинается на 1px от логотипа
-            start_y = logo_y + logo_height + 1
-        
+
+            # заголовок сразу под логотипом
+            start_y = logo_y + logo_height + 10
+        else:
+            # без лого — в верхнюю часть фейда
+            start_y = max(0, center_in_fade_y)
+
+        # страховка: не даём тексту уйти ниже кадра
+        start_y = min(start_y, height - int(gradient_height * 0.35))
+
         # ═══════════════════════════════════════════════════
         # ШАГ 6: РИСУЕМ TITLE И SUBTITLE
         # ═══════════════════════════════════════════════════
