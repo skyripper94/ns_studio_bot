@@ -114,24 +114,24 @@ def draw_soft_warm_fade(img: Image.Image, percent: float):
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
 
-    # Однотонный черный внизу (50% градиента)
-    solid_black_height = int(g_h * 0.50)
+    # Однотонный черный внизу (40% градиента)
+    solid_black_height = int(g_h * 0.40)
     solid_black_start = h - solid_black_height
     d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
 
-    # Плавный градиент в верхней части (50% градиента)
+    # Плавный градиент в верхней части (60% градиента) - более длинный и мягкий
     gradient_zone_height = g_h - solid_black_height
-    steps = max(1, int(gradient_zone_height * 3))  # больше шагов для плавности
+    steps = max(1, int(gradient_zone_height * 4))  # еще больше шагов для плавности
 
     for i in range(steps):
         t = i / steps
-        # Квадратичная функция для более насыщенного перехода
-        alpha = int(255 * (t ** 2))
+        # Более плавная cubic функция для мягкого перехода
+        alpha = int(255 * (t ** 3))
         y = y0 + int(i * gradient_zone_height / steps)
         d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    print(f"✓ Solid black gradient: {percent*100:.0f}% height, solid bottom 50%")
+    print(f"✓ Smooth gradient: {percent*100:.0f}% height, solid bottom 40%")
     return out, y0, g_h  # вернём позицию начала фейда
 
 # ----------------------------- Text Layout -----------------------------
@@ -178,6 +178,10 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         while len(lines)>3 and size>32:
             size -= 3; fnt = get_font(size, "bold")
             lines = wrap_text(t, fnt, width*0.88, draw, tracking)
+        
+        # Фиксированный межстрочный интервал для режима с логотипом
+        line_spacing = int(size * 1.15) if has_logo else 5
+        
         for line in lines:
             # ширина с учётом tracking
             lw = 0
@@ -189,7 +193,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             lh = bb[3]-bb[1]
             x = (width - lw)//2
             draw_with_tracking(draw, (x,y), line, fnt, cyan, tracking)
-            y += lh + 5
+            y += lh + line_spacing
         if subtitle:
             y += 16  # увеличенный отступ между заголовком и подзаголовком
         print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo else 'NO-LOGO'}")
@@ -255,7 +259,7 @@ def process_image():
 
         # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
         #    Текст должен быть ближе к верхней части градиента, не к краю.
-        center_in_fade = fade_top + int(fade_h*0.35)  # верхняя треть фейда
+        center_in_fade = fade_top + int(fade_h*0.35) + 20  # опускаем на 20px
         top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
 
         start_y = center_in_fade  # по умолчанию — в верхней части фейда
@@ -267,7 +271,7 @@ def process_image():
             bb = d.textbbox((0,0), logo_text, font=f)
             lw, lh = bb[2]-bb[0], bb[3]-bb[1]
             lx = (w-lw)//2
-            ly = fade_top + int(fade_h*0.30)  # логотип опускаем ниже
+            ly = fade_top + int(fade_h*0.30) + 40 + 1  # опускаем на 40px + 1px
             # Тень + белый логотип
             d.text((lx+1, ly+1), logo_text, font=f, fill=(0,0,0,150))
             d.text((lx, ly), logo_text, font=f, fill=(255,255,255,255))
