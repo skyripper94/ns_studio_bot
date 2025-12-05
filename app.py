@@ -195,7 +195,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             draw_with_tracking(draw, (x,y), line, fnt, cyan, tracking)
             y += lh + line_spacing
         if subtitle:
-            y += 16  # увеличенный отступ между заголовком и подзаголовком
+            y += 8  # уменьшенный отступ между заголовком и подзаголовком
         print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo else 'NO-LOGO'}")
 
     if subtitle:
