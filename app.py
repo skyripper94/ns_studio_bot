@@ -179,8 +179,8 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             size -= 3; fnt = get_font(size, "bold")
             lines = wrap_text(t, fnt, width*0.88, draw, tracking)
         
-        # Фиксированный межстрочный интервал для режима с логотипом (уменьшен в 2 раза)
-        line_spacing = int(size * 0.575) if has_logo else 5
+        # Фиксированный межстрочный интервал для режима с логотипом (уменьшен в 4 раза от исходного)
+        line_spacing = int(size * 0.2875) if has_logo else 5
         
         for line in lines:
             # ширина с учётом tracking
@@ -253,8 +253,8 @@ def process_image():
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
         gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
-        # Дополнительно поднимаем на 20px через увеличение процента
-        extra_pixels = 20 / h
+        # Дополнительно поднимаем на 40px через увеличение процента
+        extra_pixels = 40 / h
         gp = min(gp + extra_pixels, 0.70)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
@@ -262,7 +262,7 @@ def process_image():
 
         # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
         #    Текст должен быть ближе к верхней части градиента, не к краю.
-        center_in_fade = fade_top + int(fade_h*0.35) + 20  # опускаем на 20px
+        center_in_fade = fade_top + int(fade_h*0.35) + 40  # опускаем на 40px
         top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
 
         start_y = center_in_fade  # по умолчанию — в верхней части фейда
@@ -274,7 +274,7 @@ def process_image():
             bb = d.textbbox((0,0), logo_text, font=f)
             lw, lh = bb[2]-bb[0], bb[3]-bb[1]
             lx = (w-lw)//2
-            ly = fade_top + int(fade_h*0.30) + 40 + 1  # опускаем на 40px + 1px
+            ly = fade_top + int(fade_h*0.30) + 71  # опускаем на 71px (40+30+1)
             # Тень + белый логотип
             d.text((lx+1, ly+1), logo_text, font=f, fill=(0,0,0,150))
             d.text((lx, ly), logo_text, font=f, fill=(255,255,255,255))
