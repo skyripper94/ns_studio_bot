@@ -1,8 +1,16 @@
 from flask import Flask, request, send_file
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 import io
 import base64
 import os
+import numpy as np
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -47,18 +55,14 @@ def calculate_adaptive_gradient(img, has_long_text=False):
     pixels = list(gray.getdata())
     avg_brightness = sum(pixels) / len(pixels)
     
-    # ✅ УМЕНЬШИЛИ градиент на 5% (было 40-50%, теперь 35-45%)
-    if avg_brightness > 150:  # Светлое фото
-        gradient_percent = 0.45  # Было 0.50
-    elif avg_brightness > 100:  # Среднее
-        gradient_percent = 0.40  # Было 0.45
-    else:  # Темное
-        gradient_percent = 0.35  # Было 0.40
-    
-    # ✅ Если текст длинный → гарантируем минимум 45% (было 50%)
+    if avg_brightness > 150:
+        gradient_percent = 0.30
+    elif avg_brightness > 100:
+        gradient_percent = 0.25
+    else:
+        gradient_percent = 0.22
     if has_long_text:
-        gradient_percent = max(gradient_percent, 0.45)
-        print(f"[Adaptive Gradient] Long text detected, increased gradient")
+        gradient_percent = max(gradient_percent, 0.28)
     
     print(f"[Adaptive Gradient] Brightness: {avg_brightness:.0f}, Gradient: {gradient_percent*100:.0f}%")
     return gradient_percent
@@ -142,14 +146,12 @@ def wrap_text(text, font, max_width, draw, tracking=-1):
     
     return lines
 
-
 def draw_text_with_outline(draw, pos, text, font, color):
     """Рисует текст БЕЗ обводки (для чистого вида)"""
     x, y = pos
     
     # ✅ УБРАЛИ обводку - только основной текст
     draw.text((x, y), text, font=font, fill=color)
-
 
 def draw_text_with_tracking(draw, pos, text, font, color, tracking=-1):
     """Рисует текст с уменьшенным межбуквенным интервалом (tracking)"""
@@ -169,6 +171,42 @@ def draw_text_with_tracking(draw, pos, text, font, color, tracking=-1):
             x += char_width + tracking  # Уменьшенный интервал
     
     return x  # Возвращаем финальную X позицию
+
+def build_text_mask(size, boxes, pad_x=18, pad_y=22, blur_radius=6):
+    w, h = size
+    mask = Image.new('L', (w, h), 0)
+    d = ImageDraw.Draw(mask)
+    for box in boxes or []:
+        v = box.get('vertices', [])
+        if len(v) < 4:
+            continue
+        xs = [pt.get('x', 0) for pt in v]
+        ys = [pt.get('y', 0) for pt in v]
+        x0, y0 = max(0, min(xs) - pad_x), max(0, min(ys) - pad_y)
+        x1, y1 = min(w, max(xs) + pad_x), min(h, max(ys) + pad_y)
+        d.rectangle([x0, y0, x1, y1], fill=255)
+    return mask.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+
+def inpaint_remove_text(img: Image.Image, mask: Image.Image, method=cv2.INPAINT_TELEA, radius=3):
+    if not CV2_AVAILABLE:
+        raise RuntimeError("OpenCV (cv2) не установлен. Установите opencv-python-headless для инпейнтинга.")
+
+    img_bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    m = np.array(mask)
+    m = np.clip(m, 0, 255).astype('uint8')
+    restored = cv2.inpaint(img_bgr, m, radius, method)
+    out = cv2.cvtColor(restored, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(out)
+
+
+def add_soft_noise(img: Image.Image, mask: Image.Image, amount=6):
+    arr = np.array(img).astype(np.int16)
+    m = np.array(mask).astype(np.float32) / 255.0
+    noise = np.random.randint(-amount, amount+1, arr.shape, dtype=np.int16)
+    noise = (noise * m[..., None]).astype(np.int16)
+    arr = np.clip(arr + noise, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
 
 
 def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
@@ -329,10 +367,31 @@ def process_image():
         gradient_percent = calculate_adaptive_gradient(img, has_long_text=has_long_text)
         
         # ═══════════════════════════════════════════════════
-        # ШАГ 3: "УДАЛЕНИЕ" СТАРОГО ТЕКСТА
+        # ШАГ 3: soft text removal (inpainting) or fallback
         # ═══════════════════════════════════════════════════
         if bounding_boxes:
-            img = remove_old_text(img, bounding_boxes)
+            mask = build_text_mask(img.size, bounding_boxes, pad_x=18, pad_y=22, blur_radius=6)
+            if CV2_AVAILABLE:
+                img = inpaint_remove_text(img, mask, method=cv2.INPAINT_TELEA, radius=3)
+                toned = Image.alpha_composite(img.convert('RGBA'), Image.new('RGBA', img.size, (0,0,0,60))).convert('RGB')
+                img  = toned
+                img  = add_soft_noise(img, mask, amount=6)
+            else:
+                print("[WARN] OpenCV (cv2) недоступен. Используем мягкое затемнение маски вместо инпейнтинга.")
+                blurred = img.filter(ImageFilter.GaussianBlur(radius=4))
+                toned = Image.alpha_composite(blurred.convert('RGBA'), Image.new('RGBA', img.size, (0,0,0,60))).convert('RGB')
+                img   = Image.composite(toned, img, mask)
+        else:
+            # fallback for classic carousels when Vision returns nothing
+            w, h = img.size
+            fb = Image.new('L', (w, h), 0)
+            d = ImageDraw.Draw(fb)
+            y0 = int(h * 0.65)
+            d.rectangle([0, y0, w, h], fill=255)
+            fb = fb.filter(ImageFilter.GaussianBlur(radius=10))
+            blurred = img.filter(ImageFilter.GaussianBlur(radius=6))
+            toned = Image.alpha_composite(blurred.convert('RGBA'), Image.new('RGBA', (w, h), (0,0,0,70))).convert('RGB')
+            img   = Image.composite(toned, img, fb)
         
         # ═══════════════════════════════════════════════════
         # ШАГ 4: НАЛОЖЕНИЕ ГРАДИЕНТА (ПЛАВНЫЙ)
@@ -341,45 +400,22 @@ def process_image():
         draw_overlay = ImageDraw.Draw(overlay)
         
         gradient_height = int(height * gradient_percent)
-        gradient_start = height - gradient_height
-        
-        # ✅ НОВОЕ: 80% на плавный переход
-        fade_portion = 0.8
-        fade_height = int(gradient_height * fade_portion)
-        solid_black_start = gradient_start + fade_height
-        
-        # Сплошной черный (нижние 60% от градиента)
-        draw_overlay.rectangle(
-            [(0, solid_black_start), (width, height)],
-            fill=(0, 0, 0, 255)
-        )
-        
-        # ✅ НОВОЕ: Плавный градиент с большим количеством шагов
-        # Рисуем по 0.5px вместо 1px для устранения артефактов
-        steps = fade_height * 2  # В 2 раза больше шагов
-        
+        gradient_start  = height - gradient_height
+        fade_height     = gradient_height
+        steps           = max(1, fade_height * 2)
+        ALPHA_CAP       = 180
         for i in range(steps):
             progress = i / steps
-            
-            # ✅ Cubic ease-in-out для максимально плавного перехода
             if progress < 0.5:
-                alpha_progress = 4 * progress ** 3
+                a = 4 * (progress ** 3)
             else:
-                alpha_progress = 1 - pow(-2 * progress + 2, 3) / 2
-            
-            alpha = int(255 * alpha_progress)
+                a = 1 - ((-2 * progress + 2) ** 3) / 2
+            alpha = int(ALPHA_CAP * a)
             y_pos = gradient_start + int(i * fade_height / steps)
-            
-            draw_overlay.rectangle(
-                [(0, y_pos), (width, y_pos + 1)],
-                fill=(0, 0, 0, alpha)
-            )
-        
-        img = img.convert('RGBA')
-        img = Image.alpha_composite(img, overlay)
-        img = img.convert('RGB')
-        
-        print(f"✓ Smooth gradient: {gradient_percent*100:.0f}% height (fade: {fade_height}px [{steps} steps], solid: {gradient_height-fade_height}px)")
+            draw_overlay.rectangle([(0, y_pos), (width, y_pos + 1)], fill=(0, 0, 0, alpha))
+        img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
+
+        print(f"✓ Smooth gradient: {gradient_percent*100:.0f}% height (fade: {fade_height}px [{steps} steps])")
         
         draw = ImageDraw.Draw(img)
         
@@ -474,7 +510,7 @@ def process_image():
 def health():
     return {
         'status': 'ok',
-        'version': 'NEUROSTEP_v8.8_FINAL',
+        'version': 'NEUROSTEP_v9.0_INPAINT',
         'features': [
             'Logo mode: fullText as title, LARGE font (72px)',
             'No-logo mode: title+subtitle, standard font (48px)',
