@@ -179,8 +179,8 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             size -= 3; fnt = get_font(size, "bold")
             lines = wrap_text(t, fnt, width*0.88, draw, tracking)
         
-        # Фиксированный межстрочный интервал для режима с логотипом (уменьшен в 4 раза от исходного)
-        line_spacing = int(size * 0.2875) if has_logo else 5
+        # Фиксированный межстрочный интервал независимо от размера шрифта
+        line_spacing = 12
         
         for line in lines:
             # ширина с учётом tracking
@@ -263,24 +263,55 @@ def process_image():
 
         d = ImageDraw.Draw(img)
 
-        # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
-        #    Текст должен быть ближе к верхней части градиента, не к краю.
-        # Для изображений БЕЗ лого опускаем ниже на 80px (90-10)
-        center_offset = 80 if not add_logo else 60
-        center_in_fade = fade_top + int(fade_h*0.35) + center_offset
-        top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
+        # 3) Вычисляем высоту текстового блока для центрирования
+        # Предварительный расчет высоты title+subtitle
+        def calculate_text_height(title, subtitle, width, draw):
+            total_h = 0
+            if title:
+                t = title.upper()
+                has_logo = (subtitle == "")
+                size = 72 if has_logo and len(t)<=30 else (60 if has_logo else (48 if len(t)<=30 else 42))
+                fnt = get_font(size, "bold")
+                lines = wrap_text(t, fnt, width*0.88, draw, -1)
+                while len(lines)>3 and size>32:
+                    size -= 3
+                    fnt = get_font(size, "bold")
+                    lines = wrap_text(t, fnt, width*0.88, draw, -1)
+                for line in lines:
+                    bb = draw.textbbox((0,0), line, font=fnt)
+                    lh = bb[3]-bb[1]
+                    total_h += lh + 12  # фиксированный интервал
+                total_h -= 12  # убираем последний интервал
+                if subtitle:
+                    total_h += 8  # отступ между title и subtitle
+            if subtitle:
+                fnt = get_font(32, "medium")
+                lines = wrap_text(subtitle, fnt, width*0.88, draw, -1)
+                for line in lines:
+                    bb = draw.textbbox((0,0), line, font=fnt)
+                    lh = bb[3]-bb[1]
+                    total_h += lh + 5
+                total_h -= 5  # убираем последний интервал
+            return total_h
 
-        start_y = center_in_fade  # по умолчанию — в верхней части фейда
-
-        # 4) Логотип (если нужен) — опускаем ближе к тексту
+        text_height = calculate_text_height(title, subtitle, w, d)
+        
+        # 4) Логотип и центрирование конструкции
         if add_logo:
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
             lw, lh = bb[2]-bb[0], bb[3]-bb[1]
+            
+            # Общая высота конструкции: логотип + отступ + текст
+            total_construction_h = lh + 2 + text_height
+            
+            # Центрируем всю конструкцию в середине градиента
+            construction_top = fade_top + (fade_h - total_construction_h) // 2
+            
+            # Рисуем логотип
             lx = (w-lw)//2
-            ly = fade_top + int(fade_h*0.30) + 91  # опускаем на 91px
-            # Тень + белый логотип
+            ly = construction_top
             d.text((lx+1, ly+1), logo_text, font=f, fill=(0,0,0,150))
             d.text((lx, ly), logo_text, font=f, fill=(255,255,255,255))
             # Бирюзовые линии
@@ -288,8 +319,11 @@ def process_image():
             line_len = 185
             d.rectangle([(lx-8-line_len, line_y), (lx-8, line_y+1)], fill=(0,188,212,255))
             d.rectangle([(lx+lw+8, line_y), (lx+lw+8+line_len, line_y+1)], fill=(0,188,212,255))
-            print(f"✓ Logo at ({lx},{ly})")
-            start_y = ly + lh + 2  # только 2px отступ между лого и заголовком
+            print(f"✓ Logo at ({lx},{ly}), Construction height: {total_construction_h}px")
+            start_y = ly + lh + 2
+        else:
+            # Для изображений без лого центрируем только текст
+            start_y = fade_top + (fade_h - text_height) // 2 + 80  # смещение 80px
 
         # Гарантия, что текст не упрётся в край (с большим запасом)
         bottom_guard = h - int(fade_h*0.25)
