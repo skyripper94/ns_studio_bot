@@ -106,7 +106,7 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
     return out
 
 def draw_soft_warm_fade(img: Image.Image, percent: float):
-    """Мягкий Instagram-style тёплый градиент с коричнево-оранжевым подтоном."""
+    """Мягкий градиент с однотонным черным внизу и плавным переходом вверх."""
     w, h = img.size
     g_h = int(h * percent)
     y0 = h - g_h
@@ -114,21 +114,24 @@ def draw_soft_warm_fade(img: Image.Image, percent: float):
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
 
-    # Instagram-style тёплый тон: коричнево-оранжевый подтон вместо чисто чёрного
-    warm = (28, 18, 12)  # тёплый коричневато-оранжевый оттенок
-    steps = max(1, int(g_h*2.5))  # больше шагов для плавности
+    # Однотонный черный внизу (50% градиента)
+    solid_black_height = int(g_h * 0.50)
+    solid_black_start = h - solid_black_height
+    d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
+
+    # Плавный градиент в верхней части (50% градиента)
+    gradient_zone_height = g_h - solid_black_height
+    steps = max(1, int(gradient_zone_height * 3))  # больше шагов для плавности
 
     for i in range(steps):
-        t = i/steps
-        # Более мягкий cubic ease-in-out для Instagram-эффекта
-        a = 4*t**3 if t<0.5 else 1 - ((-2*t+2)**3)/2
-        # Увеличенная максимальная прозрачность для заметности
-        alpha = int(235 * a)  # верх фейда 0 → низ до ~235
-        y = y0 + int(i * g_h / steps)
-        d.rectangle([(0,y),(w,y+1)], fill=(*warm, alpha))
+        t = i / steps
+        # Квадратичная функция для более насыщенного перехода
+        alpha = int(255 * (t ** 2))
+        y = y0 + int(i * gradient_zone_height / steps)
+        d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    print(f"✓ Instagram-style warm gradient: {percent*100:.0f}% height")
+    print(f"✓ Solid black gradient: {percent*100:.0f}% height, solid bottom 50%")
     return out, y0, g_h  # вернём позицию начала фейда
 
 # ----------------------------- Text Layout -----------------------------
@@ -242,9 +245,10 @@ def process_image():
         if boxes:
             img = inpaint_or_soft_cover(img, boxes)
 
-        # 2) Мягкий фейд снизу (тёплый)
+        # 2) Мягкий фейд снизу (поднимаем выше)
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
+        gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
         d = ImageDraw.Draw(img)
@@ -256,14 +260,14 @@ def process_image():
 
         start_y = center_in_fade  # по умолчанию — в верхней части фейда
 
-        # 4) Логотип (если нужен) — в верхней части фейда с большим отступом от заголовка
+        # 4) Логотип (если нужен) — опускаем ближе к тексту
         if add_logo:
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
             lw, lh = bb[2]-bb[0], bb[3]-bb[1]
             lx = (w-lw)//2
-            ly = fade_top + int(fade_h*0.25)  # логотип в верхней части фейда
+            ly = fade_top + int(fade_h*0.30)  # логотип опускаем ниже
             # Тень + белый логотип
             d.text((lx+1, ly+1), logo_text, font=f, fill=(0,0,0,150))
             d.text((lx, ly), logo_text, font=f, fill=(255,255,255,255))
@@ -273,7 +277,7 @@ def process_image():
             d.rectangle([(lx-8-line_len, line_y), (lx-8, line_y+1)], fill=(0,188,212,255))
             d.rectangle([(lx+lw+8, line_y), (lx+lw+8+line_len, line_y+1)], fill=(0,188,212,255))
             print(f"✓ Logo at ({lx},{ly})")
-            start_y = ly + lh + 14  # отступ между лого и заголовком
+            start_y = ly + lh + 2  # только 2px отступ между лого и заголовком
 
         # Гарантия, что текст не упрётся в край (с большим запасом)
         bottom_guard = h - int(fade_h*0.25)
