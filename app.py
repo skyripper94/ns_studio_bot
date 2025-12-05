@@ -253,8 +253,8 @@ def process_image():
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
         gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
-        # Дополнительно поднимаем на 40px через увеличение процента
-        extra_pixels = 40 / h
+        # Дополнительно поднимаем на 60px через увеличение процента
+        extra_pixels = 60 / h
         gp = min(gp + extra_pixels, 0.70)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
@@ -262,7 +262,7 @@ def process_image():
 
         # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
         #    Текст должен быть ближе к верхней части градиента, не к краю.
-        center_in_fade = fade_top + int(fade_h*0.35) + 40  # опускаем на 40px
+        center_in_fade = fade_top + int(fade_h*0.35) + 60  # опускаем на 60px
         top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
 
         start_y = center_in_fade  # по умолчанию — в верхней части фейда
@@ -274,7 +274,7 @@ def process_image():
             bb = d.textbbox((0,0), logo_text, font=f)
             lw, lh = bb[2]-bb[0], bb[3]-bb[1]
             lx = (w-lw)//2
-            ly = fade_top + int(fade_h*0.30) + 71  # опускаем на 71px (40+30+1)
+            ly = fade_top + int(fade_h*0.30) + 91  # опускаем на 91px
             # Тень + белый логотип
             d.text((lx+1, ly+1), logo_text, font=f, fill=(0,0,0,150))
             d.text((lx, ly), logo_text, font=f, fill=(255,255,255,255))
