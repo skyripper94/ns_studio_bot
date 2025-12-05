@@ -394,28 +394,46 @@ def process_image():
             img   = Image.composite(toned, img, fb)
         
         # ═══════════════════════════════════════════════════
-        # ШАГ 4: НАЛОЖЕНИЕ ГРАДИЕНТА (ПЛАВНЫЙ)
+        # ШАГ 4: НАЛОЖЕНИЕ ГРАДИЕНТА (МЯГКИЙ ТЁПЛЫЙ)
         # ═══════════════════════════════════════════════════
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
-        
+
+        # 🔹 Меньше высота градиента (25–30% от кадра)
+        gradient_percent = 0.28
         gradient_height = int(height * gradient_percent)
-        gradient_start  = height - gradient_height
-        fade_height     = gradient_height
-        steps           = max(1, fade_height * 2)
-        ALPHA_CAP       = 180
+        gradient_start = height - gradient_height
+
+        # 🔹 Мягкий fade (95% плавного перехода)
+        fade_portion = 0.95
+        fade_height = int(gradient_height * fade_portion)
+
+        # 🔹 Тёплый оттенок, слегка янтарный (не чисто чёрный)
+        base_color = (20, 10, 0)  # лёгкий теплый тон
+        steps = fade_height * 2
+
         for i in range(steps):
             progress = i / steps
-            if progress < 0.5:
-                a = 4 * (progress ** 3)
-            else:
-                a = 1 - ((-2 * progress + 2) ** 3) / 2
-            alpha = int(ALPHA_CAP * a)
-            y_pos = gradient_start + int(i * fade_height / steps)
-            draw_overlay.rectangle([(0, y_pos), (width, y_pos + 1)], fill=(0, 0, 0, alpha))
-        img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
 
-        print(f"✓ Smooth gradient: {gradient_percent*100:.0f}% height (fade: {fade_height}px [{steps} steps])")
+            # cubic easing для плавного хода
+            if progress < 0.5:
+                alpha_progress = 4 * progress ** 3
+            else:
+                alpha_progress = 1 - pow(-2 * progress + 2, 3) / 2
+
+            alpha = int(255 * alpha_progress * 0.8)  # не полностью непрозрачно
+            y_pos = gradient_start + int(i * fade_height / steps)
+
+            draw_overlay.rectangle(
+                [(0, y_pos), (width, y_pos + 1)],
+                fill=(base_color[0], base_color[1], base_color[2], alpha)
+            )
+
+        img = img.convert('RGBA')
+        img = Image.alpha_composite(img, overlay)
+        img = img.convert('RGB')
+        print(f"✓ Warm gradient applied: {gradient_percent*100:.0f}% height")
+
         
         draw = ImageDraw.Draw(img)
         
@@ -424,9 +442,9 @@ def process_image():
         # ═══════════════════════════════════════════════════
         # ✅ НОВОЕ: Поднимаем все конструкции вверх (-40px от v8.7)
         if has_long_text:
-            start_y = gradient_start + 100  # Было 180, теперь 140 (-40px)
+            start_y = gradient_start + 400
         else:
-            start_y = gradient_start + 150  # Было 230, теперь 190 (-40px)
+            start_y = gradient_start + 20
         
         if add_logo:
             logo_text = "@neurostep.media"
