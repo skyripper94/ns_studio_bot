@@ -179,8 +179,8 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             size -= 3; fnt = get_font(size, "bold")
             lines = wrap_text(t, fnt, width*0.88, draw, tracking)
         
-        # Фиксированный межстрочный интервал для режима с логотипом
-        line_spacing = int(size * 1.15) if has_logo else 5
+        # Фиксированный межстрочный интервал для режима с логотипом (уменьшен в 2 раза)
+        line_spacing = int(size * 0.575) if has_logo else 5
         
         for line in lines:
             # ширина с учётом tracking
@@ -253,6 +253,9 @@ def process_image():
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
         gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
+        # Дополнительно поднимаем на 20px через увеличение процента
+        extra_pixels = 20 / h
+        gp = min(gp + extra_pixels, 0.70)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
         d = ImageDraw.Draw(img)
