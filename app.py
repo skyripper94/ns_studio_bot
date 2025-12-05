@@ -180,7 +180,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
             lines = wrap_text(t, fnt, width*0.88, draw, tracking)
         
         # Фиксированный межстрочный интервал независимо от размера шрифта
-        line_spacing = 12
+        line_spacing = 6
         
         # Вычисляем высоту одной строки (используем первую строку как эталон)
         bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
@@ -293,7 +293,7 @@ def process_image():
                 if lines:
                     bb = draw.textbbox((0,0), lines[0], font=fnt)
                     line_height = bb[3]-bb[1]
-                    total_h = len(lines) * line_height + (len(lines)-1) * 12
+                    total_h = len(lines) * line_height + (len(lines)-1) * 6
                 
                 if subtitle:
                     total_h += 8  # отступ между title и subtitle
@@ -318,8 +318,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # Центрируем всю конструкцию в середине градиента
-            construction_top = fade_top + (fade_h - total_construction_h) // 2
+            # Центрируем всю конструкцию в середине градиента + 60px вниз
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 60
             
             # Рисуем логотип
             lx = (w-lw)//2
@@ -334,8 +334,8 @@ def process_image():
             print(f"✓ Logo at ({lx},{ly}), Construction height: {total_construction_h}px")
             start_y = ly + lh + 2
         else:
-            # Для изображений без лого центрируем только текст
-            start_y = fade_top + (fade_h - text_height) // 2 + 80  # смещение 80px
+            # Для изображений без лого центрируем только текст + 140px вниз
+            start_y = fade_top + (fade_h - text_height) // 2 + 140
 
         # Гарантия, что текст не упрётся в край (с большим запасом)
         bottom_guard = h - int(fade_h*0.25)
