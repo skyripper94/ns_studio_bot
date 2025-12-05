@@ -255,6 +255,9 @@ def process_image():
         gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
         # Дополнительно поднимаем на 60px через увеличение процента
         extra_pixels = 60 / h
+        # Для изображений БЕЗ лого поднимаем ещё на 15px
+        if not add_logo:
+            extra_pixels = (60 + 15) / h
         gp = min(gp + extra_pixels, 0.70)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
@@ -262,7 +265,9 @@ def process_image():
 
         # 3) Раскладка: якоримся ВНУТРИ фейда в верхней части зоны.
         #    Текст должен быть ближе к верхней части градиента, не к краю.
-        center_in_fade = fade_top + int(fade_h*0.35) + 60  # опускаем на 60px
+        # Для изображений БЕЗ лого опускаем ниже на 90px (60+30)
+        center_offset = 90 if not add_logo else 60
+        center_in_fade = fade_top + int(fade_h*0.35) + center_offset
         top_in_fade    = fade_top + int(fade_h*0.22)  # ещё выше для лого
 
         start_y = center_in_fade  # по умолчанию — в верхней части фейда
