@@ -80,8 +80,8 @@ def build_mask_from_boxes(size, boxes):
 
 def inpaint_or_soft_cover(img: Image.Image, boxes):
     """
-    Удаляет старый текст и накладывает мягкий тёмный градиент для маскировки.
-    Стратегия: затемнение + размытие краёв + локальный градиент поверх.
+    Удаляет старый текст: размытие области + тёмный градиент для маскировки.
+    Стратегия: 1) размываем текст 2) накладываем мягкий градиент поверх.
     """
     if not boxes:
         return img
@@ -95,10 +95,16 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         print("✓ No text to remove (mask empty)")
         return img
 
-    # Конвертируем в RGBA для работы с прозрачностью
-    img_rgba = img.convert("RGBA")
+    # ШАГ 1: Размываем область с текстом для удаления букв
+    # Создаём сильно размытую версию изображения
+    blurred = img.filter(ImageFilter.GaussianBlur(15))
     
-    # Создаём слой затемнения с градиентом
+    # Смешиваем оригинал и размытие по маске (убираем текст)
+    mask_soft = mask.filter(ImageFilter.GaussianBlur(6))
+    img_no_text = Image.composite(blurred, img, mask_soft)
+    
+    # ШАГ 2: Накладываем тёмный градиент поверх для маскировки артефактов
+    img_rgba = img_no_text.convert("RGBA")
     darken_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(darken_layer)
     
@@ -110,8 +116,8 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         xs = [vi.get("x", 0) for vi in v]
         ys = [vi.get("y", 0) for vi in v]
         
-        # Расширяем область на 20px для плавного перехода
-        pad = 20
+        # Расширяем область на 25px для плавного перехода
+        pad = 25
         x1, y1 = max(0, min(xs)-pad), max(0, min(ys)-pad)
         x2, y2 = min(w, max(xs)+pad), min(h, max(ys)+pad)
         
@@ -121,17 +127,17 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         
         box_h = y2 - y1
         # Рисуем вертикальный градиент сверху вниз (от прозрачного к тёмному)
-        steps = max(20, box_h // 2)
+        steps = max(25, box_h // 2)
         for i in range(steps):
             t = i / steps
-            # Плавное нарастание прозрачности (квадратичная функция)
-            alpha = int(120 * (t ** 2))  # максимум 120 (полупрозрачный чёрный)
+            # Плавное нарастание прозрачности (кубическая функция для более мягкого перехода)
+            alpha = int(140 * (t ** 3))  # максимум 140 (более тёмный для лучшей маскировки)
             y_line = y1 + int(i * box_h / steps)
             if y_line < y2:
                 d.rectangle([(x1, y_line), (x2, y_line+2)], fill=(0, 0, 0, alpha))
     
-    # Размываем маску для мягких краёв
-    mask_soft = mask.filter(ImageFilter.GaussianBlur(8))
+    # Размываем градиент для ультра-мягких краёв
+    darken_layer = darken_layer.filter(ImageFilter.GaussianBlur(10))
     
     # Применяем затемнение только в области маски
     darken_masked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -140,7 +146,7 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
     # Композитим слои
     result = Image.alpha_composite(img_rgba, darken_masked)
     
-    print("✓ Soft dark gradient over text areas")
+    print("✓ Text removed with blur + soft dark gradient overlay")
     return result.convert("RGB")
 
 def draw_soft_warm_fade(img: Image.Image, percent: float):
