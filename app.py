@@ -61,7 +61,7 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     """
     Жёстко очищает верхнюю часть изображения от жёлтых полос и текстуры.
     Используется ПОСЛЕ удаления старого текста, ПЕРЕД нанесением нового.
-    Работает в зоне 30-80px над предполагаемым логотипом.
+    Работает в зоне 20-100px над предполагаемым логотипом.
     """
     w, h = img.size
     
@@ -69,10 +69,10 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     if logo_y_estimate is None:
         logo_y_estimate = int(h * 0.52)
     
-    # Зона очистки: 30-80px НАД логотипом (где остаются артефакты после размытия)
-    band_above_header = 80  # px над заголовком для поиска артефактов
+    # Зона очистки: 20-100px НАД логотипом (расширенная зона для полного захвата артефактов)
+    band_above_header = 100  # px над заголовком для поиска артефактов
     clean_zone_start = max(0, logo_y_estimate - band_above_header)
-    clean_zone_end = max(10, logo_y_estimate - 30)  # до 30px перед логотипом
+    clean_zone_end = max(10, logo_y_estimate - 20)  # до 20px перед логотипом
     
     zone_h = clean_zone_end - clean_zone_start
     
@@ -88,30 +88,35 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     if CV2_AVAILABLE:
         zone_hsv = cv2.cvtColor(clean_zone, cv2.COLOR_RGB2HSV)
         
-        # Жёлтый/оранжевый: H=5-30 в OpenCV, S>35, V>35
-        yellow_mask = cv2.inRange(zone_hsv, (5, 35, 35), (30, 255, 255))
+        # Расширенные диапазоны для захвата всех оттенков жёлтого/оранжевого/бежевого
+        # Жёлтый/оранжевый: H=0-35 (было 5-30), S>25 (было 35), V>25 (было 35)
+        yellow_mask = cv2.inRange(zone_hsv, (0, 25, 25), (35, 255, 255))
         
-        # Коричневый: H=0-10, S>25, V>30
-        brown_mask = cv2.inRange(zone_hsv, (0, 25, 30), (10, 255, 210))
+        # Коричневый/бежевый: расширенный диапазон
+        brown_mask = cv2.inRange(zone_hsv, (0, 15, 20), (15, 255, 220))
+        
+        # Светлые тёплые оттенки (часто остаются после размытия)
+        warm_mask = cv2.inRange(zone_hsv, (10, 10, 100), (30, 80, 255))
         
         dirty_mask = cv2.bitwise_or(yellow_mask, brown_mask)
+        dirty_mask = cv2.bitwise_or(dirty_mask, warm_mask)
         
-        # Морфология: open → close → top-hat для полос → dilate
-        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        # Усиленная морфология: open → close → top-hat для полос → dilate
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))  # было 3x3
         dirty_mask = cv2.morphologyEx(dirty_mask, cv2.MORPH_OPEN, kernel_open)
         
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))  # было 9x9
         dirty_mask = cv2.morphologyEx(dirty_mask, cv2.MORPH_CLOSE, kernel_close)
         
-        # Детекция горизонтальных полос (жёлтые линии)
-        kernel_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 1))
+        # Детекция горизонтальных полос (жёлтые линии) — усиленная
+        kernel_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))  # было 30x1
         horiz_lines = cv2.morphologyEx(zone_hsv[:, :, 2], cv2.MORPH_TOPHAT, kernel_horiz)
-        horiz_mask = cv2.threshold(horiz_lines, 25, 255, cv2.THRESH_BINARY)[1]
+        horiz_mask = cv2.threshold(horiz_lines, 20, 255, cv2.THRESH_BINARY)[1]  # порог 20 вместо 25
         dirty_mask = cv2.bitwise_or(dirty_mask, horiz_mask)
         
-        # Расширяем маску горизонтально
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 1))
-        dirty_mask = cv2.dilate(dirty_mask, kernel_dilate, iterations=3)
+        # Расширяем маску горизонтально — сильнее
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 1))  # было 7x1
+        dirty_mask = cv2.dilate(dirty_mask, kernel_dilate, iterations=4)  # было 3
         
         mask_coverage = np.sum(dirty_mask > 0) / dirty_mask.size * 100
         
@@ -160,25 +165,25 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     result_zone = clean_zone.copy()
     
     if CV2_AVAILABLE and np.sum(dirty_mask > 0) > 0:
-        # Inpaint с радиусом 5 для лучшего результата
+        # Inpaint с увеличенным радиусом для лучшего результата
         result_zone_bgr = cv2.cvtColor(result_zone, cv2.COLOR_RGB2BGR)
-        inpainted = cv2.inpaint(result_zone_bgr, dirty_mask, 5, cv2.INPAINT_TELEA)
+        inpainted = cv2.inpaint(result_zone_bgr, dirty_mask, 7, cv2.INPAINT_TELEA)  # радиус 7 вместо 5
         result_zone = cv2.cvtColor(inpainted, cv2.COLOR_BGR2RGB)
-        print(f"✓ Inpaint applied (radius=5)")
+        print(f"✓ Inpaint applied (radius=7)")
     else:
         # Заливка по маске
         mask_bool = dirty_mask > 128
         result_zone[mask_bool] = fill_color
         print("✓ Fill applied")
     
-    # ШАГ 4: Мягкий градиент поверх очищенной зоны
-    gradient_top_color = (fill_color.astype(np.float32) * 0.80).astype(np.uint8)
+    # ШАГ 4: Сильный градиент поверх очищенной зоны (затемняем сильнее)
+    gradient_top_color = (fill_color.astype(np.float32) * 0.70).astype(np.uint8)  # было 0.80
     
     for y in range(zone_h):
         # t: 0 вверху (тёмный) → 1 внизу (прозрачный)
         t = y / zone_h
-        # Квадратичное затухание
-        alpha = ((1 - t) ** 2.2) * 0.65  # максимум 65% затемнения
+        # Квадратичное затухание с увеличенной интенсивностью
+        alpha = ((1 - t) ** 2.0) * 0.75  # максимум 75% вместо 65%
         
         result_zone[y] = (
             result_zone[y].astype(np.float32) * (1 - alpha) + 
