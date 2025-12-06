@@ -57,6 +57,85 @@ def calculate_adaptive_gradient(img, long_text=False):
     print(f"[Adaptive Gradient] Brightness: {avg:.0f}, Gradient: {gp*100:.0f}%")
     return gp
 
+def clean_top_yellow_artifacts(img: Image.Image):
+    """
+    Очищает верхнюю часть изображения (до 30% высоты) от жёлтых/коричневых артефактов
+    и накладывает мягкий вертикальный градиент сверху вниз.
+    """
+    w, h = img.size
+    # Работаем только с верхними 30% изображения
+    top_zone_height = int(h * 0.30)
+    
+    # Конвертируем в numpy для анализа цвета
+    img_array = np.array(img)
+    top_zone = img_array[:top_zone_height, :, :]
+    
+    # Создаём маску для жёлтых/коричневых оттенков в RGB
+    # Жёлтый: R высокий, G высокий, B низкий
+    # Коричневый: R > G > B, всё средние-высокие значения
+    mask = np.zeros((top_zone_height, w), dtype=np.uint8)
+    
+    for y in range(top_zone_height):
+        for x in range(w):
+            r, g, b = top_zone[y, x]
+            # Условия для жёлтых/коричневых оттенков
+            is_yellow = (r > 150 and g > 120 and b < 100 and r - b > 50)
+            is_brown = (r > 100 and g > 70 and b < 80 and r > g > b)
+            
+            if is_yellow or is_brown:
+                mask[y, x] = 255
+    
+    # Расширяем маску для захвата размытых краёв
+    mask_pil = Image.fromarray(mask)
+    mask_pil = mask_pil.filter(ImageFilter.MaxFilter(5))  # расширение
+    mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(8))  # смягчение
+    mask_array = np.array(mask_pil)
+    
+    # Если есть артефакты — удаляем их
+    if mask_array.max() > 10:
+        # Получаем доминирующий цвет верхней зоны (медиана без жёлтых областей)
+        clean_pixels = top_zone[mask_array < 128]
+        if len(clean_pixels) > 0:
+            dominant_color = np.median(clean_pixels, axis=0).astype(np.uint8)
+        else:
+            # Fallback: тёмно-серый
+            dominant_color = np.array([40, 40, 45], dtype=np.uint8)
+        
+        # Заменяем артефакты на доминирующий цвет
+        img_rgba = img.convert("RGBA")
+        fill_layer = Image.new("RGBA", (w, h), tuple(dominant_color) + (255,))
+        
+        # Применяем только в верхней зоне по маске
+        full_mask = Image.new("L", (w, h), 0)
+        full_mask.paste(mask_pil, (0, 0))
+        
+        result = Image.composite(fill_layer, img_rgba, full_mask)
+        img = result.convert("RGB")
+        print(f"✓ Cleaned yellow artifacts in top {top_zone_height}px, dominant color: {dominant_color}")
+    
+    # Накладываем мягкий вертикальный градиент сверху вниз
+    img_rgba = img.convert("RGBA")
+    gradient = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(gradient)
+    
+    # Градиент в верхних 20% высоты (от тёмного к прозрачному)
+    gradient_height = int(h * 0.20)
+    steps = max(50, gradient_height)
+    
+    for i in range(steps):
+        t = i / steps
+        # Квадратичное затухание (темнее вверху, прозрачно внизу)
+        alpha = int(180 * ((1 - t) ** 2))
+        y = int(i * gradient_height / steps)
+        if y < h:
+            d.rectangle([(0, y), (w, y+2)], fill=(15, 15, 20, alpha))
+    
+    # Применяем градиент
+    result = Image.alpha_composite(img_rgba, gradient)
+    print(f"✓ Applied soft top gradient ({gradient_height}px)")
+    
+    return result.convert("RGB")
+
 def build_mask_from_boxes(size, boxes):
     """Возвращает бинарную маску (PIL L) по boundingBoxes."""
     w, h = size
@@ -314,6 +393,9 @@ def process_image():
         # 1) Удаляем старый текст (если есть координаты)
         if boxes:
             img = inpaint_or_soft_cover(img, boxes)
+        
+        # 1.5) Очищаем верхнюю часть от жёлтых артефактов
+        img = clean_top_yellow_artifacts(img)
 
         # 2) Мягкий фейд снизу (поднимаем выше)
         long_text = (len(title)>25) or (len(subtitle)>40)
@@ -431,13 +513,14 @@ def process_image():
 def health():
     return {
         "status": "ok",
-        "version": "NEUROSTEP_v11.0_LAST_MODE",
+        "version": "NEUROSTEP_v12.0_CLEAN_TOP",
         "opencv_available": CV2_AVAILABLE,
         "features": [
+            "✅ NEW: Auto-clean yellow artifacts from top 30% of image",
+            "✅ NEW: Soft vertical gradient overlay on top zone",
             "✅ NEW: 'last' mode - title only without logo",
-            "✅ IMPROVED: OpenCV inpaint with radius=2 (cleaner, no blur)",
-            "✅ IMPROVED: PIL fallback with blur=4 (sharper)",
             "Three modes: logo, normal (title+subtitle), last (title only)",
+            "Text removal: blur + dark gradient overlay",
             "Configurable vertical offsets per mode",
             "Instagram-style warm gradient (42-48%)",
             "Smoother fade transition with extended gradient zone",
