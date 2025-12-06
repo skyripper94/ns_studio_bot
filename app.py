@@ -80,9 +80,8 @@ def build_mask_from_boxes(size, boxes):
 
 def inpaint_or_soft_cover(img: Image.Image, boxes):
     """
-    Удаляет старый текст с улучшенным OpenCV inpaint.
-    С OpenCV — используем TELEA с минимальным радиусом для чёткости.
-    Без OpenCV — fallback через PIL с минимальным размытием.
+    Удаляет старый текст и накладывает мягкий тёмный градиент для маскировки.
+    Стратегия: затемнение + размытие краёв + локальный градиент поверх.
     """
     if not boxes:
         return img
@@ -96,33 +95,53 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         print("✓ No text to remove (mask empty)")
         return img
 
-    if CV2_AVAILABLE:
-        np_img = np.array(img.convert("RGB"))
-        np_mask = np.array(mask)
-        
-        # ✅ УЛУЧШЕННЫЙ INPAINT:
-        # Радиус 2-3 пикселя — минимальное восстановление, без мыла
-        # TELEA даёт более органичный результат чем NS
-        repaired = cv2.inpaint(np_img, np_mask, inpaintRadius=2, flags=cv2.INPAINT_TELEA)
-        
-        print("✓ Inpaint (OpenCV TELEA, radius=2)")
-        return Image.fromarray(repaired)
-
-    # Fallback PIL: минимальное размытие + лёгкий шум
-    # Используем меньший blur для сохранения резкости
-    blurred = img.filter(ImageFilter.GaussianBlur(4))
+    # Конвертируем в RGBA для работы с прозрачностью
+    img_rgba = img.convert("RGBA")
     
-    # Добавляем очень лёгкий шум для естественности
-    noise = np.random.randint(-4, 5, (h, w, 3), dtype=np.int16)
-    base = np.array(blurred).astype(np.int16)
-    soft = np.clip(base + noise, 0, 255).astype(np.uint8)
-    soft_img = Image.fromarray(soft)
+    # Создаём слой затемнения с градиентом
+    darken_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(darken_layer)
     
-    # Смешиваем по маске с более мягким переходом
-    mask_soft = mask.filter(ImageFilter.GaussianBlur(3))
-    out = Image.composite(soft_img, img, mask_soft)
-    print("✓ Soft cover (PIL fallback, blur=4)")
-    return out
+    # Для каждого бокса рисуем локальный градиент
+    for b in boxes:
+        v = b.get("vertices", [])
+        if len(v) < 4: 
+            continue
+        xs = [vi.get("x", 0) for vi in v]
+        ys = [vi.get("y", 0) for vi in v]
+        
+        # Расширяем область на 20px для плавного перехода
+        pad = 20
+        x1, y1 = max(0, min(xs)-pad), max(0, min(ys)-pad)
+        x2, y2 = min(w, max(xs)+pad), min(h, max(ys)+pad)
+        
+        # Пропускаем верхнюю половину изображения
+        if y1 < h*0.45:
+            continue
+        
+        box_h = y2 - y1
+        # Рисуем вертикальный градиент сверху вниз (от прозрачного к тёмному)
+        steps = max(20, box_h // 2)
+        for i in range(steps):
+            t = i / steps
+            # Плавное нарастание прозрачности (квадратичная функция)
+            alpha = int(120 * (t ** 2))  # максимум 120 (полупрозрачный чёрный)
+            y_line = y1 + int(i * box_h / steps)
+            if y_line < y2:
+                d.rectangle([(x1, y_line), (x2, y_line+2)], fill=(0, 0, 0, alpha))
+    
+    # Размываем маску для мягких краёв
+    mask_soft = mask.filter(ImageFilter.GaussianBlur(8))
+    
+    # Применяем затемнение только в области маски
+    darken_masked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    darken_masked.paste(darken_layer, mask=mask_soft)
+    
+    # Композитим слои
+    result = Image.alpha_composite(img_rgba, darken_masked)
+    
+    print("✓ Soft dark gradient over text areas")
+    return result.convert("RGB")
 
 def draw_soft_warm_fade(img: Image.Image, percent: float):
     """Мягкий градиент с однотонным черным внизу и плавным переходом вверх."""
