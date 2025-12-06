@@ -68,41 +68,60 @@ def build_mask_from_boxes(size, boxes):
             continue
         xs = [vi.get("x", 0) for vi in v]
         ys = [vi.get("y", 0) for vi in v]
-        pad_x, pad_y = 16, 20
+        pad_x, pad_y = 12, 14  # Уменьшенный padding для более точной маски
         x1, y1 = max(0, min(xs)-pad_x), max(0, min(ys)-pad_y)
         x2, y2 = min(w, max(xs)+pad_x), min(h, max(ys)+pad_y)
         # Только нижняя половина — убираем оверкилл
         if y1 < h*0.45:
             continue
         d.rectangle([(x1,y1),(x2,y2)], fill=255)
-    # Смягчаем края маски, чтобы не было «ступенек»
-    return mask.filter(ImageFilter.GaussianBlur(6))
+    # Смягчаем края маски минимально, чтобы не было «ступенек»
+    return mask.filter(ImageFilter.GaussianBlur(4))
 
 def inpaint_or_soft_cover(img: Image.Image, boxes):
-    """Удаляет старый текст. С OpenCV — inpaint; без него — мягкое закрытие PIL."""
+    """
+    Удаляет старый текст с улучшенным OpenCV inpaint.
+    С OpenCV — используем TELEA с минимальным радиусом для чёткости.
+    Без OpenCV — fallback через PIL с минимальным размытием.
+    """
     if not boxes:
         return img
 
     w, h = img.size
     mask = build_mask_from_boxes((w,h), boxes)
+    
+    # Проверяем, есть ли что удалять
+    mask_arr = np.array(mask)
+    if mask_arr.max() == 0:
+        print("✓ No text to remove (mask empty)")
+        return img
 
     if CV2_AVAILABLE:
         np_img = np.array(img.convert("RGB"))
         np_mask = np.array(mask)
-        # Алгоритм TELEA даёт более органичный залив
-        repaired = cv2.inpaint(np_img, np_mask, 3, cv2.INPAINT_TELEA)
-        print("✓ Inpaint (OpenCV)")
+        
+        # ✅ УЛУЧШЕННЫЙ INPAINT:
+        # Радиус 2-3 пикселя — минимальное восстановление, без мыла
+        # TELEA даёт более органичный результат чем NS
+        repaired = cv2.inpaint(np_img, np_mask, inpaintRadius=2, flags=cv2.INPAINT_TELEA)
+        
+        print("✓ Inpaint (OpenCV TELEA, radius=2)")
         return Image.fromarray(repaired)
 
-    # Fallback: лёгкий «контентный» бленд — блюрим источник и смешиваем по маске
-    blurred = img.filter(ImageFilter.GaussianBlur(7))
-    # Добавляем легкий шум, чтобы убрать «пластик»
-    noise = np.random.randint(-7, 8, (h, w, 3), dtype=np.int16)
+    # Fallback PIL: минимальное размытие + лёгкий шум
+    # Используем меньший blur для сохранения резкости
+    blurred = img.filter(ImageFilter.GaussianBlur(4))
+    
+    # Добавляем очень лёгкий шум для естественности
+    noise = np.random.randint(-4, 5, (h, w, 3), dtype=np.int16)
     base = np.array(blurred).astype(np.int16)
     soft = np.clip(base + noise, 0, 255).astype(np.uint8)
     soft_img = Image.fromarray(soft)
-    out = Image.composite(soft_img, img, mask)
-    print("✓ Soft cover (PIL fallback)")
+    
+    # Смешиваем по маске с более мягким переходом
+    mask_soft = mask.filter(ImageFilter.GaussianBlur(3))
+    out = Image.composite(soft_img, img, mask_soft)
+    print("✓ Soft cover (PIL fallback, blur=4)")
     return out
 
 def draw_soft_warm_fade(img: Image.Image, percent: float):
@@ -237,15 +256,26 @@ def process_image():
         subtitle  = data.get("subtitle","")
         boxes     = data.get("boundingBoxes", []) or data.get("boundingboxes", [])
         add_logo  = bool(data.get("addLogo", False))
+        
+        # ✅ НОВЫЙ РЕЖИМ "last" - только title, без logo и без subtitle
+        mode = data.get("mode", "").lower()
+        is_last_mode = (mode == "last")
 
-        if add_logo:
+        # Определяем режим работы
+        if is_last_mode:
+            subtitle = ""  # В режиме last — только заголовок
+            add_logo = False
+            print("[Processing] LAST MODE: title only, no logo, no subtitle")
+        elif add_logo:
             subtitle = ""  # в режиме лого — только заголовок
-            print("[Processing] Logo mode: subtitle disabled")
+            print("[Processing] LOGO MODE: subtitle disabled")
+        else:
+            print("[Processing] NORMAL MODE: title + subtitle")
 
         if not title and not subtitle:
             title = data.get("text","ЗАГОЛОВОК")
 
-        print(f"[Processing] Title:'{title}', Subtitle:'{subtitle}', Logo:{add_logo}")
+        print(f"[Processing] Title:'{title}', Subtitle:'{subtitle}', Logo:{add_logo}, Mode:{mode or 'normal'}")
 
         img = Image.open(io.BytesIO(base64.b64decode(img_b64))).convert("RGB")
         w, h = img.size
@@ -264,18 +294,22 @@ def process_image():
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
         gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
-        # Дополнительно поднимаем на 60px через увеличение процента
+        
+        # Дополнительные пиксели в зависимости от режима
         extra_pixels = 60 / h
-        # Для изображений БЕЗ лого поднимаем ещё на 15px
-        if not add_logo:
-            extra_pixels = (60 + 15) / h
+        if not add_logo and not is_last_mode:
+            # Режим title + subtitle - поднимаем на 75px
+            extra_pixels = 75 / h
+        elif is_last_mode:
+            # Режим LAST - опускаем ниже (меньше extra_pixels)
+            extra_pixels = 40 / h
+            
         gp = min(gp + extra_pixels, 0.70)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
         d = ImageDraw.Draw(img)
 
         # 3) Вычисляем высоту текстового блока для центрирования
-        # Предварительный расчет высоты title+subtitle
         def calculate_text_height(title, subtitle, width, draw):
             total_h = 0
             if title:
@@ -309,7 +343,9 @@ def process_image():
         text_height = calculate_text_height(title, subtitle, w, d)
         
         # 4) Логотип и центрирование конструкции
+        # ✅ НАСТРАИВАЕМЫЕ СМЕЩЕНИЯ ДЛЯ КАЖДОГО РЕЖИМА
         if add_logo:
+            # РЕЖИМ LOGO: логотип + title
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
@@ -318,8 +354,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # Центрируем всю конструкцию в середине градиента + 60px вниз
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 60
+            # ✅ Центрируем + смещаем ВНИЗ на 80px (было 60)
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 80
             
             # Рисуем логотип
             lx = (w-lw)//2
@@ -333,9 +369,16 @@ def process_image():
             d.rectangle([(lx+lw+8, line_y), (lx+lw+8+line_len, line_y+1)], fill=(0,188,212,255))
             print(f"✓ Logo at ({lx},{ly}), Construction height: {total_construction_h}px")
             start_y = ly + lh + 2
+            
+        elif is_last_mode:
+            # ✅ РЕЖИМ LAST: только title, смещаем ВНИЗ на 160px
+            start_y = fade_top + (fade_h - text_height) // 2 + 160
+            print(f"✓ LAST MODE: title only, offset +160px")
+            
         else:
-            # Для изображений без лого центрируем только текст + 140px вниз
+            # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 140px
             start_y = fade_top + (fade_h - text_height) // 2 + 140
+            print(f"✓ NORMAL MODE: title + subtitle, offset +140px")
 
         # Гарантия, что текст не упрётся в край (с большим запасом)
         bottom_guard = h - int(fade_h*0.25)
@@ -363,15 +406,17 @@ def process_image():
 def health():
     return {
         "status": "ok",
-        "version": "NEUROSTEP_v10.1_ELEVATED_FADE",
+        "version": "NEUROSTEP_v11.0_LAST_MODE",
+        "opencv_available": CV2_AVAILABLE,
         "features": [
-            "OpenCV inpaint (optional) + PIL soft cover fallback",
-            "Instagram-style warm gradient (brownish-orange undertone, 42-48%)",
+            "✅ NEW: 'last' mode - title only without logo",
+            "✅ IMPROVED: OpenCV inpaint with radius=2 (cleaner, no blur)",
+            "✅ IMPROVED: PIL fallback with blur=4 (sharper)",
+            "Three modes: logo, normal (title+subtitle), last (title only)",
+            "Configurable vertical offsets per mode",
+            "Instagram-style warm gradient (42-48%)",
             "Smoother fade transition with extended gradient zone",
-            "Text positioned in upper fade area for better visibility",
-            "Harmonious spacing: logo→title (14px), title→subtitle (16px)",
-            "Adaptive fade height based on image brightness and text length",
-            "Tighter cyan/white typography, tracking -1, wrap & line gap",
+            "Tighter cyan/white typography, tracking -1",
             "Safety bottom guard; tiny bottom bar (1.2%)",
         ],
     }
