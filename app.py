@@ -59,97 +59,154 @@ def calculate_adaptive_gradient(img, long_text=False):
 
 def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     """
-    Очищает узкую полосу 30-50px над логотипом от жёлтых/коричневых артефактов
-    и накладывает мягкий вертикальный градиент.
+    Жёстко очищает верхнюю часть изображения от жёлтых полос и текстуры.
+    Работает в зоне 0-30% высоты, особенно 30-60px над заголовком.
     """
     w, h = img.size
+    max_top_ratio = 0.30
+    max_top_px = int(h * max_top_ratio)
+    line_band_top_px = int(h * 0.04)  # верхние 4% для тонких линий
+    band_above_header = 60  # px над заголовком
+    feather = 28  # перо для плавного перехода
+    inpaint_radius = 4
     
-    # Оцениваем положение логотипа (примерно 15-20% от верха для нижнего градиента)
-    if logo_y_estimate is None:
-        # Логотип обычно рисуется в зоне fade_top + смещение
-        # Приблизительно это 40-50% высоты изображения
-        logo_y_estimate = int(h * 0.45)
+    # Конвертируем в numpy (RGB)
+    img_np = np.array(img)
     
-    # Работаем только с полосой 30-50px НАД логотипом
-    detection_zone_height = 50  # высота зоны детекции
-    zone_start = max(0, logo_y_estimate - detection_zone_height - 30)  # 30px запас сверху лого
-    zone_end = max(50, logo_y_estimate - 30)  # до 30px перед логотипом
+    # ШАГ 1: Поиск базовой линии заголовка по бирюзовому тексту
+    baseline_y = int(h * 0.70) if logo_y_estimate is None else logo_y_estimate
     
-    # Конвертируем в numpy для анализа цвета
-    img_array = np.array(img)
-    detection_zone = img_array[zone_start:zone_end, :, :]
-    zone_height = zone_end - zone_start
-    
-    if zone_height <= 0:
-        print("✓ Skip artifact cleaning (invalid zone)")
-        return img
-    
-    # Создаём маску для жёлтых/коричневых оттенков в RGB
-    mask = np.zeros((zone_height, w), dtype=np.uint8)
-    
-    for y in range(zone_height):
-        for x in range(w):
-            r, g, b = detection_zone[y, x]
-            # Условия для жёлтых/коричневых оттенков
-            is_yellow = (r > 150 and g > 120 and b < 100 and r - b > 50)
-            is_brown = (r > 100 and g > 70 and b < 80 and r > g > b)
-            
-            if is_yellow or is_brown:
-                mask[y, x] = 255
-    
-    # Расширяем маску для захвата размытых краёв
-    mask_pil = Image.fromarray(mask)
-    mask_pil = mask_pil.filter(ImageFilter.MaxFilter(3))  # меньшее расширение
-    mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(5))  # смягчение
-    mask_array = np.array(mask_pil)
-    
-    # Если есть артефакты — удаляем их
-    if mask_array.max() > 10:
-        # Получаем доминирующий цвет зоны (медиана без жёлтых областей)
-        clean_pixels = detection_zone[mask_array < 128]
-        if len(clean_pixels) > 0:
-            dominant_color = np.median(clean_pixels, axis=0).astype(np.uint8)
-        else:
-            # Fallback: тёмный оттенок
-            dominant_color = np.array([35, 35, 40], dtype=np.uint8)
-        
-        # Заменяем артефакты на доминирующий цвет
-        img_rgba = img.convert("RGBA")
-        fill_layer = Image.new("RGBA", (w, h), tuple(dominant_color) + (255,))
-        
-        # Применяем только в зоне детекции
-        full_mask = Image.new("L", (w, h), 0)
-        full_mask.paste(mask_pil, (0, zone_start))
-        
-        result = Image.composite(fill_layer, img_rgba, full_mask)
-        img = result.convert("RGB")
-        print(f"✓ Cleaned yellow artifacts in zone [{zone_start}:{zone_end}]px, color: {dominant_color}")
-        
-        # Накладываем лёгкий градиент ТОЛЬКО в зоне очистки + 20px сверху
-        img_rgba = img.convert("RGBA")
-        gradient = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        d = ImageDraw.Draw(gradient)
-        
-        # Градиент от начала зоны до её конца + небольшой запас
-        gradient_start = max(0, zone_start - 20)
-        gradient_height = (zone_end - gradient_start) + 30  # +30px запас вниз
-        steps = max(30, gradient_height)
-        
-        for i in range(steps):
-            t = i / steps
-            # Квадратичное затухание (темнее вверху, прозрачно внизу)
-            alpha = int(160 * ((1 - t) ** 2.5))  # более резкое затухание
-            y = gradient_start + int(i * gradient_height / steps)
-            if 0 <= y < h:
-                d.rectangle([(0, y), (w, y+2)], fill=(10, 10, 15, alpha))
-        
-        # Применяем градиент
-        result = Image.alpha_composite(img_rgba, gradient)
-        print(f"✓ Applied localized gradient [{gradient_start}:{gradient_start+gradient_height}]px")
-        return result.convert("RGB")
+    if CV2_AVAILABLE:
+        hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+        # Бирюзовый/cyan: H=80-100 в OpenCV (0-180 scale), S>50, V>100
+        cyan_mask = cv2.inRange(hsv, (80, 50, 100), (100, 255, 255))
+        rows_with_cyan = np.where(cyan_mask.any(axis=1))[0]
+        if len(rows_with_cyan) > 0:
+            baseline_y = int(rows_with_cyan[0])
+            print(f"✓ Found cyan baseline at y={baseline_y}")
     else:
-        print(f"✓ No yellow artifacts detected in zone [{zone_start}:{zone_end}]px")
+        # Fallback: ищем яркие голубые пиксели
+        for y in range(max_top_px, h):
+            row = img_np[y, :, :]
+            cyan_pixels = np.sum((row[:, 2] > row[:, 0]) & (row[:, 1] > row[:, 0]) & (row[:, 2] > 150))
+            if cyan_pixels > w * 0.05:
+                baseline_y = y
+                print(f"✓ Found approximate baseline at y={baseline_y}")
+                break
+    
+    # ШАГ 2: Определение целевой зоны очистки
+    zone_header_start = max(0, baseline_y - band_above_header)
+    zone_header_end = max(0, baseline_y - 2)
+    clean_zone_end = min(zone_header_end, max_top_px)
+    
+    if clean_zone_end <= 0:
+        print("⚠️ Clean zone empty, skipping")
         return img
+    
+    clean_zone = img_np[0:clean_zone_end, :, :]
+    zone_h = clean_zone_end
+    
+    # ШАГ 3: Построение маски грязных пикселей (жёлтый/оранжевый)
+    if CV2_AVAILABLE:
+        zone_hsv = cv2.cvtColor(clean_zone, cv2.COLOR_RGB2HSV)
+        yellow_mask = cv2.inRange(zone_hsv, (5, 40, 40), (25, 255, 255))
+        brown_mask = cv2.inRange(zone_hsv, (0, 30, 30), (10, 255, 200))
+        dirty_mask = cv2.bitwise_or(yellow_mask, brown_mask)
+        
+        # Морфология: open → close → top-hat для полос → dilate
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        dirty_mask = cv2.morphologyEx(dirty_mask, cv2.MORPH_OPEN, kernel_open)
+        
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        dirty_mask = cv2.morphologyEx(dirty_mask, cv2.MORPH_CLOSE, kernel_close)
+        
+        kernel_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 1))
+        horiz_lines = cv2.morphologyEx(zone_hsv[:, :, 2], cv2.MORPH_TOPHAT, kernel_horiz)
+        horiz_mask = cv2.threshold(horiz_lines, 30, 255, cv2.THRESH_BINARY)[1]
+        dirty_mask = cv2.bitwise_or(dirty_mask, horiz_mask)
+        
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1))
+        dirty_mask = cv2.dilate(dirty_mask, kernel_dilate, iterations=2)
+        
+        mask_coverage = np.sum(dirty_mask > 0) / dirty_mask.size * 100
+    else:
+        # Fallback без OpenCV
+        dirty_mask = np.zeros((zone_h, w), dtype=np.uint8)
+        for y in range(zone_h):
+            for x in range(w):
+                r, g, b = clean_zone[y, x]
+                is_yellow = (r > 150 and g > 100 and b < 100 and r - b > 50)
+                is_orange = (r > 100 and g > 70 and b < 90 and r > g > b)
+                if is_yellow or is_orange:
+                    dirty_mask[y, x] = 255
+        
+        mask_pil = Image.fromarray(dirty_mask)
+        mask_pil = mask_pil.filter(ImageFilter.MaxFilter(5))
+        mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(3))
+        dirty_mask = np.array(mask_pil)
+        mask_coverage = np.sum(dirty_mask > 0) / dirty_mask.size * 100
+    
+    print(f"[Mask] Dirty pixels: {mask_coverage:.2f}% in zone 0-{clean_zone_end}px")
+    
+    # ШАГ 4: Получение цвета заливки (из полосы baseline - 40...20 px)
+    sample_start = max(0, baseline_y - 40)
+    sample_end = max(10, baseline_y - 20)
+    if sample_end > sample_start and sample_end <= h:
+        sample_zone = img_np[sample_start:sample_end, :, :]
+        sample_flat = sample_zone.reshape(-1, 3)
+        non_yellow = sample_flat[~((sample_flat[:, 0] > sample_flat[:, 1]) & 
+                                    (sample_flat[:, 1] > sample_flat[:, 2]) & 
+                                    (sample_flat[:, 0] - sample_flat[:, 2] > 40))]
+        fill_color = np.median(non_yellow, axis=0).astype(np.uint8) if len(non_yellow) > 0 else np.median(sample_flat, axis=0).astype(np.uint8)
+    else:
+        fill_color = np.array([30, 30, 35], dtype=np.uint8)
+    
+    # ШАГ 5: Очистка (inpaint или заливка)
+    result_zone = clean_zone.copy()
+    
+    if CV2_AVAILABLE and np.sum(dirty_mask > 0) > 0:
+        result_zone_bgr = cv2.cvtColor(result_zone, cv2.COLOR_RGB2BGR)
+        inpainted = cv2.inpaint(result_zone_bgr, dirty_mask, inpaint_radius, cv2.INPAINT_TELEA)
+        result_zone = cv2.cvtColor(inpainted, cv2.COLOR_BGR2RGB)
+        print(f"✓ Inpaint applied (radius={inpaint_radius})")
+    else:
+        mask_bool = dirty_mask > 128
+        result_zone[mask_bool] = fill_color
+        print("✓ Fill applied")
+    
+    # Если маска слабая, затемняем всю зону
+    if mask_coverage < 5.0:
+        result_zone = (result_zone.astype(np.float32) * 0.85).astype(np.uint8)
+    
+    # ШАГ 6: Градиент сверху (от тёмного к прозрачному)
+    gradient_height = max(clean_zone_end, feather * 2)
+    gradient_top_color = (fill_color.astype(np.float32) * 0.85).astype(np.uint8)
+    
+    for y in range(min(gradient_height, zone_h)):
+        t = y / gradient_height
+        alpha = (1 - t) ** 2
+        result_zone[y] = (
+            result_zone[y].astype(np.float32) * (1 - alpha * 0.7) + 
+            gradient_top_color.astype(np.float32) * (alpha * 0.7)
+        ).astype(np.uint8)
+    
+    # ШАГ 7: Перо на нижней границе
+    feather_start = max(0, zone_h - feather)
+    for y in range(feather_start, zone_h):
+        t = (y - feather_start) / feather
+        blend = t ** 1.5
+        orig_row = clean_zone[y]
+        result_zone[y] = (
+            result_zone[y].astype(np.float32) * (1 - blend) + 
+            orig_row.astype(np.float32) * blend
+        ).astype(np.uint8)
+    
+    # ШАГ 8: Собираем результат
+    result_np = img_np.copy()
+    result_np[0:clean_zone_end, :, :] = result_zone
+    
+    print(f"✓ Top cleaned: 0-{clean_zone_end}px, baseline at {baseline_y}px")
+    return Image.fromarray(result_np)
 
 def build_mask_from_boxes(size, boxes):
     """Возвращает бинарную маску (PIL L) по boundingBoxes."""
@@ -528,18 +585,17 @@ def process_image():
 def health():
     return {
         "status": "ok",
-        "version": "NEUROSTEP_v12.0_CLEAN_TOP",
+        "version": "NEUROSTEP_v13.0_HARD_CLEAN",
         "opencv_available": CV2_AVAILABLE,
         "features": [
-            "✅ NEW: Auto-clean yellow artifacts from top 30% of image",
-            "✅ NEW: Soft vertical gradient overlay on top zone",
-            "✅ NEW: 'last' mode - title only without logo",
+            "✅ NEW: Hard clean top zone (0-30%) with inpaint + morphology",
+            "✅ NEW: Auto-detect cyan baseline for precise zone targeting",
+            "✅ NEW: Horizontal line detection with top-hat morphology",
+            "✅ NEW: Feathered gradient transition (28px)",
+            "'last' mode - title only without logo",
             "Three modes: logo, normal (title+subtitle), last (title only)",
             "Text removal: blur + dark gradient overlay",
-            "Configurable vertical offsets per mode",
             "Instagram-style warm gradient (42-48%)",
-            "Smoother fade transition with extended gradient zone",
-            "Tighter cyan/white typography, tracking -1",
             "Safety bottom guard; tiny bottom bar (1.2%)",
         ],
     }
