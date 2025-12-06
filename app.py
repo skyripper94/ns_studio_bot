@@ -69,10 +69,10 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     if logo_y_estimate is None:
         logo_y_estimate = int(h * 0.52)
     
-    # Узкая зона очистки: только там где артефакты от старого текста
-    band_above_header = 70  # px над заголовком для поиска артефактов
+    # Расширенная зона очистки: захватываем все артефакты от старого текста
+    band_above_header = 120  # px над заголовком для поиска артефактов
     clean_zone_start = max(0, logo_y_estimate - band_above_header)
-    clean_zone_end = max(10, logo_y_estimate - 25)  # до 25px перед логотипом
+    clean_zone_end = max(10, logo_y_estimate - 15)  # до 15px перед логотипом
     
     zone_h = clean_zone_end - clean_zone_start
     
@@ -88,28 +88,35 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     if CV2_AVAILABLE:
         zone_hsv = cv2.cvtColor(clean_zone, cv2.COLOR_RGB2HSV)
         
-        # Только явно жёлтые/оранжевые пиксели (не трогаем нормальные оттенки)
-        # Жёлтый: H=10-30, S>50, V>60 (более строгие критерии)
-        yellow_mask = cv2.inRange(zone_hsv, (10, 50, 60), (30, 255, 255))
+        # Агрессивная детекция всех жёлтых/оранжевых/бежевых оттенков
+        # Жёлтый: расширенный диапазон H=8-32, S>30, V>40
+        yellow_mask = cv2.inRange(zone_hsv, (8, 30, 40), (32, 255, 255))
         
-        # Оранжевый: H=5-15, S>60, V>70
-        orange_mask = cv2.inRange(zone_hsv, (5, 60, 70), (15, 255, 255))
+        # Оранжевый: H=3-18, S>35, V>45
+        orange_mask = cv2.inRange(zone_hsv, (3, 35, 45), (18, 255, 255))
+        
+        # Светло-бежевый (частые артефакты размытия)
+        beige_mask = cv2.inRange(zone_hsv, (15, 20, 80), (30, 100, 255))
         
         dirty_mask = cv2.bitwise_or(yellow_mask, orange_mask)
+        dirty_mask = cv2.bitwise_or(dirty_mask, beige_mask)
         
-        # Лёгкая морфология: только убираем шум
+        # Усиленная морфология: убираем шум + соединяем близкие области
         kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         dirty_mask = cv2.morphologyEx(dirty_mask, cv2.MORPH_OPEN, kernel_open)
         
-        # Детекция горизонтальных полос (жёлтые линии)
-        kernel_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 1))
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        dirty_mask = cv2.morphologyEx(dirty_mask, cv2.MORPH_CLOSE, kernel_close)
+        
+        # Детекция горизонтальных полос (жёлтые линии) — усиленная
+        kernel_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 1))
         horiz_lines = cv2.morphologyEx(zone_hsv[:, :, 2], cv2.MORPH_TOPHAT, kernel_horiz)
-        horiz_mask = cv2.threshold(horiz_lines, 30, 255, cv2.THRESH_BINARY)[1]
+        horiz_mask = cv2.threshold(horiz_lines, 22, 255, cv2.THRESH_BINARY)[1]
         dirty_mask = cv2.bitwise_or(dirty_mask, horiz_mask)
         
-        # Минимальное расширение только горизонтально (для линий)
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1))
-        dirty_mask = cv2.dilate(dirty_mask, kernel_dilate, iterations=2)
+        # Расширяем маску горизонтально — сильнее
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (8, 1))
+        dirty_mask = cv2.dilate(dirty_mask, kernel_dilate, iterations=3)
         
         mask_coverage = np.sum(dirty_mask > 0) / dirty_mask.size * 100
         
@@ -158,11 +165,11 @@ def clean_top_yellow_artifacts(img: Image.Image, logo_y_estimate=None):
     result_zone = clean_zone.copy()
     
     if CV2_AVAILABLE and np.sum(dirty_mask > 0) > 0:
-        # Inpaint с умеренным радиусом — только замазываем артефакты
+        # Inpaint с увеличенным радиусом для лучшей очистки
         result_zone_bgr = cv2.cvtColor(result_zone, cv2.COLOR_RGB2BGR)
-        inpainted = cv2.inpaint(result_zone_bgr, dirty_mask, 5, cv2.INPAINT_TELEA)
+        inpainted = cv2.inpaint(result_zone_bgr, dirty_mask, 8, cv2.INPAINT_TELEA)
         result_zone = cv2.cvtColor(inpainted, cv2.COLOR_BGR2RGB)
-        print(f"✓ Inpaint applied (radius=5)")
+        print(f"✓ Inpaint applied (radius=8)")
     else:
         # Заливка по маске
         mask_bool = dirty_mask > 128
@@ -466,18 +473,18 @@ def process_image():
         # 2) Мягкий фейд снизу (поднимаем выше)
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
-        gp = min(gp + 0.10, 0.65)  # поднимаем градиент на 10% выше
+        gp = min(gp + 0.15, 0.68)  # поднимаем градиент на 15% выше (было 10%)
         
         # Дополнительные пиксели в зависимости от режима
-        extra_pixels = 60 / h
+        extra_pixels = 80 / h  # было 60
         if not add_logo and not is_last_mode:
-            # Режим title + subtitle - поднимаем на 75px
-            extra_pixels = 75 / h
+            # Режим title + subtitle - поднимаем на 95px (было 75px)
+            extra_pixels = 95 / h
         elif is_last_mode:
             # Режим LAST - опускаем ниже (меньше extra_pixels)
-            extra_pixels = 40 / h
+            extra_pixels = 55 / h  # было 40
             
-        gp = min(gp + extra_pixels, 0.70)
+        gp = min(gp + extra_pixels, 0.72)  # было 0.70
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
         d = ImageDraw.Draw(img)
