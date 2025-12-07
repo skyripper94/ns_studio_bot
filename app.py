@@ -240,7 +240,7 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         print("✓ No text to remove (mask empty)")
         return img
 
-    # ШАГ 1: Размываем область с текстом для удаления букв
+    # ШАГ 1: Размываем область с текстом для удаления букв (БЕЗ градиента!)
     # Создаём сильно размытую версию изображения
     blurred = img.filter(ImageFilter.GaussianBlur(15))
     
@@ -248,51 +248,8 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
     mask_soft = mask.filter(ImageFilter.GaussianBlur(6))
     img_no_text = Image.composite(blurred, img, mask_soft)
     
-    # ШАГ 2: Накладываем тёмный градиент поверх для маскировки артефактов
-    img_rgba = img_no_text.convert("RGBA")
-    darken_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(darken_layer)
-    
-    # Для каждого бокса рисуем локальный градиент
-    for b in boxes:
-        v = b.get("vertices", [])
-        if len(v) < 4: 
-            continue
-        xs = [vi.get("x", 0) for vi in v]
-        ys = [vi.get("y", 0) for vi in v]
-        
-        # Расширяем область на 25px для плавного перехода
-        pad = 25
-        x1, y1 = max(0, min(xs)-pad), max(0, min(ys)-pad)
-        x2, y2 = min(w, max(xs)+pad), min(h, max(ys)+pad)
-        
-        # Пропускаем верхнюю половину изображения
-        if y1 < h*0.45:
-            continue
-        
-        box_h = y2 - y1
-        # Рисуем вертикальный градиент сверху вниз (от прозрачного к тёмному)
-        steps = max(25, box_h // 2)
-        for i in range(steps):
-            t = i / steps
-            # Плавное нарастание прозрачности (кубическая функция для более мягкого перехода)
-            alpha = int(140 * (t ** 3))  # максимум 140 (более тёмный для лучшей маскировки)
-            y_line = y1 + int(i * box_h / steps)
-            if y_line < y2:
-                d.rectangle([(x1, y_line), (x2, y_line+2)], fill=(0, 0, 0, alpha))
-    
-    # Размываем градиент для ультра-мягких краёв
-    darken_layer = darken_layer.filter(ImageFilter.GaussianBlur(10))
-    
-    # Применяем затемнение только в области маски
-    darken_masked = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    darken_masked.paste(darken_layer, mask=mask_soft)
-    
-    # Композитим слои
-    result = Image.alpha_composite(img_rgba, darken_masked)
-    
-    print("✓ Text removed with blur + soft dark gradient overlay")
-    return result.convert("RGB")
+    print("✓ Text removed with blur only (no gradient artifacts)")
+    return img_no_text
 
 def draw_soft_warm_fade(img: Image.Image, percent: float):
     """Мягкий градиент с однотонным черным внизу и плавным переходом вверх."""
@@ -463,21 +420,25 @@ def process_image():
             # Передаём примерное положение где будет логотип (50-55% высоты)
             img = clean_top_yellow_artifacts(img, logo_y_estimate=int(h * 0.52))
 
-        # 2) Мягкий фейд снизу (поднимаем ЕЩЁ выше)
+        # 2) Мягкий фейд снизу (индивидуально для каждого режима)
         long_text = (len(title)>25) or (len(subtitle)>40)
         gp = calculate_adaptive_gradient(img, long_text)
-        gp = min(gp + 0.20, 0.70)  # поднимаем градиент на 20% выше (было 15%)
         
-        # Дополнительные пиксели в зависимости от режима
-        extra_pixels = 100 / h  # было 80
-        if not add_logo and not is_last_mode:
-            # Режим title + subtitle - поднимаем на 115px (было 95px)
-            extra_pixels = 115 / h
+        # Настройки градиента для каждого режима
+        if add_logo:
+            # LOGO режим: градиент выше +22%
+            gp = min(gp + 0.22, 0.73)
+            extra_pixels = 110 / h
         elif is_last_mode:
-            # Режим LAST - опускаем ниже (меньше extra_pixels)
-            extra_pixels = 70 / h  # было 55
+            # LAST режим: градиент ещё выше +25%
+            gp = min(gp + 0.25, 0.76)
+            extra_pixels = 90 / h
+        else:
+            # NORMAL режим: градиент меньше +8%
+            gp = min(gp + 0.08, 0.62)
+            extra_pixels = 85 / h
             
-        gp = min(gp + extra_pixels, 0.75)  # было 0.72
+        gp = min(gp + extra_pixels, 0.78)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
         d = ImageDraw.Draw(img)
@@ -518,7 +479,7 @@ def process_image():
         # 4) Логотип и центрирование конструкции
         # ✅ НАСТРАИВАЕМЫЕ СМЕЩЕНИЯ ДЛЯ КАЖДОГО РЕЖИМА
         if add_logo:
-            # РЕЖИМ LOGO: логотип + title
+            # РЕЖИМ LOGO: логотип + title (текст НИЖЕ)
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
@@ -527,8 +488,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # ✅ Центрируем + смещаем ВНИЗ на 80px (было 60)
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 80
+            # ✅ Центрируем + смещаем ВНИЗ на 100px (было 80) - текст ниже
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 100
             
             # Рисуем логотип
             lx = (w-lw)//2
@@ -544,12 +505,12 @@ def process_image():
             start_y = ly + lh + 2
             
         elif is_last_mode:
-            # ✅ РЕЖИМ LAST: только title, смещаем ВНИЗ на 160px
-            start_y = fade_top + (fade_h - text_height) // 2 + 160
-            print(f"✓ LAST MODE: title only, offset +160px")
+            # ✅ РЕЖИМ LAST: только title, смещаем ВНИЗ на 180px (было 160) - текст выше
+            start_y = fade_top + (fade_h - text_height) // 2 + 180
+            print(f"✓ LAST MODE: title only, offset +180px")
             
         else:
-            # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 140px
+            # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 140px (без изменений)
             start_y = fade_top + (fade_h - text_height) // 2 + 140
             print(f"✓ NORMAL MODE: title + subtitle, offset +140px")
 
