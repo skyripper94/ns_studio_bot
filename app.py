@@ -309,7 +309,7 @@ def draw_with_tracking(draw, xy, text, font, color, tracking=-1):
         else:
             x += cw
 
-def draw_stretched_line(img, text, font, color, center_x, y, tracking=-1, stretch_factor=1.15):
+def draw_stretched_line(img, text, font, color, center_x, y, tracking=-1, stretch_factor=1.25):
     """
     Рисует строку текста с вертикальным растяжением (буквы выше).
     stretch_factor=1.15 означает 115% высоты (на 15% выше).
