@@ -317,7 +317,7 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
     if title:
         t = title.upper()
         has_logo = (subtitle == "")
-        size = 72 if has_logo and len(t)<=30 else (60 if has_logo else (48 if len(t)<=30 else 42))
+        size = 72 if has_logo and len(t)<=30 else (60 if has_logo else (44 if len(t)<=30 else 38))
         fnt = get_font(size, "bold")
         tracking = -1
         lines = wrap_text(t, fnt, width*0.88, draw, tracking)
@@ -434,9 +434,9 @@ def process_image():
             gp = min(gp + 0.25, 0.76)
             extra_pixels = 90 / h
         else:
-            # NORMAL режим: градиент меньше +8%
-            gp = min(gp + 0.08, 0.62)
-            extra_pixels = 85 / h
+            # NORMAL режим: градиент выше +12% (было +8%)
+            gp = min(gp + 0.12, 0.66)
+            extra_pixels = 95 / h
             
         gp = min(gp + extra_pixels, 0.78)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
@@ -479,7 +479,7 @@ def process_image():
         # 4) Логотип и центрирование конструкции
         # ✅ НАСТРАИВАЕМЫЕ СМЕЩЕНИЯ ДЛЯ КАЖДОГО РЕЖИМА
         if add_logo:
-            # РЕЖИМ LOGO: логотип + title (текст НИЖЕ)
+            # РЕЖИМ LOGO: логотип + title (текст ЕЩЁ НИЖЕ)
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
@@ -488,8 +488,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # ✅ Центрируем + смещаем ВНИЗ на 100px (было 80) - текст ниже
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 100
+            # ✅ Центрируем + смещаем ВНИЗ на 120px (было 100) - текст ещё ниже
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 120
             
             # Рисуем логотип
             lx = (w-lw)//2
@@ -510,9 +510,9 @@ def process_image():
             print(f"✓ LAST MODE: title only, offset +180px")
             
         else:
-            # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 140px (без изменений)
-            start_y = fade_top + (fade_h - text_height) // 2 + 140
-            print(f"✓ NORMAL MODE: title + subtitle, offset +140px")
+            # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 120px (было 140) - текст выше
+            start_y = fade_top + (fade_h - text_height) // 2 + 120
+            print(f"✓ NORMAL MODE: title + subtitle, offset +120px")
 
         # Гарантия, что текст не упрётся в край (с большим запасом)
         bottom_guard = h - int(fade_h*0.25)
