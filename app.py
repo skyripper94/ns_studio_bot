@@ -428,7 +428,7 @@ def process_image():
         if add_logo:
             # LOGO режим: градиент выше +38% (было +34%) - закрываем желтые полоски
             gp = min(gp + 0.38, 0.82)
-            extra_pixels = 150 / h
+            extra_pixels = 160 / h  # было 150 - поднимаем fade на 10px
         elif is_last_mode:
             # LAST режим: градиент ещё выше +25%
             gp = min(gp + 0.25, 0.76)
