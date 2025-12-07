@@ -416,9 +416,8 @@ def process_image():
         # 1) Удаляем старый текст (если есть координаты)
         if boxes:
             img = inpaint_or_soft_cover(img, boxes)
-            # После удаления текста очищаем жёлтые артефакты в верхней части
-            # Передаём примерное положение где будет логотип (50-55% высоты)
-            img = clean_top_yellow_artifacts(img, logo_y_estimate=int(h * 0.52))
+            # ОТКЛЮЧЕНО: clean_top_yellow_artifacts создавала мыльную полосу по середине
+            # img = clean_top_yellow_artifacts(img, logo_y_estimate=int(h * 0.52))
 
         # 2) Мягкий фейд снизу (индивидуально для каждого режима)
         long_text = (len(title)>25) or (len(subtitle)>40)
