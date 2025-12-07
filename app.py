@@ -521,10 +521,29 @@ def process_image():
         # 5) Текст
         draw_title_subtitle(img, d, title, subtitle, start_y, w)
 
-        # 6) Мини-полоска внизу (ещё меньше)
+        # 6) Мини-полоска внизу с внутренней тенью
         bar_h = int(h*0.012)
         bar_y0 = h - bar_h
+        
+        # Рисуем основную полоску
         d.rectangle([(0, bar_y0), (w, h)], fill=(0,150,170,255))
+        
+        # Добавляем минимальную внутреннюю тень сверху (1-2px)
+        shadow_h = 2
+        for i in range(shadow_h):
+            t = i / shadow_h
+            # Затухание от темного к прозрачному
+            shadow_alpha = int(40 * (1 - t))  # минимальная тень
+            # Рисуем темную линию
+            shadow_y = bar_y0 + i
+            if shadow_y < h:
+                for x in range(w):
+                    r, g, b = (0, 150, 170)
+                    # Затемняем цвет
+                    dark_r = max(0, r - shadow_alpha)
+                    dark_g = max(0, g - shadow_alpha)
+                    dark_b = max(0, b - shadow_alpha)
+                    d.point((x, shadow_y), fill=(dark_r, dark_g, dark_b))
 
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=95)
