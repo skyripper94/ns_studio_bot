@@ -241,11 +241,11 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         return img
 
     # ШАГ 1: Размываем область с текстом для удаления букв (БЕЗ градиента!)
-    # Создаём сильно размытую версию изображения
-    blurred = img.filter(ImageFilter.GaussianBlur(20))  # было 15 - увеличиваем для уменьшения артефактов
+    # Создаём СИЛЬНО размытую версию изображения для удаления мыльной полосы
+    blurred = img.filter(ImageFilter.GaussianBlur(30))  # было 20 - увеличиваем ещё
     
     # Смешиваем оригинал и размытие по маске (убираем текст)
-    mask_soft = mask.filter(ImageFilter.GaussianBlur(8))  # было 6
+    mask_soft = mask.filter(ImageFilter.GaussianBlur(12))  # было 8 - больше размытие краёв
     img_no_text = Image.composite(blurred, img, mask_soft)
     
     print("✓ Text removed with blur only (no gradient artifacts)")
@@ -426,14 +426,14 @@ def process_image():
         
         # Настройки градиента для каждого режима
         if add_logo:
-            # LOGO режим: градиент МАКСИМАЛЬНО ВЫШЕ - закрываем жёлтые полоски!
-            gp = 0.92  # ФИКСИРОВАННЫЙ высокий градиент - 92% высоты изображения
+            # LOGO режим: градиент высокий - закрываем жёлтые полоски
+            gp = 0.92  # ФИКСИРОВАННЫЙ высокий градиент - 92%
         elif is_last_mode:
-            # LAST режим: градиент ещё выше +25%
-            gp = min(gp + 0.25, 0.76)
+            # LAST режим: градиент ВЫШЕ (было 0.76)
+            gp = 0.82
         else:
-            # NORMAL режим: градиент выше +12% (было +8%)
-            gp = min(gp + 0.12, 0.66)
+            # NORMAL режим: градиент НИЖЕ (было +12%)
+            gp = min(gp + 0.05, 0.55)
             
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
@@ -475,7 +475,7 @@ def process_image():
         # 4) Логотип и центрирование конструкции
         # ✅ НАСТРАИВАЕМЫЕ СМЕЩЕНИЯ ДЛЯ КАЖДОГО РЕЖИМА
         if add_logo:
-            # РЕЖИМ LOGO: логотип + title (текст ВЫШЕ)
+            # РЕЖИМ LOGO: логотип + title (текст НИЖЕ)
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
@@ -484,8 +484,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # ✅ Центрируем + смещаем ВНИЗ на 140px (было 160) - текст выше
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 140
+            # ✅ Центрируем + смещаем ВНИЗ на 160px (было 140) - текст ниже
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 160
             
             # Рисуем логотип
             lx = (w-lw)//2
@@ -501,9 +501,9 @@ def process_image():
             start_y = ly + lh + 2
             
         elif is_last_mode:
-            # ✅ РЕЖИМ LAST: только title, смещаем ВНИЗ на 160px (было 180) - текст выше
-            start_y = fade_top + (fade_h - text_height) // 2 + 160
-            print(f"✓ LAST MODE: title only, offset +160px")
+            # ✅ РЕЖИМ LAST: только title, текст ВЫШЕ (было +160px)
+            start_y = fade_top + (fade_h - text_height) // 2 + 140
+            print(f"✓ LAST MODE: title only, offset +140px")
             
         else:
             # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 120px (было 140) - текст выше
