@@ -426,19 +426,15 @@ def process_image():
         
         # Настройки градиента для каждого режима
         if add_logo:
-            # LOGO режим: градиент МАКСИМАЛЬНО ВЫШЕ - закрываем артефакты
-            gp = min(gp + 0.50, 0.90)  # увеличил max с 0.85 до 0.90
-            extra_pixels = 200 / h  # было 10 - возвращаем большое значение!
+            # LOGO режим: градиент МАКСИМАЛЬНО ВЫШЕ - закрываем жёлтые полоски!
+            gp = 0.92  # ФИКСИРОВАННЫЙ высокий градиент - 92% высоты изображения
         elif is_last_mode:
             # LAST режим: градиент ещё выше +25%
             gp = min(gp + 0.25, 0.76)
-            extra_pixels = 90 / h
         else:
             # NORMAL режим: градиент выше +12% (было +8%)
             gp = min(gp + 0.12, 0.66)
-            extra_pixels = 95 / h
             
-        gp = min(gp + extra_pixels, 0.78)
         img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
 
         d = ImageDraw.Draw(img)
