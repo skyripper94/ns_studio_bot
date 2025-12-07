@@ -426,9 +426,9 @@ def process_image():
         
         # Настройки градиента для каждого режима
         if add_logo:
-            # LOGO режим: градиент выше +30% (было +26%)
-            gp = min(gp + 0.30, 0.78)
-            extra_pixels = 130 / h
+            # LOGO режим: градиент выше +34% (было +30%)
+            gp = min(gp + 0.34, 0.80)
+            extra_pixels = 140 / h
         elif is_last_mode:
             # LAST режим: градиент ещё выше +25%
             gp = min(gp + 0.25, 0.76)
@@ -479,7 +479,7 @@ def process_image():
         # 4) Логотип и центрирование конструкции
         # ✅ НАСТРАИВАЕМЫЕ СМЕЩЕНИЯ ДЛЯ КАЖДОГО РЕЖИМА
         if add_logo:
-            # РЕЖИМ LOGO: логотип + title (текст В 2 РАЗА НИЖЕ)
+            # РЕЖИМ LOGO: логотип + title (текст В 1.5 РАЗА ВЫШЕ)
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
             bb = d.textbbox((0,0), logo_text, font=f)
@@ -488,8 +488,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # ✅ Центрируем + смещаем ВНИЗ на 240px (было 120) - текст в 2 раза ниже
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 240
+            # ✅ Центрируем + смещаем ВНИЗ на 160px (было 240) - текст в 1.5 раза выше
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 160
             
             # Рисуем логотип
             lx = (w-lw)//2
