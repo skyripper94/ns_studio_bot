@@ -427,8 +427,8 @@ def process_image():
         # Настройки градиента для каждого режима
         if add_logo:
             # LOGO режим: градиент выше +42% (было +38%) - ЗАКРЫВАЕМ артефакты
-            gp = min(gp + 0.42, 0.85)
-            extra_pixels = 170 / h  # было 160
+            gp = min(gp + 0.50, 0.85)
+            extra_pixels = 10 / h  # было 160
         elif is_last_mode:
             # LAST режим: градиент ещё выше +25%
             gp = min(gp + 0.25, 0.76)
