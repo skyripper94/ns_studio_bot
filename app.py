@@ -309,10 +309,65 @@ def draw_with_tracking(draw, xy, text, font, color, tracking=-1):
         else:
             x += cw
 
+def draw_stretched_line(img, text, font, color, center_x, y, tracking=-1, stretch_factor=1.15):
+    """
+    Рисует строку текста с вертикальным растяжением (буквы выше).
+    stretch_factor=1.15 означает 115% высоты (на 15% выше).
+    """
+    # Создаём временный draw для измерения
+    temp_draw = ImageDraw.Draw(img)
+    
+    # Измеряем ширину строки с учётом tracking
+    line_width = 0
+    for ch in text:
+        bb = temp_draw.textbbox((0,0), ch, font=font)
+        cw = bb[2] - bb[0]
+        line_width += cw if ch == " " else cw + tracking
+    
+    # Измеряем высоту строки
+    bb = temp_draw.textbbox((0,0), text, font=font)
+    line_height = bb[3] - bb[1]
+    
+    # Создаём временное RGBA изображение для текста
+    padding = 10
+    temp_width = line_width + padding * 2
+    temp_height = line_height + padding * 2
+    temp_img = Image.new("RGBA", (temp_width, temp_height), (0, 0, 0, 0))
+    temp_draw = ImageDraw.Draw(temp_img)
+    
+    # Рисуем текст с tracking во временное изображение
+    x = padding
+    for ch in text:
+        bb = temp_draw.textbbox((0,0), ch, font=font)
+        cw = bb[2] - bb[0]
+        if ch != " ":
+            temp_draw.text((x, padding), ch, font=font, fill=color)
+            x += cw + tracking
+        else:
+            x += cw
+    
+    # Растягиваем по вертикали
+    new_height = int(temp_height * stretch_factor)
+    stretched = temp_img.resize((temp_width, new_height), Image.Resampling.LANCZOS)
+    
+    # Вычисляем позицию для вставки (центрируем по x)
+    paste_x = center_x - line_width // 2 - padding
+    # Корректируем y с учётом увеличенной высоты (чтобы базовая линия осталась примерно там же)
+    height_diff = new_height - temp_height
+    paste_y = y - padding - height_diff  # сдвигаем вверх на разницу высот
+    
+    # Вставляем с альфа-каналом
+    img.paste(stretched, (paste_x, paste_y), stretched)
+    
+    return new_height - padding * 2  # возвращаем реальную высоту растянутого текста
+
 def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
     cyan = (0,188,212)
     white = (255,255,255)
     y = start_y
+    
+    # Коэффициент вертикального растяжения букв (1.15 = на 15% выше)
+    stretch_factor = 1.15
 
     if title:
         t = title.upper()
@@ -332,23 +387,20 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
         line_height = bb[3]-bb[1]
         
+        # Высота растянутой строки
+        stretched_line_height = int(line_height * stretch_factor)
+        
+        center_x = width // 2
         for i, line in enumerate(lines):
-            # ширина с учётом tracking
-            lw = 0
-            for ch in line:
-                bb = draw.textbbox((0,0), ch, font=fnt)
-                cw = bb[2]-bb[0]
-                lw += cw if ch==" " else cw + tracking
-            x = (width - lw)//2
-            # Используем фиксированную высоту строки для всех линий
-            line_y = y + i * (line_height + line_spacing)
-            draw_with_tracking(draw, (x,line_y), line, fnt, cyan, tracking)
+            # Используем растянутую высоту строки для позиционирования
+            line_y = y + i * (stretched_line_height + line_spacing)
+            draw_stretched_line(img, line, fnt, cyan, center_x, line_y, tracking, stretch_factor)
         
         # Переходим к следующему элементу
-        y += len(lines) * (line_height + line_spacing) - line_spacing
+        y += len(lines) * (stretched_line_height + line_spacing) - line_spacing
         if subtitle:
             y += 8  # уменьшенный отступ между заголовком и подзаголовком
-        print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo else 'NO-LOGO'}")
+        print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo else 'NO-LOGO'}, Stretch:{stretch_factor}")
 
     if subtitle:
         fnt = get_font(32, "medium")
@@ -358,19 +410,15 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width):
         # Вычисляем высоту одной строки subtitle
         bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
         sub_line_height = bb[3]-bb[1]
+        stretched_sub_height = int(sub_line_height * stretch_factor)
         sub_line_spacing = 5
         
+        center_x = width // 2
         for i, line in enumerate(lines):
-            lw = 0
-            for ch in line:
-                bb = draw.textbbox((0,0), ch, font=fnt)
-                cw = bb[2]-bb[0]
-                lw += cw if ch==" " else cw + tracking
-            x = (width - lw)//2
-            # Используем фиксированную высоту строки
-            line_y = y + i * (sub_line_height + sub_line_spacing)
-            draw_with_tracking(draw, (x,line_y), line, fnt, white, tracking)
-        print(f"[Subtitle] Lines:{len(lines)}")
+            # Используем растянутую высоту строки
+            line_y = y + i * (stretched_sub_height + sub_line_spacing)
+            draw_stretched_line(img, line, fnt, white, center_x, line_y, tracking, stretch_factor)
+        print(f"[Subtitle] Lines:{len(lines)}, Stretch:{stretch_factor}")
 
 # ----------------------------- API -----------------------------
 
