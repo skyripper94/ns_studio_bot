@@ -220,8 +220,8 @@ def build_mask_from_boxes(size, boxes):
         if y1 < h*0.45:
             continue
         d.rectangle([(x1,y1),(x2,y2)], fill=255)
-    # Смягчаем края маски минимально, чтобы не было «ступенек»
-    return mask.filter(ImageFilter.GaussianBlur(4))
+    # МИНИМАЛЬНОЕ размытие только для сглаживания ступенек
+    return mask.filter(ImageFilter.GaussianBlur(1))  # было 4 - слишком много
 
 def inpaint_or_soft_cover(img: Image.Image, boxes):
     """
@@ -240,12 +240,12 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
         print("✓ No text to remove (mask empty)")
         return img
 
-    # ШАГ 1: Размываем область с текстом для удаления букв (БЕЗ градиента!)
-    # Создаём СИЛЬНО размытую версию изображения для удаления мыльной полосы
-    blurred = img.filter(ImageFilter.GaussianBlur(30))  # было 20 - увеличиваем ещё
+    # ШАГ 1: Размываем ТОЛЬКО внутри boundingBoxes!
+    # Создаём размытую версию изображения
+    blurred = img.filter(ImageFilter.GaussianBlur(25))
     
-    # Смешиваем оригинал и размытие по маске (убираем текст)
-    mask_soft = mask.filter(ImageFilter.GaussianBlur(12))  # было 8 - больше размытие краёв
+    # МИНИМАЛЬНОЕ размытие маски - только 2px для сглаживания краёв!
+    mask_soft = mask.filter(ImageFilter.GaussianBlur(2))  # было 12 - слишком много!
     img_no_text = Image.composite(blurred, img, mask_soft)
     
     print("✓ Text removed with blur only (no gradient artifacts)")
@@ -484,8 +484,8 @@ def process_image():
             # Общая высота конструкции: логотип + отступ + текст
             total_construction_h = lh + 2 + text_height
             
-            # ✅ Центрируем + смещаем ВНИЗ на 160px (было 140) - текст ниже
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 160
+            # ✅ Центрируем + смещаем ВНИЗ на 190px (было 160) - текст ниже
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 190
             
             # Рисуем логотип
             lx = (w-lw)//2
@@ -501,9 +501,9 @@ def process_image():
             start_y = ly + lh + 2
             
         elif is_last_mode:
-            # ✅ РЕЖИМ LAST: только title, текст ВЫШЕ (было +160px)
-            start_y = fade_top + (fade_h - text_height) // 2 + 140
-            print(f"✓ LAST MODE: title only, offset +140px")
+            # ✅ РЕЖИМ LAST: только title, смещаем ВНИЗ на 160px (было 140) - текст ниже
+            start_y = fade_top + (fade_h - text_height) // 2 + 160
+            print(f"✓ LAST MODE: title only, offset +160px")
             
         else:
             # РЕЖИМ NORMAL: title + subtitle, смещаем ВНИЗ на 120px (было 140) - текст выше
