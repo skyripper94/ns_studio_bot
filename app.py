@@ -397,8 +397,8 @@ def process_image():
             
             total_construction_h = lh + 2 + text_height
             
-            # Центрируем конструкцию в середине градиента со смещением вниз (удвоено)
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 80
+            # Центрируем конструкцию в середине градиента со смещением вниз (4x от оригинала)
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 160
             
             lx = (w-lw)//2
             ly = construction_top
@@ -411,7 +411,7 @@ def process_image():
             start_y = ly + lh + 2
             
         elif is_last_mode:
-            start_y = fade_top + (fade_h - text_height) // 2 + 60
+            start_y = fade_top + (fade_h - text_height) // 2 + 120
             
         else:
             start_y = fade_top + (fade_h - text_height) // 2 + 20
