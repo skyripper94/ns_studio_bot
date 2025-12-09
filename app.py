@@ -357,9 +357,9 @@ def process_image():
             gp = calculate_adaptive_gradient(img, long_text)
             
             if add_logo:
-                gp = 0.95  # Увеличено с 0.92 для опускания градиента
+                gp = 0.98  # Ещё больше для опускания градиента ниже
             elif is_last_mode:
-                gp = 0.85  # Увеличено с 0.82 для опускания градиента
+                gp = 0.88  # Ещё больше для опускания градиента ниже
             else:
                 gp = min(gp + 0.05, 0.55)
             
