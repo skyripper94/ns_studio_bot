@@ -1,9 +1,0 @@
-[phases.setup]
-# системные шрифты для рендеринга; локальные TTF/OTF из `fonts/` будут включены в сборку из репозитория
-aptPkgs = ["fonts-dejavu-core", "fonts-liberation", "fontconfig", "fonts-noto"]
-
-[phases.build]
-cmds = ["pip install -r requirements.txt"]
-
-[phases.start]
-cmd = "gunicorn app:app --bind 0.0.0.0:5000"
