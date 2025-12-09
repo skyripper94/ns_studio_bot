@@ -142,16 +142,20 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
     print(f"✓ Local gradient applied on boxes zone [{zone_start}-{zone_end}]px")
     return result
 
-def draw_soft_warm_fade(img: Image.Image, percent: float):
+def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0):
+    """
+    Рисует градиент снизу.
+    offset_down: смещение всего градиента вниз в пикселях.
+    """
     w, h = img.size
     g_h = int(h * percent)
-    y0 = h - g_h
+    y0 = h - g_h + offset_down  # Добавляем смещение
 
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
 
     solid_black_height = int(g_h * 0.40)
-    solid_black_start = h - solid_black_height
+    solid_black_start = h - solid_black_height + offset_down  # Смещаем и солидную часть
     d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
 
     gradient_zone_height = g_h - solid_black_height
@@ -161,7 +165,8 @@ def draw_soft_warm_fade(img: Image.Image, percent: float):
         t = i / steps
         alpha = int(255 * (t ** 3))
         y = y0 + int(i * gradient_zone_height / steps)
-        d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
+        if y < h:  # Проверка границ
+            d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     return out, y0, g_h
@@ -348,12 +353,10 @@ def process_image():
                 gp = min(gp + 0.05, 0.55)
             
             print(f"[Gradient] Auto-calculated: {gp*100:.0f}%")
-            
-        img, fade_top, fade_h = draw_soft_warm_fade(img, gp)
         
-        # Опускаем градиент на 10px для logo и last mode
-        if add_logo or is_last_mode:
-            fade_top += 10
+        # Определяем смещение градиента вниз для logo и last mode
+        gradient_offset = 10 if (add_logo or is_last_mode) else 0
+        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, gradient_offset)
 
         d = ImageDraw.Draw(img)
 
