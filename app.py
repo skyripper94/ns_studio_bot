@@ -98,11 +98,9 @@ def inpaint_or_soft_cover(img: Image.Image, boxes):
 
 # ✅ НОВОЕ: Локальный градиент на зону boundingBoxes
 def apply_local_gradient_on_boxes(img: Image.Image, boxes):
-    """Накладывает полупрозрачный градиент на зону где был текст."""
-    if not boxes:
-        return img
-    
-    w, h = img.size
+    """ОТКЛЮЧЕНО: градиент на зону boundingBoxes убран."""
+    # Просто возвращаем изображение без изменений
+    return img
     
     # Находим общую зону всех boundingBoxes
     all_y = []
@@ -144,43 +142,43 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
 
 def draw_soft_warm_fade(img: Image.Image, percent: float, soft_top: bool = False):
     """
-    НОВЫЙ ГРАДИЕНТ С НУЛЯ.
-    Рисует чёрный градиент от прозрачного (сверху) к чёрному (снизу).
+    ГАРАНТИРОВАННО РАБОЧИЙ ГРАДИЕНТ используя numpy.
     """
     w, h = img.size
     
-    # Создаём прозрачный слой
-    gradient_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    # Конвертируем в numpy array для прямой работы с пикселями
+    img_array = np.array(img.convert("RGBA"))
     
-    # Высота зоны градиента
+    # Высота градиента
     gradient_height = int(h * percent)
     start_y = h - gradient_height
     
-    # Рисуем градиент построчно
+    # Создаём маску градиента
     for y in range(start_y, h):
-        # Позиция от 0 (верх градиента) до 1 (низ изображения)
+        # Позиция от 0 (верх) до 1 (низ)
         position = (y - start_y) / gradient_height
         
-        # Нижние 40% - полностью чёрные
+        # Нижние 40% = полностью чёрный
         if position >= 0.6:
             alpha = 255
         else:
-            # Верхние 60% - плавный переход
-            # position идёт от 0 до 0.6, нормализуем к 0-1
+            # Верхние 60% = плавный переход
             t = position / 0.6
             
             if soft_top:
-                # Мягкий край (степень 4)
                 alpha = int(255 * (t ** 4))
             else:
-                # Обычный (степень 3)
                 alpha = int(255 * (t ** 3))
         
-        # Рисуем чёрную линию с вычисленной прозрачностью
-        gradient_layer.paste(Image.new("RGBA", (w, 1), (0, 0, 0, alpha)), (0, y))
+        # Применяем чёрный цвет с alpha к этой строке
+        # Формула: new_color = old_color * (1 - alpha/255) + black * (alpha/255)
+        blend = alpha / 255.0
+        img_array[y, :, 0] = img_array[y, :, 0] * (1 - blend)  # R
+        img_array[y, :, 1] = img_array[y, :, 1] * (1 - blend)  # G
+        img_array[y, :, 2] = img_array[y, :, 2] * (1 - blend)  # B
     
-    # Накладываем градиент на изображение
-    result = Image.alpha_composite(img.convert("RGBA"), gradient_layer).convert("RGB")
+    # Конвертируем обратно в PIL Image
+    result = Image.fromarray(img_array.astype('uint8'), 'RGBA').convert('RGB')
     
     return result, start_y, gradient_height
 
