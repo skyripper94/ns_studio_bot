@@ -1,27 +1,9 @@
-# ИСПРАВЛЕНИЯ:
-# 1. Ручное управление градиентом через gradientPercent
-# 2. Минимальный шрифт в logo mode = 54px
-# 3. Увеличенный stretch_factor для logo mode = 1.3
-# 4. Ограничение start_y снизу (текст не уезжает)
-# 5. Локальный градиент на зону boundingBoxes (закрывает желтое мыло)
-
-# ИНСТРУКЦИЯ:
-# 1. Замени весь app.py этим кодом
-# 2. Deploy на Railway
-# 3. В n8n обнови Check Logo (check_logo_gradient.js)
-# 4. В n8n обнови Extract Headline (extract_headline_v10.1_fixed.js)
+# NEUROSTEP COVER GENERATOR
+# Simple image processing service for creating text overlays
 
 from flask import Flask, request, send_file
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import io, base64, os
-import numpy as np
-
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except Exception:
-    cv2 = None
-    CV2_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -44,143 +26,6 @@ def get_font(size, weight="bold"):
         except:
             pass
     return ImageFont.load_default()
-
-def calculate_adaptive_gradient(img, long_text=False):
-    w, h = img.size
-    bottom = img.crop((0, h//2, w, h)).convert("L")
-    arr = np.array(bottom, dtype=np.uint8)
-    avg = float(arr.mean())
-
-    if avg > 150:      gp = 0.48
-    elif avg > 100:    gp = 0.45
-    else:              gp = 0.42
-
-    if long_text:
-        gp = max(gp, 0.36)
-
-    return gp
-
-def build_mask_from_boxes(size, boxes):
-    w, h = size
-    mask = Image.new("L", (w, h), 0)
-    d = ImageDraw.Draw(mask)
-    for b in boxes:
-        v = b.get("vertices", [])
-        if len(v) < 4: 
-            continue
-        xs = [vi.get("x", 0) for vi in v]
-        ys = [vi.get("y", 0) for vi in v]
-        pad_x, pad_y = 12, 14
-        x1, y1 = max(0, min(xs)-pad_x), max(0, min(ys)-pad_y)
-        x2, y2 = min(w, max(xs)+pad_x), min(h, max(ys)+pad_y)
-        if y1 < h*0.45:
-            continue
-        d.rectangle([(x1,y1),(x2,y2)], fill=255)
-    return mask.filter(ImageFilter.GaussianBlur(1))
-
-def inpaint_or_soft_cover(img: Image.Image, boxes):
-    if not boxes:
-        return img
-
-    w, h = img.size
-    mask = build_mask_from_boxes((w,h), boxes)
-    
-    mask_arr = np.array(mask)
-    if mask_arr.max() == 0:
-        return img
-
-    blurred = img.filter(ImageFilter.GaussianBlur(25))
-    mask_soft = mask.filter(ImageFilter.GaussianBlur(2))
-    img_no_text = Image.composite(blurred, img, mask_soft)
-    
-    print("✓ Text removed")
-    return img_no_text
-
-# ✅ НОВОЕ: Локальный градиент на зону boundingBoxes
-def apply_local_gradient_on_boxes(img: Image.Image, boxes):
-    """ОТКЛЮЧЕНО: градиент на зону boundingBoxes убран."""
-    # Просто возвращаем изображение без изменений
-    return img
-    
-    # Находим общую зону всех boundingBoxes
-    all_y = []
-    for b in boxes:
-        v = b.get("vertices", [])
-        if len(v) >= 4:
-            ys = [vi.get("y", 0) for vi in v]
-            all_y.extend(ys)
-    
-    if not all_y:
-        return img
-    
-    # Зона: от min_y - 40px до max_y + 20px
-    zone_start = max(0, min(all_y) - 40)
-    zone_end = min(h, max(all_y) + 20)
-    zone_height = zone_end - zone_start
-    
-    if zone_height < 10:
-        return img
-    
-    # Создаём градиент overlay
-    overlay = Image.new("RGBA", (w, h), (0,0,0,0))
-    d = ImageDraw.Draw(overlay)
-    
-    steps = max(20, zone_height)
-    for i in range(steps):
-        t = i / steps
-        # Кубическое затухание для мягкого края сверху, монолит снизу
-        # При t=0 (верх): alpha=180 (более непрозрачный)
-        # При t=1 (низ): alpha=0 (прозрачный)
-        alpha = int(180 * ((1 - t) ** 3))
-        y = zone_start + int(i * zone_height / steps)
-        if 0 <= y < h:
-            d.rectangle([(0, y), (w, y+2)], fill=(5, 5, 10, alpha))
-    
-    result = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    print(f"✓ Local gradient applied on boxes zone [{zone_start}-{zone_end}]px")
-    return result
-
-def draw_soft_warm_fade(img: Image.Image, percent: float, soft_top: bool = False):
-    """
-    ГАРАНТИРОВАННО РАБОЧИЙ ГРАДИЕНТ используя numpy.
-    """
-    w, h = img.size
-    
-    # Конвертируем в numpy array для прямой работы с пикселями
-    img_array = np.array(img.convert("RGBA"))
-    
-    # Высота градиента
-    gradient_height = int(h * percent)
-    start_y = h - gradient_height
-    
-    # Создаём маску градиента
-    for y in range(start_y, h):
-        # Позиция от 0 (верх) до 1 (низ)
-        position = (y - start_y) / gradient_height
-        
-        # Нижние 40% = полностью чёрный
-        if position >= 0.6:
-            alpha = 255
-        else:
-            # Верхние 60% = плавный переход
-            t = position / 0.6
-            
-            if soft_top:
-                alpha = int(255 * (t ** 4))
-            else:
-                alpha = int(255 * (t ** 3))
-        
-        # Применяем чёрный цвет с alpha к этой строке
-        # Формула: new_color = old_color * (1 - alpha/255) + black * (alpha/255)
-        blend = alpha / 255.0
-        img_array[y, :, 0] = img_array[y, :, 0] * (1 - blend)  # R
-        img_array[y, :, 1] = img_array[y, :, 1] * (1 - blend)  # G
-        img_array[y, :, 2] = img_array[y, :, 2] * (1 - blend)  # B
-    
-    # Конвертируем обратно в PIL Image
-    result = Image.fromarray(img_array.astype('uint8'), 'RGBA').convert('RGB')
-    
-    return result, start_y, gradient_height
 
 def wrap_text(text, font, max_width, draw, tracking=-1):
     words, lines, cur = text.split(), [], []
@@ -310,11 +155,7 @@ def process_image():
         img_b64   = data.get("image","")
         title     = data.get("title","")
         subtitle  = data.get("subtitle","")
-        boxes     = data.get("boundingBoxes", []) or data.get("boundingboxes", [])
         add_logo  = bool(data.get("addLogo", False))
-        
-        # ✅ НОВОЕ: Ручное управление градиентом
-        manual_gradient = data.get("gradientPercent", None)
         
         mode = data.get("mode", "").lower()
         is_last_mode = (mode == "last")
@@ -329,8 +170,6 @@ def process_image():
             title = data.get("text","ЗАГОЛОВОК")
 
         print(f"[Processing] Title:'{title}', Subtitle:'{subtitle}', Logo:{add_logo}, Mode:{mode or 'normal'}")
-        if manual_gradient:
-            print(f"[Processing] Manual gradient: {manual_gradient*100:.0f}%")
 
         img = Image.open(io.BytesIO(base64.b64decode(img_b64))).convert("RGB")
         w, h = img.size
@@ -339,39 +178,9 @@ def process_image():
         img = ImageEnhance.Contrast(img).enhance(1.08)
         img = ImageEnhance.Brightness(img).enhance(0.98)
 
-        # 1) Удаляем старый текст
-        if boxes:
-            img = inpaint_or_soft_cover(img, boxes)
-            # ✅ НОВОЕ: Локальный градиент на зону boundingBoxes
-            img = apply_local_gradient_on_boxes(img, boxes)
-
-        # 2) Мягкий фейд снизу
-        long_text = (len(title)>25) or (len(subtitle)>40)
-        
-        # ✅ ИСПРАВЛЕНО: Используем manual_gradient если указан
-        if manual_gradient is not None:
-            gp = manual_gradient
-            print(f"[Gradient] Using manual: {gp*100:.0f}%")
-        else:
-            # Auto-calculate
-            gp = calculate_adaptive_gradient(img, long_text)
-            
-            if add_logo:
-                gp = 0.98  # Ещё больше для опускания градиента ниже
-            elif is_last_mode:
-                gp = 0.88  # Ещё больше для опускания градиента ниже
-            else:
-                gp = min(gp + 0.05, 0.55)
-            
-            print(f"[Gradient] Auto-calculated: {gp*100:.0f}%")
-        
-        # Мягкий верхний край для logo и last mode
-        soft_top_edge = add_logo or is_last_mode
-        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, soft_top_edge)
-
         d = ImageDraw.Draw(img)
 
-        # 3) Вычисляем высоту текстового блока
+        # Вычисляем высоту текстового блока
         def calculate_text_height(title, subtitle, width, draw):
             total_h = 0
             if title:
@@ -406,7 +215,7 @@ def process_image():
 
         text_height = calculate_text_height(title, subtitle, w, d)
         
-        # 4) Логотип и центрирование
+        # Логотип и текст позиционирование (просто в нижней части изображения)
         if add_logo:
             logo_text = "@neurostep.media"
             f = get_font(18, "bold")
@@ -415,8 +224,8 @@ def process_image():
             
             total_construction_h = lh + 2 + text_height
             
-            # Центрируем конструкцию в середине градиента со смещением вниз
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 200
+            # Размещаем в нижней трети изображения
+            construction_top = h - total_construction_h - 100
             
             lx = (w-lw)//2
             ly = construction_top
@@ -429,36 +238,15 @@ def process_image():
             start_y = ly + lh + 2
             
         elif is_last_mode:
-            start_y = fade_top + (fade_h - text_height) // 2 + 160
+            # Размещаем в нижней части
+            start_y = h - text_height - 120
             
         else:
-            start_y = fade_top + (fade_h - text_height) // 2 + 20
+            # Обычный режим - центр изображения
+            start_y = (h - text_height) // 2 + 100
 
-        # ✅ ИСПРАВЛЕНО: Ограничиваем start_y снизу чтобы текст не уезжал
-        bar_h = int(h*0.012)
-        max_start_y = h - bar_h - text_height - 30  # минимум 30px запас снизу
-        start_y = min(start_y, max_start_y)
-        print(f"[Positioning] start_y={start_y}, text_height={text_height}, max_allowed={max_start_y}")
-
-        # 5) Текст
+        # Текст
         draw_title_subtitle(img, d, title, subtitle, start_y, w, add_logo)
-
-        # 6) Мини-полоска внизу
-        bar_y0 = h - bar_h
-        d.rectangle([(0, bar_y0), (w, h)], fill=(0,150,170,255))
-        
-        shadow_h = 2
-        for i in range(shadow_h):
-            t = i / shadow_h
-            shadow_alpha = int(40 * (1 - t))
-            shadow_y = bar_y0 + i
-            if shadow_y < h:
-                for x in range(w):
-                    r, g, b = (0, 150, 170)
-                    dark_r = max(0, r - shadow_alpha)
-                    dark_g = max(0, g - shadow_alpha)
-                    dark_b = max(0, b - shadow_alpha)
-                    d.point((x, shadow_y), fill=(dark_r, dark_g, dark_b))
 
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=95)
