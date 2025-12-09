@@ -130,8 +130,10 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
     steps = max(20, zone_height)
     for i in range(steps):
         t = i / steps
-        # Квадратичное затухание (темнее вверху)
-        alpha = int(120 * ((1 - t) ** 2))
+        # Кубическое затухание для мягкого края сверху, монолит снизу
+        # При t=0 (верх): alpha=180 (более непрозрачный)
+        # При t=1 (низ): alpha=0 (прозрачный)
+        alpha = int(180 * ((1 - t) ** 3))
         y = zone_start + int(i * zone_height / steps)
         if 0 <= y < h:
             d.rectangle([(0, y), (w, y+2)], fill=(5, 5, 10, alpha))
