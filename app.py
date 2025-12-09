@@ -142,20 +142,21 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
     print(f"✓ Local gradient applied on boxes zone [{zone_start}-{zone_end}]px")
     return result
 
-def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0):
+def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0, soft_top: bool = False):
     """
     Рисует градиент снизу.
     offset_down: смещение всего градиента вниз в пикселях.
+    soft_top: если True, добавляет мягкое рассеивание сверху градиента.
     """
     w, h = img.size
     g_h = int(h * percent)
-    y0 = h - g_h + offset_down  # Добавляем смещение
+    y0 = h - g_h + offset_down
 
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
 
     solid_black_height = int(g_h * 0.40)
-    solid_black_start = h - solid_black_height + offset_down  # Смещаем и солидную часть
+    solid_black_start = h - solid_black_height + offset_down
     d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
 
     gradient_zone_height = g_h - solid_black_height
@@ -163,9 +164,16 @@ def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0):
 
     for i in range(steps):
         t = i / steps
-        alpha = int(255 * (t ** 3))
+        
+        if soft_top:
+            # Мягкое рассеивание: в начале (t близко к 0) ещё больше затухание
+            # Используем двойную степень для очень мягкого края
+            alpha = int(255 * (t ** 4))
+        else:
+            alpha = int(255 * (t ** 3))
+            
         y = y0 + int(i * gradient_zone_height / steps)
-        if y < h:  # Проверка границ
+        if y < h:
             d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
@@ -346,17 +354,17 @@ def process_image():
             gp = calculate_adaptive_gradient(img, long_text)
             
             if add_logo:
-                gp = 0.92
+                gp = 0.95  # Увеличено с 0.92 для опускания градиента
             elif is_last_mode:
-                gp = 0.82
+                gp = 0.85  # Увеличено с 0.82 для опускания градиента
             else:
                 gp = min(gp + 0.05, 0.55)
             
             print(f"[Gradient] Auto-calculated: {gp*100:.0f}%")
         
-        # Определяем смещение градиента вниз для logo и last mode
-        gradient_offset = 10 if (add_logo or is_last_mode) else 0
-        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, gradient_offset)
+        # Мягкий верхний край для logo и last mode
+        soft_top_edge = add_logo or is_last_mode
+        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, 0, soft_top_edge)
 
         d = ImageDraw.Draw(img)
 
