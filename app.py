@@ -145,21 +145,23 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
 def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0, soft_top: bool = False):
     """
     Рисует градиент снизу.
-    offset_down: смещение всего градиента вниз в пикселях.
+    offset_down: смещение ВЕРХНЕЙ границы градиента вниз в пикселях (градиент станет выше).
     soft_top: если True, добавляет мягкое рассеивание сверху градиента.
     """
     w, h = img.size
     g_h = int(h * percent)
-    y0 = h - g_h + offset_down
+    # Верхняя граница градиента смещается ВНИЗ (градиент начинается ниже)
+    y0 = h - g_h - offset_down  # МИНУС offset, чтобы градиент был НИЖЕ
 
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
 
+    # Солидная чёрная часть - 40% от высоты градиента, всегда внизу
     solid_black_height = int(g_h * 0.40)
     solid_black_start = h - solid_black_height
-    # Чёрная часть всегда идёт до низа изображения (не смещается)
     d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
 
+    # Градиентная зона
     gradient_zone_height = g_h - solid_black_height
     steps = max(1, int(gradient_zone_height * 4))
 
@@ -167,14 +169,13 @@ def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0, 
         t = i / steps
         
         if soft_top:
-            # Мягкое рассеивание: в начале (t близко к 0) ещё больше затухание
-            # Используем двойную степень для очень мягкого края
+            # Мягкое рассеивание сверху
             alpha = int(255 * (t ** 4))
         else:
             alpha = int(255 * (t ** 3))
             
         y = y0 + int(i * gradient_zone_height / steps)
-        if 0 <= y < h:
+        if 0 <= y < solid_black_start:  # Рисуем только до начала чёрной части
             d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
