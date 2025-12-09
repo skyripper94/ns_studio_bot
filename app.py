@@ -144,51 +144,42 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
 
 def draw_soft_warm_fade(img: Image.Image, percent: float, soft_top: bool = False):
     """
-    Простой и рабочий градиент снизу вверх.
+    Рабочий градиент снизу вверх.
     percent: какую часть изображения занимает градиент (0.0-1.0)
     soft_top: если True, верхний край градиента более мягкий
     """
     w, h = img.size
+    g_h = int(h * percent)
+    y0 = h - g_h
+
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
-    
-    # Высота градиента
-    gradient_height = int(h * percent)
-    # Начало градиента (сверху)
-    gradient_start = h - gradient_height
-    
-    # 40% снизу - сплошной чёрный
-    solid_height = int(gradient_height * 0.40)
-    solid_start = h - solid_height
-    d.rectangle([(0, solid_start), (w, h)], fill=(0, 0, 0, 255))
-    
-    # 60% сверху - плавный градиент
-    fade_height = gradient_height - solid_height
-    
-    if fade_height > 0:
-        steps = int(fade_height)  # Каждый пиксель - отдельный шаг
+
+    # Сплошной чёрный внизу (40% градиента)
+    solid_black_height = int(g_h * 0.40)
+    solid_black_start = h - solid_black_height
+    d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
+
+    # Плавный градиент сверху (60% градиента)
+    gradient_zone_height = g_h - solid_black_height
+    steps = max(1, int(gradient_zone_height * 4))  # Больше шагов для плавности
+
+    for i in range(steps):
+        t = i / steps
         
-        for i in range(steps):
-            # Нормализованная позиция от 0 (верх градиента) до 1 (начало чёрного)
-            t = i / max(steps - 1, 1)  # Избегаем деления на 0
-            
-            # Выбираем функцию затухания
-            if soft_top:
-                # Очень мягкий верх для logo/last режима
-                alpha = int(255 * (t ** 4))
-            else:
-                # Обычный кубический градиент
-                alpha = int(255 * (t ** 3))
-            
-            # Позиция пикселя
-            y = gradient_start + i
-            
-            # Рисуем линию градиента
-            d.line([(0, y), (w, y)], fill=(0, 0, 0, alpha))
-    
-    # Накладываем на изображение
-    result = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    return result, gradient_start, gradient_height
+        # Выбираем функцию затухания
+        if soft_top:
+            # Очень мягкий верх для logo/last режима (степень 4)
+            alpha = int(255 * (t ** 4))
+        else:
+            # Обычный кубический градиент (степень 3)
+            alpha = int(255 * (t ** 3))
+        
+        y = y0 + int(i * gradient_zone_height / steps)
+        d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
+
+    out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    return out, y0, g_h
 
 def wrap_text(text, font, max_width, draw, tracking=-1):
     words, lines, cur = text.split(), [], []
