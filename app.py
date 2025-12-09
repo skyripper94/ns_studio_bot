@@ -180,44 +180,32 @@ def wrap_text(text, font, max_width, draw, tracking=-1):
     if cur: lines.append(" ".join(cur))
     return lines
 
-def draw_stretched_line(img, text, font, color, center_x, y, tracking=-1, stretch_factor=1.25):
-    temp_draw = ImageDraw.Draw(img)
+def draw_text_with_stroke(draw, text, font, x, y, fill_color, stroke_width=3, stroke_color=(0,0,0,180), tracking=-2):
+    """
+    Рисует текст с обводкой и плотным tracking.
+    """
+    # Рисуем обводку (stroke)
+    for offset_x in range(-stroke_width, stroke_width + 1):
+        for offset_y in range(-stroke_width, stroke_width + 1):
+            if offset_x == 0 and offset_y == 0:
+                continue
+            # Рисуем каждый символ с tracking
+            char_x = x
+            for ch in text:
+                if ch != " ":
+                    draw.text((char_x + offset_x, y + offset_y), ch, font=font, fill=stroke_color)
+                bb = draw.textbbox((0,0), ch, font=font)
+                cw = bb[2] - bb[0]
+                char_x += cw if ch == " " else cw + tracking
     
-    line_width = 0
+    # Рисуем основной текст
+    char_x = x
     for ch in text:
-        bb = temp_draw.textbbox((0,0), ch, font=font)
-        cw = bb[2] - bb[0]
-        line_width += cw if ch == " " else cw + tracking
-    
-    bb = temp_draw.textbbox((0,0), text, font=font)
-    line_height = bb[3] - bb[1]
-    
-    padding = 10
-    temp_width = line_width + padding * 2
-    temp_height = line_height + padding * 2
-    temp_img = Image.new("RGBA", (temp_width, temp_height), (0, 0, 0, 0))
-    temp_draw = ImageDraw.Draw(temp_img)
-    
-    x = padding
-    for ch in text:
-        bb = temp_draw.textbbox((0,0), ch, font=font)
-        cw = bb[2] - bb[0]
         if ch != " ":
-            temp_draw.text((x, padding), ch, font=font, fill=color)
-            x += cw + tracking
-        else:
-            x += cw
-    
-    new_height = int(temp_height * stretch_factor)
-    stretched = temp_img.resize((temp_width, new_height), Image.Resampling.LANCZOS)
-    
-    paste_x = center_x - line_width // 2 - padding
-    height_diff = new_height - temp_height
-    paste_y = y - padding - height_diff
-    
-    img.paste(stretched, (paste_x, paste_y), stretched)
-    
-    return new_height - padding * 2
+            draw.text((char_x, y), ch, font=font, fill=fill_color)
+        bb = draw.textbbox((0,0), ch, font=font)
+        cw = bb[2] - bb[0]
+        char_x += cw if ch == " " else cw + tracking
 
 def draw_title_subtitle(img, draw, title, subtitle, start_y, width, has_logo=False):
     cyan = (0,188,212)
@@ -231,55 +219,71 @@ def draw_title_subtitle(img, draw, title, subtitle, start_y, width, has_logo=Fal
         t = title.upper()
         has_logo_mode = (subtitle == "")
         
-        # ✅ ИСПРАВЛЕНО: Минимальный размер в logo mode = 54px (было 32px)
-        if has_logo_mode:
-            size = 72 if len(t)<=30 else 60
-        else:
-            size = 44 if len(t)<=30 else 38
+        # Начальный размер шрифта
+        size = 68 if len(t)<=30 else 56
         
         fnt = get_font(size, "bold")
-        tracking = -1
-        lines = wrap_text(t, fnt, width*0.88, draw, tracking)
+        tracking = -2  # Плотный tracking
+        max_width = int(width * 0.85)  # 85% ширины изображения
+        lines = wrap_text(t, fnt, max_width, draw, tracking)
         
-        # ✅ ИСПРАВЛЕНО: Не уменьшаем ниже 54px в logo mode
-        min_size = 54 if has_logo_mode else 32
-        while len(lines)>3 and size>min_size:
-            size -= 3
+        # Уменьшаем шрифт если не влезает
+        while len(lines) > 3 and size > 36:
+            size -= 4
             fnt = get_font(size, "bold")
-            lines = wrap_text(t, fnt, width*0.88, draw, tracking)
+            lines = wrap_text(t, fnt, max_width, draw, tracking)
         
-        line_spacing = 6
+        # Фиксированный межстрочный интервал
+        line_spacing = 4
         
+        # Вычисляем высоту строки
         bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
-        line_height = bb[3]-bb[1]
+        line_height = bb[3] - bb[1]
         
-        stretched_line_height = int(line_height * stretch_factor)
-        
-        center_x = width // 2
+        # Рисуем каждую строку с обводкой
         for i, line in enumerate(lines):
-            line_y = y + i * (stretched_line_height + line_spacing)
-            draw_stretched_line(img, line, fnt, cyan, center_x, line_y, tracking, stretch_factor)
+            # Вычисляем ширину строки с tracking
+            line_width = 0
+            for ch in line:
+                bb = draw.textbbox((0,0), ch, font=fnt)
+                cw = bb[2] - bb[0]
+                line_width += cw if ch == " " else cw + tracking
+            
+            # Центрируем
+            x = (width - line_width) // 2
+            line_y = y + i * (line_height + line_spacing)
+            
+            # Рисуем с обводкой
+            draw_text_with_stroke(draw, line, fnt, x, line_y, cyan, stroke_width=3, tracking=tracking)
         
-        y += len(lines) * (stretched_line_height + line_spacing) - line_spacing
+        y += len(lines) * (line_height + line_spacing)
         if subtitle:
-            y += 8
-        print(f"[Title] Lines:{len(lines)}, Size:{size}px, Mode:{'LOGO' if has_logo_mode else 'NO-LOGO'}, Stretch:{stretch_factor}")
+            y += 10
+        print(f"[Title] Lines:{len(lines)}, Size:{size}px, LineHeight:{line_height}px")
 
     if subtitle:
-        fnt = get_font(32, "medium")
+        fnt = get_font(28, "medium")
         tracking = -1
-        lines = wrap_text(subtitle, fnt, width*0.88, draw, tracking)
+        max_width = int(width * 0.85)
+        lines = wrap_text(subtitle, fnt, max_width, draw, tracking)
         
         bb = draw.textbbox((0,0), lines[0] if lines else "A", font=fnt)
-        sub_line_height = bb[3]-bb[1]
-        stretched_sub_height = int(sub_line_height * stretch_factor)
-        sub_line_spacing = 5
+        sub_line_height = bb[3] - bb[1]
+        sub_line_spacing = 3
         
-        center_x = width // 2
         for i, line in enumerate(lines):
-            line_y = y + i * (stretched_sub_height + sub_line_spacing)
-            draw_stretched_line(img, line, fnt, white, center_x, line_y, tracking, stretch_factor)
-        print(f"[Subtitle] Lines:{len(lines)}, Stretch:{stretch_factor}")
+            line_width = 0
+            for ch in line:
+                bb = draw.textbbox((0,0), ch, font=fnt)
+                cw = bb[2] - bb[0]
+                line_width += cw if ch == " " else cw + tracking
+            
+            x = (width - line_width) // 2
+            line_y = y + i * (sub_line_height + sub_line_spacing)
+            
+            draw_text_with_stroke(draw, line, fnt, x, line_y, white, stroke_width=2, tracking=tracking)
+        
+        print(f"[Subtitle] Lines:{len(lines)}")
 
 @app.route("/process", methods=["POST"])
 def process_image():
@@ -352,34 +356,32 @@ def process_image():
             total_h = 0
             if title:
                 t = title.upper()
-                has_logo_mode = (subtitle == "")
-                if has_logo_mode:
-                    size = 72 if len(t)<=30 else 60
-                else:
-                    size = 48 if len(t)<=30 else 42
+                size = 68 if len(t)<=30 else 56
                 
                 fnt = get_font(size, "bold")
-                lines = wrap_text(t, fnt, width*0.88, draw, -1)
-                min_size = 54 if has_logo_mode else 32
-                while len(lines)>3 and size>min_size:
-                    size -= 3
+                max_width = int(width * 0.85)
+                lines = wrap_text(t, fnt, max_width, draw, -2)
+                
+                while len(lines) > 3 and size > 36:
+                    size -= 4
                     fnt = get_font(size, "bold")
-                    lines = wrap_text(t, fnt, width*0.88, draw, -1)
+                    lines = wrap_text(t, fnt, max_width, draw, -2)
                 
                 if lines:
                     bb = draw.textbbox((0,0), lines[0], font=fnt)
                     line_height = bb[3]-bb[1]
-                    total_h = len(lines) * line_height + (len(lines)-1) * 6
+                    total_h = len(lines) * line_height + (len(lines)-1) * 4
                 
                 if subtitle:
-                    total_h += 8
+                    total_h += 10
             if subtitle:
-                fnt = get_font(32, "medium")
-                lines = wrap_text(subtitle, fnt, width*0.88, draw, -1)
+                fnt = get_font(28, "medium")
+                max_width = int(width * 0.85)
+                lines = wrap_text(subtitle, fnt, max_width, draw, -1)
                 if lines:
                     bb = draw.textbbox((0,0), lines[0], font=fnt)
                     sub_line_height = bb[3]-bb[1]
-                    total_h += len(lines) * sub_line_height + (len(lines)-1) * 5
+                    total_h += len(lines) * sub_line_height + (len(lines)-1) * 3
             return total_h
 
         text_height = calculate_text_height(title, subtitle, w, d)
@@ -393,7 +395,8 @@ def process_image():
             
             total_construction_h = lh + 2 + text_height
             
-            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 190
+            # Центрируем конструкцию в середине градиента с небольшим смещением вниз
+            construction_top = fade_top + (fade_h - total_construction_h) // 2 + 40
             
             lx = (w-lw)//2
             ly = construction_top
@@ -406,10 +409,10 @@ def process_image():
             start_y = ly + lh + 2
             
         elif is_last_mode:
-            start_y = fade_top + (fade_h - text_height) // 2 + 160
+            start_y = fade_top + (fade_h - text_height) // 2 + 30
             
         else:
-            start_y = fade_top + (fade_h - text_height) // 2 + 120
+            start_y = fade_top + (fade_h - text_height) // 2 + 20
 
         # ✅ ИСПРАВЛЕНО: Ограничиваем start_y снизу чтобы текст не уезжал
         bar_h = int(h*0.012)
