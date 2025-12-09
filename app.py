@@ -156,7 +156,8 @@ def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0, 
     d = ImageDraw.Draw(overlay)
 
     solid_black_height = int(g_h * 0.40)
-    solid_black_start = h - solid_black_height + offset_down
+    solid_black_start = h - solid_black_height
+    # Чёрная часть всегда идёт до низа изображения (не смещается)
     d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
 
     gradient_zone_height = g_h - solid_black_height
@@ -173,7 +174,7 @@ def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0, 
             alpha = int(255 * (t ** 3))
             
         y = y0 + int(i * gradient_zone_height / steps)
-        if y < h:
+        if 0 <= y < h:
             d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
 
     out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
@@ -362,9 +363,11 @@ def process_image():
             
             print(f"[Gradient] Auto-calculated: {gp*100:.0f}%")
         
+        # Смещение градиента вниз на 10px для logo и last mode
+        gradient_offset = 10 if (add_logo or is_last_mode) else 0
         # Мягкий верхний край для logo и last mode
         soft_top_edge = add_logo or is_last_mode
-        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, 0, soft_top_edge)
+        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, gradient_offset, soft_top_edge)
 
         d = ImageDraw.Draw(img)
 
