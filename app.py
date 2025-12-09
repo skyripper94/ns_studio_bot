@@ -142,44 +142,52 @@ def apply_local_gradient_on_boxes(img: Image.Image, boxes):
     print(f"✓ Local gradient applied on boxes zone [{zone_start}-{zone_end}]px")
     return result
 
-def draw_soft_warm_fade(img: Image.Image, percent: float, offset_down: int = 0, soft_top: bool = False):
+def draw_soft_warm_fade(img: Image.Image, percent: float, soft_top: bool = False):
     """
-    Рисует градиент снизу.
-    offset_down: смещение ВЕРХНЕЙ границы градиента вниз в пикселях (градиент станет выше).
-    soft_top: если True, добавляет мягкое рассеивание сверху градиента.
+    Простой и рабочий градиент снизу вверх.
+    percent: какую часть изображения занимает градиент (0.0-1.0)
+    soft_top: если True, верхний край градиента более мягкий
     """
     w, h = img.size
-    g_h = int(h * percent)
-    # Верхняя граница градиента смещается ВНИЗ (градиент начинается ниже)
-    y0 = h - g_h - offset_down  # МИНУС offset, чтобы градиент был НИЖЕ
-
     overlay = Image.new("RGBA", (w, h), (0,0,0,0))
     d = ImageDraw.Draw(overlay)
-
-    # Солидная чёрная часть - 40% от высоты градиента, всегда внизу
-    solid_black_height = int(g_h * 0.40)
-    solid_black_start = h - solid_black_height
-    d.rectangle([(0, solid_black_start), (w, h)], fill=(0, 0, 0, 255))
-
-    # Градиентная зона
-    gradient_zone_height = g_h - solid_black_height
-    steps = max(1, int(gradient_zone_height * 4))
-
+    
+    # Высота градиента
+    gradient_height = int(h * percent)
+    # Начало градиента (сверху)
+    gradient_start = h - gradient_height
+    
+    # 40% снизу - сплошной чёрный
+    solid_height = int(gradient_height * 0.40)
+    solid_start = h - solid_height
+    d.rectangle([(0, solid_start), (w, h)], fill=(0, 0, 0, 255))
+    
+    # 60% сверху - плавный градиент
+    fade_height = gradient_height - solid_height
+    steps = max(100, fade_height)
+    
     for i in range(steps):
+        # Нормализованная позиция от 0 (верх градиента) до 1 (начало чёрного)
         t = i / steps
         
+        # Выбираем функцию затухания
         if soft_top:
-            # Мягкое рассеивание сверху
+            # Очень мягкий верх для logo/last режима
             alpha = int(255 * (t ** 4))
         else:
+            # Обычный кубический градиент
             alpha = int(255 * (t ** 3))
-            
-        y = y0 + int(i * gradient_zone_height / steps)
-        if 0 <= y < solid_black_start:  # Рисуем только до начала чёрной части
+        
+        # Позиция пикселя
+        y = gradient_start + int(i * fade_height / steps)
+        
+        # Рисуем только если в пределах fade зоны
+        if gradient_start <= y < solid_start:
             d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
-
-    out = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    return out, y0, g_h
+    
+    # Накладываем на изображение
+    result = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    return result, gradient_start, gradient_height
 
 def wrap_text(text, font, max_width, draw, tracking=-1):
     words, lines, cur = text.split(), [], []
@@ -364,11 +372,9 @@ def process_image():
             
             print(f"[Gradient] Auto-calculated: {gp*100:.0f}%")
         
-        # Смещение градиента вниз на 10px для logo и last mode
-        gradient_offset = 10 if (add_logo or is_last_mode) else 0
         # Мягкий верхний край для logo и last mode
         soft_top_edge = add_logo or is_last_mode
-        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, gradient_offset, soft_top_edge)
+        img, fade_top, fade_h = draw_soft_warm_fade(img, gp, soft_top_edge)
 
         d = ImageDraw.Draw(img)
 
