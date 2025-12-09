@@ -164,26 +164,27 @@ def draw_soft_warm_fade(img: Image.Image, percent: float, soft_top: bool = False
     
     # 60% сверху - плавный градиент
     fade_height = gradient_height - solid_height
-    steps = max(100, fade_height)
     
-    for i in range(steps):
-        # Нормализованная позиция от 0 (верх градиента) до 1 (начало чёрного)
-        t = i / steps
+    if fade_height > 0:
+        steps = int(fade_height)  # Каждый пиксель - отдельный шаг
         
-        # Выбираем функцию затухания
-        if soft_top:
-            # Очень мягкий верх для logo/last режима
-            alpha = int(255 * (t ** 4))
-        else:
-            # Обычный кубический градиент
-            alpha = int(255 * (t ** 3))
-        
-        # Позиция пикселя
-        y = gradient_start + int(i * fade_height / steps)
-        
-        # Рисуем только если в пределах fade зоны
-        if gradient_start <= y < solid_start:
-            d.rectangle([(0, y), (w, y+1)], fill=(0, 0, 0, alpha))
+        for i in range(steps):
+            # Нормализованная позиция от 0 (верх градиента) до 1 (начало чёрного)
+            t = i / max(steps - 1, 1)  # Избегаем деления на 0
+            
+            # Выбираем функцию затухания
+            if soft_top:
+                # Очень мягкий верх для logo/last режима
+                alpha = int(255 * (t ** 4))
+            else:
+                # Обычный кубический градиент
+                alpha = int(255 * (t ** 3))
+            
+            # Позиция пикселя
+            y = gradient_start + i
+            
+            # Рисуем линию градиента
+            d.line([(0, y), (w, y)], fill=(0, 0, 0, alpha))
     
     # Накладываем на изображение
     result = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
