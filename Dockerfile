@@ -32,9 +32,9 @@ RUN mkdir -p /tmp/bot_images /app/models
 
 #
 # Скачиваем LaMa модель (опционально, можно скачать при первом запуске)
-# RUN wget https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip && \
-#     unzip big-lama.zip -d /app/models/ && \
-#     rm big-lama.zip
+ RUN wget https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip && \
+     unzip big-lama.zip -d /app/models/ && \
+     rm big-lama.zip
 
 # Переменные окружения
 ENV PYTHONUNBUFFERED=1
