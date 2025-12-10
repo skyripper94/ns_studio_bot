@@ -30,11 +30,6 @@ COPY lama_integration.py .
 # Создаем директории
 RUN mkdir -p /tmp/bot_images /app/models
 
-# Клонируем LaMa репозиторий
-RUN git clone https://github.com/advimman/lama.git /app/lama && \
-    cd /app/lama && \
-    pip install --no-cache-dir -r requirements.txt
-
 # Скачиваем LaMa модель (опционально, можно скачать при первом запуске)
  RUN wget https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip && \
      unzip big-lama.zip -d /app/models/ && \
