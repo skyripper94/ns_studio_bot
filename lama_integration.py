@@ -1,85 +1,73 @@
 """
-Интеграция с LaMa для удаления текста
+Интеграция с IOPaint для качественного удаления текста
+IOPaint - готовая обертка над LaMa с простым API
 """
 
 import os
-import sys
-from pathlib import Path
 import logging
 import numpy as np
-import torch
-from PIL import Image
 import cv2
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Путь к модели
-MODEL_PATH = Path(os.getenv('LAMA_MODEL_PATH', '/app/models/big-lama'))
+# Пробуем импортировать IOPaint
+try:
+    from iopaint.model_manager import ModelManager
+    from iopaint.schema import Config, HDStrategy, LDMSampler
+    IOPAINT_AVAILABLE = True
+    logger.info("✅ IOPaint доступен")
+except ImportError:
+    IOPAINT_AVAILABLE = False
+    logger.warning("⚠️ IOPaint недоступен, используем OpenCV fallback")
 
 
 class LamaInpainter:
-    """Класс для работы с LaMa моделью"""
+    """Инпейнтер с IOPaint (LaMa) или OpenCV fallback"""
     
     def __init__(self):
         self.model = None
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        logger.info(f"Используем устройство: {self.device}")
-    
-    def load_model(self):
-        """Загружает LaMa модель"""
-        if self.model is not None:
-            return True
+        self.device = 'cpu'  # IOPaint автоматически выбирает GPU если есть
         
+        if IOPAINT_AVAILABLE:
+            self._init_iopaint()
+        else:
+            logger.info("Используем OpenCV fallback")
+    
+    def _init_iopaint(self):
+        """Инициализация IOPaint модели"""
         try:
-            # Проверяем наличие модели
-            if not MODEL_PATH.exists():
-                logger.warning(f"Модель не найдена в {MODEL_PATH}")
-                logger.info("Попытка скачать модель...")
-                self._download_model()
+            # Конфигурация IOPaint
+            config = Config(
+                ldm_steps=25,
+                ldm_sampler=LDMSampler.ddim,
+                hd_strategy=HDStrategy.ORIGINAL,
+                hd_strategy_crop_margin=128,
+                hd_strategy_crop_trigger_size=800,
+                hd_strategy_resize_limit=1024,
+            )
             
-            # Загружаем модель
-            logger.info("Загружаем LaMa модель...")
+            # Загружаем LaMa модель
+            self.model = ModelManager(
+                name="lama",
+                device=self.device,
+            )
             
-            # TODO: Здесь будет реальная загрузка LaMa
-            # Для Railway деплоя используем упрощенную версию
-            
-            # Пока используем простой OpenCV inpainting как fallback
-            self.model = "opencv_fallback"
-            logger.info("✅ Модель загружена (OpenCV fallback)")
-            
-            return True
+            self.config = config
+            logger.info("✅ IOPaint LaMa модель загружена")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки модели: {e}")
-            return False
+            logger.error(f"❌ Ошибка загрузки IOPaint: {e}")
+            self.model = None
     
-    def _download_model(self):
-        """Скачивает модель с HuggingFace"""
-        import urllib.request
-        import zipfile
-        
-        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        
-        model_url = "https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip"
-        zip_path = MODEL_PATH.parent / "big-lama.zip"
-        
-        logger.info(f"Скачиваем модель с {model_url}")
-        
-        # Скачиваем
-        urllib.request.urlretrieve(model_url, zip_path)
-        
-        # Распаковываем
-        logger.info("Распаковываем модель...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(MODEL_PATH.parent)
-        
-        # Удаляем архив
-        zip_path.unlink()
-        logger.info("✅ Модель скачана")
+    def load_model(self):
+        """Совместимость со старым API"""
+        if self.model is None and IOPAINT_AVAILABLE:
+            self._init_iopaint()
     
     def inpaint(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """
-        Удаляет области по маске
+        Удаляет области по маске используя IOPaint (LaMa) или OpenCV
         
         Args:
             image: исходное изображение (BGR)
@@ -88,62 +76,64 @@ class LamaInpainter:
         Returns:
             result: обработанное изображение
         """
-        if self.model is None:
-            self.load_model()
+        # Если IOPaint доступен и модель загружена
+        if IOPAINT_AVAILABLE and self.model is not None:
+            try:
+                return self._iopaint_inpaint(image, mask)
+            except Exception as e:
+                logger.error(f"❌ Ошибка IOPaint inpainting: {e}")
+                logger.info("Переключаемся на OpenCV fallback")
+                return self._opencv_inpaint(image, mask)
+        else:
+            # Fallback на улучшенный OpenCV
+            return self._opencv_inpaint(image, mask)
+    
+    def _iopaint_inpaint(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """IOPaint инпейнтинг (высокое качество)"""
+        # Конвертируем BGR -> RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Конвертируем в PIL Image
+        pil_image = Image.fromarray(image_rgb)
+        pil_mask = Image.fromarray(mask)
+        
+        # Инпейнтинг через IOPaint
+        result_pil = self.model(pil_image, pil_mask, self.config)
+        
+        # Конвертируем обратно в numpy BGR
+        result_rgb = np.array(result_pil)
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        
+        logger.info("✅ IOPaint (LaMa) inpainting выполнен")
+        return result_bgr
+    
+    def _opencv_inpaint(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """Улучшенный OpenCV инпейнтинг (fallback)"""
+        if mask.dtype != np.uint8:
+            mask = mask.astype(np.uint8)
         
         try:
-            # Убеждаемся что маска правильного типа
-            if mask.dtype != np.uint8:
-                mask = mask.astype(np.uint8)
-            
-            # Используем комбинацию методов для лучшего качества
-            # Сначала NS (лучше для текстур)
+            # Двойной проход для лучшего качества
             result = cv2.inpaint(image, mask, inpaintRadius=7, flags=cv2.INPAINT_NS)
-            
-            # Затем дополнительный проход TELEA для сглаживания
             result = cv2.inpaint(result, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
             
-            # Небольшое размытие только в области маски для сглаживания границ
+            # Легкое размытие в области маски для сглаживания границ
             mask_blur = cv2.GaussianBlur(mask, (5, 5), 0)
             mask_normalized = mask_blur.astype(float) / 255.0
             
-            # Применяем легкое размытие только в замененных областях
             blurred = cv2.bilateralFilter(result, 5, 50, 50)
             result = (result * (1 - mask_normalized[:,:,np.newaxis]) + 
                      blurred * mask_normalized[:,:,np.newaxis]).astype(np.uint8)
             
-            logger.info("✅ Inpainting выполнен (улучшенный OpenCV)")
+            logger.info("✅ OpenCV inpainting выполнен")
             return result
             
         except Exception as e:
-            logger.error(f"❌ Ошибка inpainting: {e}")
+            logger.error(f"❌ Ошибка OpenCV inpainting: {e}")
             return image
-    
-    def process_file(self, image_path: Path, mask_path: Path, output_path: Path):
-        """
-        Обрабатывает файл изображения
-        
-        Args:
-            image_path: путь к изображению
-            mask_path: путь к маске
-            output_path: путь для сохранения результата
-        """
-        # Читаем изображение и маску
-        image = cv2.imread(str(image_path))
-        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        
-        if image is None or mask is None:
-            raise ValueError("Не удалось загрузить изображение или маску")
-        
-        # Обрабатываем
-        result = self.inpaint(image, mask)
-        
-        # Сохраняем
-        cv2.imwrite(str(output_path), result)
-        logger.info(f"Результат сохранен: {output_path}")
 
 
-# Глобальный экземпляр
+# Глобальный инстанс
 _inpainter = None
 
 def get_inpainter() -> LamaInpainter:
