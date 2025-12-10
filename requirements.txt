@@ -2,12 +2,12 @@
 python-telegram-bot==20.7
 python-dotenv==1.0.0
 
-# Обработка изображений
-Pillow==10.1.0
+# Обработка изображений - СОВМЕСТИМЫЕ версии с IOPaint
+Pillow==9.5.0
 opencv-python-headless==4.8.1.78
 numpy==1.24.3
 
-# IOPaint - готовая обертка над LaMa (упрощенная интеграция)
+# IOPaint - готовая обертка над LaMa
 iopaint==1.3.3
 
 # Утилиты
