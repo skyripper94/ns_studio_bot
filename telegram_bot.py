@@ -343,11 +343,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем результат
         await status_msg.edit_text("✅ Готово!")
         
+        # Создаем короткий ID для callback_data (Telegram лимит 64 байта)
+        import uuid
+        short_id = str(uuid.uuid4())[:8]  # Используем первые 8 символов UUID
+        
         # Создаем кнопки
         keyboard = [
             [
-                InlineKeyboardButton("➕ Добавить текст", callback_data=f"addtext_{photo.file_id}"),
-                InlineKeyboardButton("👁️ Показать маску", callback_data=f"showmask_{photo.file_id}")
+                InlineKeyboardButton("➕ Добавить текст", callback_data=f"addtext_{short_id}"),
+                InlineKeyboardButton("👁️ Показать маску", callback_data=f"showmask_{short_id}")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -363,11 +367,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Удаляем статус
         await status_msg.delete()
         
-        # Сохраняем пути в контексте
-        context.user_data[photo.file_id] = {
+        # Сохраняем пути в контексте с коротким ID
+        context.user_data[short_id] = {
             'original': image_path,
             'cleaned': cleaned_path,
-            'mask': mask_path
+            'mask': mask_path,
+            'file_id': photo.file_id
         }
         
     except Exception as e:
@@ -384,17 +389,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data.startswith("showmask_"):
         # Показываем маску
-        file_id = data.replace("showmask_", "")
-        if file_id in context.user_data:
-            mask_path = context.user_data[file_id]['mask']
+        short_id = data.replace("showmask_", "")
+        if short_id in context.user_data:
+            mask_path = context.user_data[short_id]['mask']
             with open(mask_path, 'rb') as f:
                 await query.message.reply_photo(
                     photo=f,
                     caption="👁️ Маска удаления (белое = удалено)"
                 )
+        else:
+            await query.message.reply_text("❌ Данные изображения не найдены. Отправьте изображение снова.")
     
     elif data.startswith("addtext_"):
         # Запрашиваем текст
+        short_id = data.replace("addtext_", "")
+        # Сохраняем short_id для команды addtext
+        context.user_data['current_image_id'] = short_id
+        
         await query.message.reply_text(
             "✍️ Отправьте текст в формате:\n\n"
             "`/addtext \"Основной текст\" \"Дополнительный\"`\n\n"
@@ -427,14 +438,14 @@ async def addtext_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     main_text = texts[0] if len(texts) > 0 else DEFAULT_MAIN_TEXT
     secondary_text = texts[1] if len(texts) > 1 else ""
     
-    # Берем последнее очищенное изображение
-    if not context.user_data:
+    # Берем current_image_id из контекста
+    current_image_id = context.user_data.get('current_image_id')
+    
+    if not current_image_id or current_image_id not in context.user_data:
         await update.message.reply_text("❌ Сначала отправьте изображение для очистки!")
         return
     
-    # Берем последнее изображение
-    last_file_id = list(context.user_data.keys())[-1]
-    cleaned_path = context.user_data[last_file_id]['cleaned']
+    cleaned_path = context.user_data[current_image_id]['cleaned']
     
     status_msg = await update.message.reply_text("✍️ Добавляю текст...")
     
