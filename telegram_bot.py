@@ -1,5 +1,5 @@
 """
-Telegram Bot with 2 main modes:
+# Telegram Bot with 2 main modes:
 1. REMOVE - Only remove text (existing)
 2. FULL - Full workflow with 3 submodes (1/2/3)
 """
