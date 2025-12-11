@@ -1,124 +1,169 @@
 """
-FULL WORKFLOW:
-1. OCR - recognize text from image
-2. Remove text using FLUX Kontext Pro
-3. Translate EN -> RU
-4. Add translated text back
+Complete Workflow:
+1. OCR (Google Vision API on bottom 35%)
+2. Remove text (FLUX Kontext Pro)
+3. Translate & adapt (OpenAI GPT-4)
+4. Render gradient + text with custom styling
 """
 
 import os
 import logging
 import numpy as np
 import cv2
+import base64
+import requests
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
-import easyocr
-from deep_translator import GoogleTranslator
+import openai
 
 logger = logging.getLogger(__name__)
 
 # Configuration
 REPLICATE_API_TOKEN = os.getenv('REPLICATE_API_TOKEN', '')
+GOOGLE_VISION_API_KEY = os.getenv('GOOGLE_VISION_API_KEY', '')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 
-# Initialize OCR reader (once)
-_ocr_reader = None
+# Set OpenAI API key
+openai.api_key = OPENAI_API_KEY
 
-def get_ocr_reader():
-    """Initialize EasyOCR reader (lazy loading)"""
-    global _ocr_reader
-    if _ocr_reader is None:
-        logger.info("🔍 Initializing EasyOCR...")
-        _ocr_reader = easyocr.Reader(['en'], gpu=False)
-        logger.info("✅ EasyOCR ready")
-    return _ocr_reader
+# Colors
+COLOR_TURQUOISE = (0, 206, 209)  # #00CED1 (PIL uses RGB)
+COLOR_WHITE = (255, 255, 255)
+COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
+COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
+
+# Font sizes
+FONT_SIZE_MODE1 = 52  # Logo mode
+FONT_SIZE_MODE2 = 50  # Text mode
+FONT_SIZE_MODE3_TITLE = 48  # Content mode title
+FONT_SIZE_MODE3_SUBTITLE = 38  # Content mode subtitle
+FONT_SIZE_LOGO = 18
+FONT_SIZE_MIN = 20
+
+# Spacing
+SPACING_BOTTOM = 60  # px from bottom
+SPACING_LOGO_TO_TITLE = 1  # px between logo and title
+SPACING_TITLE_TO_SUBTITLE = 2  # px between title and subtitle
+LINE_SPACING = 1  # px between lines
+LOGO_LINE_LENGTH = 120  # px on each side
+
+# Layout
+TEXT_WIDTH_PERCENT = 0.9  # 90% of image width
+
+# Font path
+FONT_PATH = '/app/fonts/WaffleSoft.otf'
 
 
-def recognize_text(image: np.ndarray) -> list:
+def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = 35) -> dict:
     """
-    Recognize text from image using OCR
-    Returns: list of dicts with text and coordinates
+    OCR using Google Vision API on bottom portion of image
+    Returns: dict with 'text' and 'lines'
     """
+    if not GOOGLE_VISION_API_KEY:
+        logger.warning("⚠️ GOOGLE_VISION_API_KEY not set")
+        return {'text': '', 'lines': []}
+    
     try:
-        reader = get_ocr_reader()
+        # Crop bottom portion
+        height, width = image.shape[:2]
+        crop_start = int(height * (1 - crop_bottom_percent / 100))
+        cropped = image[crop_start:, :]
         
-        # Convert BGR to RGB for OCR
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        logger.info(f"🔍 OCR on bottom {crop_bottom_percent}% (rows {crop_start}-{height})")
         
-        # Run OCR
-        logger.info("🔍 Running OCR...")
-        results = reader.readtext(image_rgb)
+        # Convert to RGB and encode to base64
+        image_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(image_rgb)
+        buffer = BytesIO()
+        pil_image.save(buffer, format='PNG')
+        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # Parse results
-        text_data = []
-        for (bbox, text, confidence) in results:
-            if confidence > 0.5:  # Filter low confidence
-                # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                x_coords = [point[0] for point in bbox]
-                y_coords = [point[1] for point in bbox]
-                
-                text_data.append({
-                    'text': text,
-                    'confidence': confidence,
-                    'bbox': bbox,
-                    'x_min': int(min(x_coords)),
-                    'y_min': int(min(y_coords)),
-                    'x_max': int(max(x_coords)),
-                    'y_max': int(max(y_coords))
-                })
-                
-                logger.info(f"📝 Found: '{text}' (confidence: {confidence:.2f})")
+        # Call Google Vision API
+        url = f"https://vision.googleapis.com/v1/images:annotate?key={GOOGLE_VISION_API_KEY}"
+        payload = {
+            "requests": [{
+                "image": {"content": image_base64},
+                "features": [{"type": "TEXT_DETECTION"}]
+            }]
+        }
         
-        return text_data
+        response = requests.post(url, json=payload, timeout=30)
+        result = response.json()
+        
+        if 'responses' not in result or not result['responses']:
+            logger.warning("⚠️ No OCR results")
+            return {'text': '', 'lines': []}
+        
+        response_data = result['responses'][0]
+        
+        if 'textAnnotations' not in response_data:
+            logger.warning("⚠️ No text detected")
+            return {'text': '', 'lines': []}
+        
+        # First annotation is full text
+        full_text = response_data['textAnnotations'][0]['description']
+        logger.info(f"📝 Detected text: {full_text}")
+        
+        # Extract lines
+        lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+        
+        return {
+            'text': full_text,
+            'lines': lines
+        }
         
     except Exception as e:
-        logger.error(f"❌ OCR error: {e}")
-        return []
+        logger.error(f"❌ Google Vision OCR error: {e}")
+        return {'text': '', 'lines': []}
 
 
-def create_text_mask(image: np.ndarray, text_data: list, gradient_height_percent: int = 40) -> np.ndarray:
+def openai_translate(text: str, context: str = "") -> str:
     """
-    Create mask for text removal
-    - Covers detected text boxes
-    - Extends to cover gradient area (bottom 35-40%)
+    Translate and adapt text using OpenAI GPT-4
     """
-    height, width = image.shape[:2]
-    mask = np.zeros((height, width), dtype=np.uint8)
+    if not OPENAI_API_KEY or not text:
+        logger.warning("⚠️ OPENAI_API_KEY not set or no text")
+        return text
     
-    if not text_data:
-        # No text detected - mask bottom gradient area
-        gradient_start = int(height * (1 - gradient_height_percent / 100))
-        mask[gradient_start:, :] = 255
-        logger.info(f"📐 No text detected, masking bottom {gradient_height_percent}%")
-        return mask
-    
-    # Find text area boundaries
-    min_y = min(item['y_min'] for item in text_data)
-    max_y = max(item['y_max'] for item in text_data)
-    
-    # Extend mask to cover gradient area (bottom 35-40%)
-    gradient_start = int(height * (1 - gradient_height_percent / 100))
-    mask_start = min(min_y, gradient_start)
-    mask_end = height  # Always to bottom
-    
-    # Fill mask area
-    mask[mask_start:mask_end, :] = 255
-    
-    logger.info(f"📐 Text mask: rows {mask_start}-{mask_end} (gradient area: bottom {gradient_height_percent}%)")
-    
-    return mask
-
-
-def translate_text(text: str, source: str = 'en', target: str = 'ru') -> str:
-    """Translate text using Google Translate"""
     try:
-        translator = GoogleTranslator(source=source, target=target)
-        translated = translator.translate(text)
-        logger.info(f"🌐 Translated: '{text}' → '{translated}'")
+        logger.info(f"🌐 Translating: {text}")
+        
+        system_prompt = """Ты профессиональный переводчик для русскоязычной (СНГ) аудитории.
+
+Правила перевода:
+1. Названия брендов оставляй на английском (SpaceX, Tesla, Apple и т.д.)
+2. Адаптируй под естественный русский язык, не переводи дословно
+3. Используй короткие синонимы вместо длинных слов
+4. Сокращай валюту: "billion" → "млрд.", "million" → "млн."
+5. Делай текст живым и понятным для СНГ
+6. Возвращай ТОЛЬКО переведённый текст, без пояснений
+
+Примеры:
+"The Most Expensive Things Humans Have Ever Created" → "Самые дорогие творения человечества"
+"SpaceX Starlink Satellite Constellation" → "Спутниковая сеть SpaceX Starlink"
+"$10 billion" → "$10 млрд."
+"We Share Insights That Expand Your View" → "Делимся знаниями, расширяющими кругозор"
+"""
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Переведи и адаптируй: {text}"}
+            ],
+            temperature=0.7,
+            max_tokens=200
+        )
+        
+        translated = response.choices[0].message.content.strip()
+        logger.info(f"✅ Translated: {translated}")
+        
         return translated
+        
     except Exception as e:
-        logger.error(f"❌ Translation error: {e}")
-        return text  # Return original if translation fails
+        logger.error(f"❌ OpenAI translation error: {e}")
+        return text
 
 
 def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -129,43 +174,37 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     result = cv2.inpaint(image, mask, inpaintRadius=7, flags=cv2.INPAINT_NS)
     result = cv2.inpaint(result, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
     
-    logger.info("✅ OpenCV fallback inpainting done")
+    logger.info("✅ OpenCV fallback inpainting")
     return result
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """
-    Remove text using FLUX Kontext Pro
-    """
+    """Remove text using FLUX Kontext Pro"""
     if not REPLICATE_API_TOKEN:
-        logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV fallback")
+        logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
         return opencv_fallback(image, mask)
     
     try:
         import replicate
         
-        logger.info(f"🚀 Starting FLUX Kontext Pro...")
+        logger.info("🚀 FLUX Kontext Pro starting...")
         
-        # Convert image to BytesIO
+        # Convert to BytesIO
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Convert mask to BytesIO
         pil_mask = Image.fromarray(mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        # FLUX Kontext Pro prompt for inpainting
-        prompt = "seamless clean background, smooth gradient, no text, no logos, professional photo editing, high quality"
+        prompt = "seamless clean background, smooth gradient, no text, no logos, professional quality"
         
-        logger.info(f"📤 Sending to FLUX Kontext Pro...")
-        logger.info(f"🎨 Prompt: {prompt}")
+        logger.info("📤 Sending to FLUX...")
         
-        # Run FLUX Kontext Pro
         output = replicate.run(
             REPLICATE_MODEL,
             input={
@@ -180,161 +219,375 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         if hasattr(output, 'read'):
             result_bytes = output.read()
         elif isinstance(output, str):
-            import requests
-            logger.info("📥 Downloading result...")
             response = requests.get(output, timeout=60)
             result_bytes = response.content
         elif isinstance(output, list) and len(output) > 0:
-            import requests
-            logger.info("📥 Downloading result...")
             response = requests.get(output[0], timeout=60)
             result_bytes = response.content
         else:
-            logger.error(f"❌ Unknown output format: {type(output)}")
+            logger.error(f"❌ Unknown output: {type(output)}")
             return opencv_fallback(image, mask)
         
-        # Convert to numpy array
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
         result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        logger.info("✅ FLUX Kontext Pro inpainting done!")
+        logger.info("✅ FLUX Kontext Pro done!")
         return result_bgr
         
-    except ImportError:
-        logger.error("❌ replicate library not installed!")
-        return opencv_fallback(image, mask)
-    
     except Exception as e:
-        logger.error(f"❌ FLUX Kontext Pro error: {e}")
-        logger.info("Using OpenCV fallback")
+        logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
 
 
-def add_text_to_image(image: np.ndarray, texts: list, font_size: int = 40) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 35) -> np.ndarray:
     """
-    Add translated text back to image
-    texts: list of dicts with 'text' and position info
+    Create black gradient overlay (bottom 35% full black, fading up)
     """
-    try:
-        # Convert to PIL for text rendering
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(image_rgb)
-        draw = ImageDraw.Draw(pil_image)
+    gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
+    
+    start_row = int(height * (1 - start_percent / 100))
+    
+    for y in range(height):
+        if y >= height - 10:  # Bottom 10px fully black
+            alpha = 255
+        elif y >= start_row:
+            # Gradient from start_row to bottom
+            progress = (y - start_row) / (height - start_row)
+            alpha = int(255 * progress)
+        else:
+            alpha = 0
         
-        # Try to load font
+        gradient[y, :] = [0, 0, 0, alpha]
+    
+    return gradient
+
+
+def calculate_adaptive_font_size(text: str, font_path: str, max_width: int, 
+                                  initial_size: int, min_size: int = 20) -> tuple:
+    """
+    Calculate font size that fits text within max_width
+    Returns: (font_size, font_object, lines)
+    """
+    font_size = initial_size
+    
+    while font_size >= min_size:
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-        except:
-            font = ImageFont.load_default()
-            logger.warning("⚠️ Using default font")
-        
-        height, width = image.shape[:2]
-        
-        for item in texts:
-            text = item['translated_text']
+            font = ImageFont.truetype(font_path, font_size)
             
-            # Calculate text position (bottom center)
-            # Get text size
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
+            # Split into lines and check width
+            words = text.split()
+            lines = []
+            current_line = []
             
-            # Position at bottom center
-            x = (width - text_width) // 2
-            y = height - text_height - 30  # 30px from bottom
+            for word in words:
+                test_line = ' '.join(current_line + [word])
+                bbox = font.getbbox(test_line)
+                width = bbox[2] - bbox[0]
+                
+                if width <= max_width:
+                    current_line.append(word)
+                else:
+                    if current_line:
+                        lines.append(' '.join(current_line))
+                        current_line = [word]
+                    else:
+                        # Single word too long, must fit
+                        lines.append(word)
+                        current_line = []
             
-            # Draw text with shadow for better visibility
-            # Shadow
-            draw.text((x+2, y+2), text, font=font, fill=(0, 0, 0, 255))
-            # Main text (white)
-            draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))
+            if current_line:
+                lines.append(' '.join(current_line))
             
-            logger.info(f"✍️ Added text: '{text}' at ({x}, {y})")
+            # Check if all lines fit
+            fits = all(
+                font.getbbox(line)[2] - font.getbbox(line)[0] <= max_width
+                for line in lines
+            )
+            
+            if fits:
+                return font_size, font, lines
+            
+        except Exception as e:
+            logger.error(f"Font error at size {font_size}: {e}")
         
-        # Convert back to OpenCV
-        result_rgb = np.array(pil_image)
-        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-        
-        return result_bgr
-        
-    except Exception as e:
-        logger.error(f"❌ Text rendering error: {e}")
-        return image
+        font_size -= 2  # Decrease by 2px
+    
+    # Last resort
+    font = ImageFont.truetype(font_path, min_size)
+    return min_size, font, [text]
 
 
-def process_image_full_workflow(image: np.ndarray, gradient_percent: int = 40, translate: bool = True) -> tuple:
+def draw_text_with_outline_shadow(draw: ImageDraw.Draw, x: int, y: int, 
+                                   text: str, font: ImageFont.FreeTypeFont,
+                                   fill_color: tuple, outline_color: tuple,
+                                   shadow_offset: int = 2):
+    """Draw text with outline and shadow"""
+    # Shadow (behind)
+    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, 
+              fill=(0, 0, 0, 128))
+    
+    # Outline (8 directions)
+    for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
+        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
+    
+    # Main text
+    draw.text((x, y), text, font=font, fill=fill_color)
+
+
+def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     """
-    FULL WORKFLOW:
-    1. Recognize text (OCR)
-    2. Create mask for gradient area
-    3. Remove text using FLUX Kontext Pro
-    4. Translate text EN->RU
-    5. Add translated text back
-    
-    Returns: (processed_image, recognized_texts)
+    Mode 1: Logo + 2 lines + Title
     """
-    logger.info("=" * 50)
-    logger.info("🚀 Starting FULL WORKFLOW")
-    logger.info("=" * 50)
+    draw = ImageDraw.Draw(image, 'RGBA')
+    width, height = image.size
+    max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
-    # Step 1: OCR
-    logger.info("📋 STEP 1: Text Recognition")
-    text_data = recognize_text(image)
+    # Calculate title size and position
+    title_size, title_font, title_lines = calculate_adaptive_font_size(
+        title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE1
+    )
     
-    if not text_data:
-        logger.warning("⚠️ No text detected, will mask gradient area only")
+    # Calculate total height needed
+    title_heights = [title_font.getbbox(line)[3] - title_font.getbbox(line)[1] 
+                     for line in title_lines]
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
-    # Step 2: Create mask
-    logger.info("📋 STEP 2: Mask Creation")
-    mask = create_text_mask(image, text_data, gradient_percent)
+    # Logo
+    logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
+    logo_text = "@neurostep.media"
+    logo_bbox = logo_font.getbbox(logo_text)
+    logo_width = logo_bbox[2] - logo_bbox[0]
+    logo_height = logo_bbox[3] - logo_bbox[1]
     
-    # Step 3: Remove text
-    logger.info("📋 STEP 3: Text Removal (FLUX Kontext Pro)")
-    result = flux_kontext_inpaint(image, mask)
+    # Total construction height
+    total_height = logo_height + SPACING_LOGO_TO_TITLE + total_title_height
     
-    # Step 4 & 5: Translate and add text
-    if text_data and translate:
-        logger.info("📋 STEP 4: Translation")
-        for item in text_data:
-            item['translated_text'] = translate_text(item['text'], 'en', 'ru')
+    # Start Y position (60px from bottom for last line)
+    start_y = height - SPACING_BOTTOM - total_height
+    
+    # Draw logo
+    logo_x = (width - logo_width) // 2
+    logo_y = start_y
+    
+    # Logo lines
+    line_y = logo_y + logo_height // 2
+    line_left_start = logo_x - LOGO_LINE_LENGTH - 10
+    line_right_start = logo_x + logo_width + 10
+    
+    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)],
+              fill=COLOR_TURQUOISE, width=1)
+    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)],
+              fill=COLOR_TURQUOISE, width=1)
+    
+    # Logo text (no outline, just white)
+    draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
+    
+    # Draw title
+    title_y = start_y + logo_height + SPACING_LOGO_TO_TITLE
+    
+    for line in title_lines:
+        line_bbox = title_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
+        line_height = line_bbox[3] - line_bbox[1]
+        line_x = (width - line_width) // 2
         
-        logger.info("📋 STEP 5: Add Translated Text")
-        result = add_text_to_image(result, text_data)
+        draw_text_with_outline_shadow(
+            draw, line_x, title_y, line, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
+        )
+        
+        title_y += line_height + LINE_SPACING
     
-    logger.info("=" * 50)
+    return image
+
+
+def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
+    """
+    Mode 2: Title only (no logo)
+    """
+    draw = ImageDraw.Draw(image, 'RGBA')
+    width, height = image.size
+    max_text_width = int(width * TEXT_WIDTH_PERCENT)
+    
+    # Calculate title
+    title_size, title_font, title_lines = calculate_adaptive_font_size(
+        title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE2
+    )
+    
+    # Total height
+    title_heights = [title_font.getbbox(line)[3] - title_font.getbbox(line)[1] 
+                     for line in title_lines]
+    total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
+    
+    # Start position
+    start_y = height - SPACING_BOTTOM - total_height
+    
+    # Draw title
+    current_y = start_y
+    for line in title_lines:
+        line_bbox = title_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
+        line_height = line_bbox[3] - line_bbox[1]
+        line_x = (width - line_width) // 2
+        
+        draw_text_with_outline_shadow(
+            draw, line_x, current_y, line, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
+        )
+        
+        current_y += line_height + LINE_SPACING
+    
+    return image
+
+
+def render_mode3_content(image: Image.Image, title_translated: str, 
+                         subtitle_translated: str) -> Image.Image:
+    """
+    Mode 3: Title + Subtitle
+    """
+    draw = ImageDraw.Draw(image, 'RGBA')
+    width, height = image.size
+    max_text_width = int(width * TEXT_WIDTH_PERCENT)
+    
+    # Calculate title
+    title_size, title_font, title_lines = calculate_adaptive_font_size(
+        title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE
+    )
+    
+    # Calculate subtitle (20% smaller than title)
+    subtitle_initial_size = int(title_size * 0.8)
+    subtitle_size, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
+        subtitle_translated, FONT_PATH, max_text_width, subtitle_initial_size
+    )
+    
+    # Total height
+    title_heights = [title_font.getbbox(line)[3] - title_font.getbbox(line)[1] 
+                     for line in title_lines]
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
+    
+    subtitle_heights = [subtitle_font.getbbox(line)[3] - subtitle_font.getbbox(line)[1] 
+                        for line in subtitle_lines]
+    total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
+    
+    total_height = total_title_height + SPACING_TITLE_TO_SUBTITLE + total_subtitle_height
+    
+    # Start position
+    start_y = height - SPACING_BOTTOM - total_height
+    
+    # Draw title
+    current_y = start_y
+    for line in title_lines:
+        line_bbox = title_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
+        line_height = line_bbox[3] - line_bbox[1]
+        line_x = (width - line_width) // 2
+        
+        draw_text_with_outline_shadow(
+            draw, line_x, current_y, line, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
+        )
+        
+        current_y += line_height + LINE_SPACING
+    
+    # Draw subtitle
+    current_y += SPACING_TITLE_TO_SUBTITLE
+    
+    for line in subtitle_lines:
+        line_bbox = subtitle_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
+        line_height = line_bbox[3] - line_bbox[1]
+        line_x = (width - line_width) // 2
+        
+        draw_text_with_outline_shadow(
+            draw, line_x, current_y, line, subtitle_font,
+            COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
+        )
+        
+        current_y += line_height + LINE_SPACING
+    
+    return image
+
+
+def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
+    """
+    Full workflow for modes 1, 2, 3
+    Returns: (result_image, ocr_data)
+    """
+    logger.info("=" * 60)
+    logger.info(f"🚀 FULL WORKFLOW - MODE {mode}")
+    logger.info("=" * 60)
+    
+    # Step 1: OCR on bottom 35%
+    logger.info("📋 STEP 1: OCR (Google Vision)")
+    ocr_data = google_vision_ocr(image, crop_bottom_percent=35)
+    
+    if not ocr_data['text']:
+        logger.warning("⚠️ No text detected")
+        return image, ocr_data
+    
+    # Step 2: Create mask for bottom 35%
+    logger.info("📋 STEP 2: Create Mask")
+    height, width = image.shape[:2]
+    mask = np.zeros((height, width), dtype=np.uint8)
+    mask_start = int(height * 0.65)
+    mask[mask_start:, :] = 255
+    logger.info(f"📐 Mask: rows {mask_start}-{height}")
+    
+    # Step 3: Remove text with FLUX
+    logger.info("📋 STEP 3: Remove Text (FLUX Kontext Pro)")
+    clean_image = flux_kontext_inpaint(image, mask)
+    
+    # Step 4: Translate
+    logger.info("📋 STEP 4: Translate (OpenAI)")
+    
+    if mode == 3:
+        # Mode 3: separate title and subtitle
+        lines = ocr_data['lines']
+        if len(lines) >= 2:
+            title = ' '.join(lines[:-1])  # All except last
+            subtitle = lines[-1]  # Last line
+        else:
+            title = ocr_data['text']
+            subtitle = ""
+        
+        title_translated = openai_translate(title)
+        subtitle_translated = openai_translate(subtitle) if subtitle else ""
+    else:
+        title_translated = openai_translate(ocr_data['text'])
+        subtitle_translated = ""
+    
+    # Step 5: Create gradient
+    logger.info("📋 STEP 5: Create Gradient")
+    gradient = create_gradient(width, height, start_percent=35)
+    
+    # Apply gradient
+    clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(clean_rgb).convert('RGBA')
+    gradient_image = Image.fromarray(gradient, 'RGBA')
+    pil_image = Image.alpha_composite(pil_image, gradient_image)
+    
+    # Step 6: Render text
+    logger.info(f"📋 STEP 6: Render Text (Mode {mode})")
+    
+    if mode == 1:
+        pil_image = render_mode1_logo(pil_image, title_translated)
+    elif mode == 2:
+        pil_image = render_mode2_text(pil_image, title_translated)
+    elif mode == 3:
+        pil_image = render_mode3_content(pil_image, title_translated, subtitle_translated)
+    
+    # Convert back
+    result_rgb = np.array(pil_image.convert('RGB'))
+    result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+    
+    logger.info("=" * 60)
     logger.info("✅ WORKFLOW COMPLETED!")
-    logger.info("=" * 50)
+    logger.info("=" * 60)
     
-    return result, text_data
+    return result_bgr, ocr_data
 
 
 def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """
-    Compatibility function for existing telegram_bot.py
-    Calls FLUX Kontext Pro
-    """
+    """Compatibility function"""
     return flux_kontext_inpaint(image, mask)
-
-
-def remove_text(image_path: str, mask_path: str, output_path: str) -> bool:
-    """
-    Compatibility function for CLI usage
-    """
-    try:
-        image = cv2.imread(image_path)
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        
-        if image is None or mask is None:
-            logger.error("❌ Failed to load files")
-            return False
-        
-        result = flux_kontext_inpaint(image, mask)
-        cv2.imwrite(output_path, result)
-        
-        logger.info(f"✅ Result saved: {output_path}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        return False
