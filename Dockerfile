@@ -1,4 +1,4 @@
-## Use Python 3.10 slim
+# Use Python 3.10 slim
 FROM python:3.10-slim
 
 # Install system dependencies including font support
@@ -29,9 +29,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY telegram_bot.py .
 COPY lama_integration.py .
 
-# Copy font file (user must add this manually to GitHub)
-# The font file must be at: fonts/WaffleSoft.otf in repository
-COPY fonts/WaffleSoft.otf /app/fonts/ 2>/dev/null || echo "Warning: Font file not found, will use fallback"
+# Copy font file (place fonts/WaffleSoft.otf in repository)
+COPY fonts/ /app/fonts/
 
 # Update font cache
 RUN fc-cache -f -v
