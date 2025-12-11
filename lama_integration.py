@@ -1,27 +1,19 @@
 """
-Интеграция с Replicate API для удаления текста/лого
-Обновлено: декабрь 2024 - использует актуальные модели
+Интеграция с Replicate API используя ОФИЦИАЛЬНЫЙ SDK
+Намного проще и надежнее чем HTTP API!
 """
 
 import os
 import logging
 import numpy as np
 import cv2
-import requests
-import time
-import base64
 from io import BytesIO
 from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Конфигурация из переменных окружения
+# Конфигурация
 REPLICATE_API_KEY = os.getenv('REPLICATE_API_KEY', '')
-
-# АКТУАЛЬНЫЕ МОДЕЛИ (декабрь 2024):
-# 1. ideogram-ai/ideogram-v2 - топ качество + текст ⭐ РЕКОМЕНДУЮ
-# 2. ideogram-ai/ideogram-v2-turbo - быстрее, чуть хуже качество
-# 3. stability-ai/stable-diffusion-inpainting - классика
 REPLICATE_MODEL = os.getenv('REPLICATE_MODEL', 'ideogram-ai/ideogram-v2')
 
 
@@ -53,155 +45,80 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    Удаляет области по маске используя Replicate API
+    Удаляет области по маске используя Replicate SDK
     """
     if not REPLICATE_API_KEY:
         logger.warning("⚠️ REPLICATE_API_KEY не установлен, используем OpenCV fallback")
         return opencv_fallback(image, mask)
     
     try:
-        logger.info(f"🚀 Запуск Replicate API (модель: {REPLICATE_MODEL})...")
+        import replicate
         
-        # Конвертируем изображение в base64
+        logger.info(f"🚀 Запуск Replicate SDK (модель: {REPLICATE_MODEL})...")
+        
+        # Конвертируем изображение в BytesIO
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
-        
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
-        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+        img_buffer.seek(0)
         
-        # Конвертируем маску в base64
+        # Конвертируем маску в BytesIO
         pil_mask = Image.fromarray(mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
-        mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
+        mask_buffer.seek(0)
         
-        # Создаём prediction с НОВЫМ форматом API
-        logger.info("📤 Отправка запроса...")
+        # Запускаем модель через SDK
+        logger.info("📤 Отправка через Replicate SDK...")
         
-        # Для ideogram-v2 используем простой формат
-        if 'ideogram' in REPLICATE_MODEL:
-            payload = {
-                "input": {
-                    "prompt": "clean background, no text, no logos",  # Что хотим видеть
-                    "image": f"data:image/png;base64,{img_base64}",
-                    "mask": f"data:image/png;base64,{mask_base64}",
-                    "magic_prompt_option": "Off"  # Отключаем magic prompt для точности
-                }
+        output = replicate.run(
+            REPLICATE_MODEL,
+            input={
+                "prompt": "clean background, no text, no logos, seamless fill",
+                "image": img_buffer,
+                "mask": mask_buffer,
+                "magic_prompt_option": "Off"  # Для ideogram моделей
             }
-        else:
-            # Для других моделей (stable-diffusion)
-            payload = {
-                "input": {
-                    "prompt": "clean background",
-                    "image": f"data:image/png;base64,{img_base64}",
-                    "mask": f"data:image/png;base64,{mask_base64}",
-                }
-            }
-        
-        response = requests.post(
-            f"https://api.replicate.com/v1/models/{REPLICATE_MODEL}/predictions",
-            headers={
-                "Authorization": f"Bearer {REPLICATE_API_KEY}",
-                "Content-Type": "application/json",
-                "Prefer": "wait"
-            },
-            json=payload,
-            timeout=120
         )
         
-        if response.status_code not in [200, 201]:
-            logger.error(f"❌ Replicate ошибка: {response.status_code} - {response.text}")
-            return opencv_fallback(image, mask)
-        
-        result_data = response.json()
-        status = result_data.get('status')
-        
-        if status == 'succeeded':
-            result_url = result_data.get('output')
-            
-            if not result_url:
-                logger.error("❌ Replicate вернул пустой output")
-                return opencv_fallback(image, mask)
-            
-            if isinstance(result_url, list):
-                result_url = result_url[0]
-            
+        # Получаем результат
+        # output может быть URL или FileOutput объект
+        if hasattr(output, 'read'):
+            # Это FileOutput объект
+            result_bytes = output.read()
+        elif isinstance(output, str):
+            # Это URL, загружаем
+            import requests
             logger.info("📥 Загрузка результата...")
-            result_response = requests.get(result_url, timeout=30)
-            
-            if result_response.status_code != 200:
-                logger.error(f"❌ Ошибка загрузки: {result_response.status_code}")
-                return opencv_fallback(image, mask)
-            
-            result_pil = Image.open(BytesIO(result_response.content))
-            result_rgb = np.array(result_pil.convert('RGB'))
-            result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-            
-            logger.info("✅ Replicate inpainting выполнен успешно!")
-            return result_bgr
-            
-        elif status == 'failed':
-            error = result_data.get('error', 'Unknown error')
-            logger.error(f"❌ Replicate failed: {error}")
-            return opencv_fallback(image, mask)
-        
+            response = requests.get(output, timeout=30)
+            result_bytes = response.content
+        elif isinstance(output, list) and len(output) > 0:
+            # Список URL
+            import requests
+            logger.info("📥 Загрузка результата...")
+            response = requests.get(output[0], timeout=30)
+            result_bytes = response.content
         else:
-            # Статус processing - ждём
-            get_url = result_data.get('urls', {}).get('get')
-            
-            if not get_url:
-                logger.error("❌ Нет URL для проверки статуса")
-                return opencv_fallback(image, mask)
-            
-            logger.info("⏳ Ожидание обработки...")
-            
-            for attempt in range(90):
-                time.sleep(1)
-                
-                status_response = requests.get(
-                    get_url,
-                    headers={"Authorization": f"Bearer {REPLICATE_API_KEY}"},
-                    timeout=10
-                )
-                
-                if status_response.status_code != 200:
-                    logger.error(f"❌ Ошибка проверки статуса")
-                    return opencv_fallback(image, mask)
-                
-                status_data = status_response.json()
-                current_status = status_data.get('status')
-                
-                if current_status == 'succeeded':
-                    result_url = status_data.get('output')
-                    
-                    if isinstance(result_url, list):
-                        result_url = result_url[0]
-                    
-                    result_response = requests.get(result_url, timeout=30)
-                    result_pil = Image.open(BytesIO(result_response.content))
-                    result_rgb = np.array(result_pil.convert('RGB'))
-                    result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-                    
-                    logger.info(f"✅ Replicate выполнен за {attempt+1}с")
-                    return result_bgr
-                
-                elif current_status == 'failed':
-                    logger.error(f"❌ Replicate failed")
-                    return opencv_fallback(image, mask)
-                
-                if attempt % 10 == 0:
-                    logger.info(f"⏳ Обработка... {attempt}s")
-            
-            logger.error("❌ Timeout")
+            logger.error(f"❌ Неизвестный формат output: {type(output)}")
             return opencv_fallback(image, mask)
         
-    except requests.exceptions.Timeout:
-        logger.error("❌ Timeout")
+        # Конвертируем в numpy array
+        result_pil = Image.open(BytesIO(result_bytes))
+        result_rgb = np.array(result_pil.convert('RGB'))
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        
+        logger.info("✅ Replicate SDK inpainting выполнен успешно!")
+        return result_bgr
+        
+    except ImportError:
+        logger.error("❌ Библиотека replicate не установлена!")
+        logger.error("Добавьте 'replicate' в requirements.txt")
         return opencv_fallback(image, mask)
     
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Ошибка Replicate SDK: {e}")
+        logger.info("Используем OpenCV fallback")
         return opencv_fallback(image, mask)
 
 
