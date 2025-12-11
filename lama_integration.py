@@ -43,9 +43,9 @@ FONT_SIZE_MIN = 24  # Increased minimum (was 20)
 
 # Spacing
 SPACING_BOTTOM = 100  # px from bottom (increased from 20, was 60)
-SPACING_LOGO_TO_TITLE = 1  # px between logo and title (increased from 1)
-SPACING_TITLE_TO_SUBTITLE = 3  # px between title and subtitle (increased from 2)
-LINE_SPACING = 2  # px between lines (increased from 1)
+SPACING_LOGO_TO_TITLE = 10  # px between logo and title (increased from 1)
+SPACING_TITLE_TO_SUBTITLE = 10  # px between title and subtitle (increased from 2)
+LINE_SPACING = 8  # px between lines (increased from 1)
 LOGO_LINE_LENGTH = 300  # px on each side
 
 # Layout
@@ -201,9 +201,10 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        prompt = "seamless clean background, smooth gradient, no text, no logos, professional quality"
+        prompt = "naturally blend and restore the background, remove only the text, preserve all objects and original image content"
         
         logger.info("📤 Sending to FLUX...")
+        logger.info(f"🎯 Prompt: {prompt}")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -211,7 +212,9 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "prompt": prompt,
                 "input_image": img_buffer,
                 "mask": mask_buffer,
-                "output_format": "png"
+                "output_format": "png",
+                "go_fast": False,  # Better quality
+                "num_inference_steps": 28  # Default, good balance
             }
         )
         
