@@ -1,6 +1,6 @@
 """
-Интеграция с Replicate API для запуска LaMa модели
-Универсальная версия - работает с любой моделью inpainting на Replicate
+Интеграция с Replicate API для удаления текста/лого
+Обновлено: декабрь 2024 - использует актуальные модели
 """
 
 import os
@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 
 # Конфигурация из переменных окружения
 REPLICATE_API_KEY = os.getenv('REPLICATE_API_KEY', '')
-# Модель по умолчанию: cjwbw/lama (стабильная LaMa модель)
-REPLICATE_MODEL = os.getenv('REPLICATE_MODEL', 'cjwbw/lama')
+
+# АКТУАЛЬНЫЕ МОДЕЛИ (декабрь 2024):
+# 1. ideogram-ai/ideogram-v2 - топ качество + текст ⭐ РЕКОМЕНДУЮ
+# 2. ideogram-ai/ideogram-v2-turbo - быстрее, чуть хуже качество
+# 3. stability-ai/stable-diffusion-inpainting - классика
+REPLICATE_MODEL = os.getenv('REPLICATE_MODEL', 'ideogram-ai/ideogram-v2')
 
 
 def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -72,23 +76,38 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         pil_mask.save(mask_buffer, format='PNG')
         mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
         
-        # Создаём prediction используя упрощённый формат
+        # Создаём prediction с НОВЫМ форматом API
         logger.info("📤 Отправка запроса...")
-        response = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            headers={
-                "Authorization": f"Bearer {REPLICATE_API_KEY}",
-                "Content-Type": "application/json",
-                "Prefer": "wait"  # Ждём результата синхронно
-            },
-            json={
-                "model": REPLICATE_MODEL,
+        
+        # Для ideogram-v2 используем простой формат
+        if 'ideogram' in REPLICATE_MODEL:
+            payload = {
                 "input": {
+                    "prompt": "clean background, no text, no logos",  # Что хотим видеть
+                    "image": f"data:image/png;base64,{img_base64}",
+                    "mask": f"data:image/png;base64,{mask_base64}",
+                    "magic_prompt_option": "Off"  # Отключаем magic prompt для точности
+                }
+            }
+        else:
+            # Для других моделей (stable-diffusion)
+            payload = {
+                "input": {
+                    "prompt": "clean background",
                     "image": f"data:image/png;base64,{img_base64}",
                     "mask": f"data:image/png;base64,{mask_base64}",
                 }
+            }
+        
+        response = requests.post(
+            f"https://api.replicate.com/v1/models/{REPLICATE_MODEL}/predictions",
+            headers={
+                "Authorization": f"Bearer {REPLICATE_API_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "wait"
             },
-            timeout=120  # 2 минуты на обработку
+            json=payload,
+            timeout=120
         )
         
         if response.status_code not in [200, 201]:
@@ -96,8 +115,6 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             return opencv_fallback(image, mask)
         
         result_data = response.json()
-        
-        # Проверяем статус
         status = result_data.get('status')
         
         if status == 'succeeded':
@@ -107,11 +124,9 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 logger.error("❌ Replicate вернул пустой output")
                 return opencv_fallback(image, mask)
             
-            # Если output это список, берём первый элемент
             if isinstance(result_url, list):
                 result_url = result_url[0]
             
-            # Загружаем результат
             logger.info("📥 Загрузка результата...")
             result_response = requests.get(result_url, timeout=30)
             
@@ -119,12 +134,11 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 logger.error(f"❌ Ошибка загрузки: {result_response.status_code}")
                 return opencv_fallback(image, mask)
             
-            # Конвертируем в numpy array
             result_pil = Image.open(BytesIO(result_response.content))
             result_rgb = np.array(result_pil.convert('RGB'))
             result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
             
-            logger.info("✅ Replicate (LaMa) inpainting выполнен успешно!")
+            logger.info("✅ Replicate inpainting выполнен успешно!")
             return result_bgr
             
         elif status == 'failed':
@@ -133,8 +147,7 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             return opencv_fallback(image, mask)
         
         else:
-            # Если статус processing, пробуем подождать
-            prediction_id = result_data.get('id')
+            # Статус processing - ждём
             get_url = result_data.get('urls', {}).get('get')
             
             if not get_url:
@@ -143,7 +156,6 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             
             logger.info("⏳ Ожидание обработки...")
             
-            # Ждём до 90 секунд
             for attempt in range(90):
                 time.sleep(1)
                 
@@ -178,7 +190,6 @@ def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                     logger.error(f"❌ Replicate failed")
                     return opencv_fallback(image, mask)
                 
-                # Показываем прогресс
                 if attempt % 10 == 0:
                     logger.info(f"⏳ Обработка... {attempt}s")
             
