@@ -559,12 +559,20 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     
     # Step 5: Create gradient
     logger.info("📋 STEP 5: Create Gradient")
-    gradient = create_gradient(width, height, start_percent=35)
     
-    # Apply gradient
+    # Convert FLUX result to PIL
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
+    
+    # Get actual image size (FLUX may have resized it)
+    actual_width, actual_height = pil_image.size
+    logger.info(f"📐 Image size: {actual_width}x{actual_height}")
+    
+    # Create gradient matching actual size
+    gradient = create_gradient(actual_width, actual_height, start_percent=35)
     gradient_image = Image.fromarray(gradient, 'RGBA')
+    
+    # Apply gradient
     pil_image = Image.alpha_composite(pil_image, gradient_image)
     
     # Step 6: Render text
