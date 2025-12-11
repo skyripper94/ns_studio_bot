@@ -1,5 +1,5 @@
 """
-Complete Workflow:
+# Complete Workflow:
 1. OCR (Google Vision API on bottom 35%)
 2. Remove text (FLUX Kontext Pro)
 3. Translate & adapt (OpenAI GPT-4)
