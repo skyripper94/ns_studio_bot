@@ -40,3 +40,5 @@ RUN mkdir -p /tmp/bot_images
 
 # Run bot
 CMD ["python", "telegram_bot.py"]
+
+#
