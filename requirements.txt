@@ -1,4 +1,4 @@
-# Core dependencies
+# Core
 python-telegram-bot==20.7
 python-dotenv==1.0.0
 
@@ -7,14 +7,11 @@ Pillow==10.1.0
 opencv-python-headless==4.8.1.78
 numpy==1.24.3
 
-# Replicate SDK for FLUX Kontext Pro
+# Replicate SDK
 replicate
 
 # HTTP requests
 requests==2.31.0
 
-# OCR for text recognition
-easyocr
-
-# Translation EN to RU
-deep-translator==1.11.4
+# OpenAI
+openai==0.28.1
