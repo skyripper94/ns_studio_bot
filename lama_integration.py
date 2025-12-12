@@ -260,7 +260,7 @@ def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndar
             # Enhanced gradient with better curve
             progress = (y - start_row) / (height - start_row)
             # Use cubic easing for smoother, more saturated gradient
-            alpha = int(255 * (progress ** 1.2))
+            alpha = int(255 * (progress ** 0.8))
         else:
             alpha = 0
         
