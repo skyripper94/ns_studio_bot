@@ -28,7 +28,7 @@ REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 openai.api_key = OPENAI_API_KEY
 
 # Colors
-COLOR_TURQUOISE = (0, 206, 209)  # #00CED1 (PIL uses RGB)
+COLOR_TURQUOISE = (0, 180, 185)  # #00B4B9 (PIL uses RGB)
 COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
