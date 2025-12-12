@@ -28,28 +28,28 @@ REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 openai.api_key = OPENAI_API_KEY
 
 # Colors
-COLOR_TURQUOISE = (0, 206, 209)  # #00B4B9 (PIL uses RGB)
+COLOR_TURQUOISE = (0, 206, 209)  # #00CED1 (PIL uses RGB)
 COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
 
-# Font sizes (increased for better visibility)
-FONT_SIZE_MODE1 = 80  # 64 * 1.25
-FONT_SIZE_MODE2 = 78  # 62 * 1.25
-FONT_SIZE_MODE3_TITLE = 75  # 60 * 1.25
-FONT_SIZE_MODE3_SUBTITLE = 60  # 48 * 1.25
+# Font sizes (ORIGINAL SIZES - before *1.25)
+FONT_SIZE_MODE1 = 52  # Original
+FONT_SIZE_MODE2 = 50  # Original
+FONT_SIZE_MODE3_TITLE = 48  # Original
+FONT_SIZE_MODE3_SUBTITLE = 40  # Original
 FONT_SIZE_LOGO = 18
-FONT_SIZE_MIN = 24  # Increased minimum (was 20)
+FONT_SIZE_MIN = 32
 
 # Spacing
-SPACING_BOTTOM = 100  # px from bottom (increased from 20, was 60)
-SPACING_LOGO_TO_TITLE = 6  # px between logo and title (increased from 1)
-SPACING_TITLE_TO_SUBTITLE = 10  # px between title and subtitle (increased from 2)
-LINE_SPACING = 8  # px between lines (increased from 1)
-LOGO_LINE_LENGTH = 300  # px on each side
+SPACING_BOTTOM = 100
+SPACING_LOGO_TO_TITLE = 6
+SPACING_TITLE_TO_SUBTITLE = 10
+LINE_SPACING = 8
+LOGO_LINE_LENGTH = 300
 
 # Layout
-TEXT_WIDTH_PERCENT = 0.9  # 90% of image width
+TEXT_WIDTH_PERCENT = 0.9
 
 # Font path
 FONT_PATH = '/app/fonts/WaffleSoft.otf'
@@ -213,8 +213,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "input_image": img_buffer,
                 "mask": mask_buffer,
                 "output_format": "png",
-                "go_fast": False,  # Better quality
-                "num_inference_steps": 28  # Default, good balance
+                "go_fast": False,
+                "num_inference_steps": 28
             }
         )
         
@@ -243,30 +243,27 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 50) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
     """
-    Create enhanced black gradient overlay with better saturation
-    Starts from 45% (was 35%) for better coverage
+    Create smooth black gradient overlay WITHOUT solid black bar
+    Starts from 55% and smoothly fades to black at bottom
     """
     gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
     
     start_row = int(height * (1 - start_percent / 100))
     
     for y in range(height):
-        if y >= height - 60:
-            # Bottom 10px fully black
-            alpha = 255
-        elif y >= start_row:
-            # Enhanced gradient with better curve
+        if y >= start_row:
+            # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            # Use cubic easing for smoother, more saturated gradient
-            alpha = int(255 * (progress ** 1.2))
+            # Use power of 0.7 for faster darkening (more aggressive)
+            alpha = int(255 * (progress ** 0.7))
         else:
             alpha = 0
         
         gradient[y, :] = [0, 0, 0, alpha]
     
-    logger.info(f"✨ Created enhanced gradient from row {start_row} ({start_percent}%)")
+    logger.info(f"✨ Created smooth gradient from row {start_row} ({start_percent}%)")
     return gradient
 
 
@@ -299,7 +296,6 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
                         lines.append(' '.join(current_line))
                         current_line = [word]
                     else:
-                        # Single word too long, must fit
                         lines.append(word)
                         current_line = []
             
@@ -318,33 +314,64 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
         except Exception as e:
             logger.error(f"Font error at size {font_size}: {e}")
         
-        font_size -= 2  # Decrease by 2px
+        font_size -= 2
     
     # Last resort
     font = ImageFont.truetype(font_path, min_size)
     return min_size, font, [text]
 
-def draw_text_with_outline_shadow(draw: ImageDraw.Draw, x: int, y: int, 
-                                   text: str, font: ImageFont.FreeTypeFont,
-                                   fill_color: tuple, outline_color: tuple,
-                                   shadow_offset: int = 2):
-    """Draw text with outline and shadow"""
-    # Shadow (behind)
-    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, 
-              fill=(0, 0, 0, 128))
+
+def draw_sharp_stretched_text(image: Image.Image, x: int, y: int, 
+                               text: str, font: ImageFont.FreeTypeFont,
+                               fill_color: tuple, outline_color: tuple,
+                               shadow_offset: int = 2):
+    """
+    Draw super sharp text with 3x rendering + 25% vertical stretch
+    """
+    # Get text size
+    bbox = font.getbbox(text)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    
+    # Create temporary image 3x for sharpness
+    scale = 3
+    temp_width = text_width * scale
+    temp_height = text_height * scale
+    
+    temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
+    temp_draw = ImageDraw.Draw(temp)
+    
+    # Font 3x
+    font_3x = ImageFont.truetype(font.path, font.size * scale)
+    
+    # Draw with 3x resolution
+    # Shadow
+    temp_draw.text((shadow_offset * scale, shadow_offset * scale), text, 
+                   font=font_3x, fill=(0, 0, 0, 128))
     
     # Outline (8 directions)
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
+        temp_draw.text((dx * scale, dy * scale), text, 
+                       font=font_3x, fill=outline_color)
     
     # Main text
-    draw.text((x, y), text, font=font, fill=fill_color)
+    temp_draw.text((0, 0), text, font=font_3x, fill=fill_color)
+    
+    # Downscale to original size with high quality (for sharpness)
+    temp = temp.resize((text_width, text_height), Image.LANCZOS)
+    
+    # STRETCH VERTICALLY by 25%
+    stretched_height = int(text_height * 1.25)
+    temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
+    
+    # Paste stretched text into image
+    image.paste(temp_stretched, (x, y), temp_stretched)
+
 
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     """
     Mode 1: Logo + 2 lines + Title (UPPERCASE)
     """
-    draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
@@ -356,9 +383,14 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE1
     )
     
-    # Calculate total height needed
-    title_heights = [title_font.getbbox(line)[3] - title_font.getbbox(line)[1] 
-                     for line in title_lines]
+    # Calculate total height needed (with 25% stretch)
+    title_heights = []
+    for line in title_lines:
+        bbox = title_font.getbbox(line)
+        line_height = bbox[3] - bbox[1]
+        stretched_height = int(line_height * 1.25)  # +25% vertical
+        title_heights.append(stretched_height)
+    
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
     # Logo
@@ -371,10 +403,11 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     # Total construction height
     total_height = logo_height + SPACING_LOGO_TO_TITLE + total_title_height
     
-    # Start Y position (60px from bottom for last line)
+    # Start Y position
     start_y = height - SPACING_BOTTOM - total_height
     
     # Draw logo
+    draw = ImageDraw.Draw(image, 'RGBA')
     logo_x = (width - logo_width) // 2
     logo_y = start_y
     
@@ -388,24 +421,23 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)],
               fill=COLOR_TURQUOISE, width=1)
     
-    # Logo text (no outline, just white)
+    # Logo text
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
     
-    # Draw title
+    # Draw title with sharp + stretched rendering
     title_y = start_y + logo_height + SPACING_LOGO_TO_TITLE
     
-    for line in title_lines:
+    for i, line in enumerate(title_lines):
         line_bbox = title_font.getbbox(line)
         line_width = line_bbox[2] - line_bbox[0]
-        line_height = line_bbox[3] - line_bbox[1]
         line_x = (width - line_width) // 2
         
-        draw_text_with_outline_shadow(
-            draw, line_x, title_y, line, title_font,
+        draw_sharp_stretched_text(
+            image, line_x, title_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
         
-        title_y += line_height + LINE_SPACING
+        title_y += title_heights[i] + LINE_SPACING
     
     return image
 
@@ -414,7 +446,6 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     """
     Mode 2: Title only (no logo) (UPPERCASE)
     """
-    draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
@@ -426,9 +457,14 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE2
     )
     
-    # Total height
-    title_heights = [title_font.getbbox(line)[3] - title_font.getbbox(line)[1] 
-                     for line in title_lines]
+    # Total height (with 25% stretch)
+    title_heights = []
+    for line in title_lines:
+        bbox = title_font.getbbox(line)
+        line_height = bbox[3] - bbox[1]
+        stretched_height = int(line_height * 1.25)
+        title_heights.append(stretched_height)
+    
     total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
     # Start position
@@ -436,18 +472,17 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     
     # Draw title
     current_y = start_y
-    for line in title_lines:
+    for i, line in enumerate(title_lines):
         line_bbox = title_font.getbbox(line)
         line_width = line_bbox[2] - line_bbox[0]
-        line_height = line_bbox[3] - line_bbox[1]
         line_x = (width - line_width) // 2
         
-        draw_text_with_outline_shadow(
-            draw, line_x, current_y, line, title_font,
+        draw_sharp_stretched_text(
+            image, line_x, current_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
         
-        current_y += line_height + LINE_SPACING
+        current_y += title_heights[i] + LINE_SPACING
     
     return image
 
@@ -457,7 +492,6 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     """
     Mode 3: Title + Subtitle (BOTH UPPERCASE)
     """
-    draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
@@ -470,19 +504,28 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE
     )
     
-    # Calculate subtitle (20% smaller than title)
+    # Calculate subtitle
     subtitle_initial_size = int(title_size * 0.8)
     subtitle_size, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
         subtitle_translated, FONT_PATH, max_text_width, subtitle_initial_size
     )
     
-    # Total height
-    title_heights = [title_font.getbbox(line)[3] - title_font.getbbox(line)[1] 
-                     for line in title_lines]
-    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
+    # Total height (with 25% stretch)
+    title_heights = []
+    for line in title_lines:
+        bbox = title_font.getbbox(line)
+        line_height = bbox[3] - bbox[1]
+        stretched_height = int(line_height * 1.25)
+        title_heights.append(stretched_height)
     
-    subtitle_heights = [subtitle_font.getbbox(line)[3] - subtitle_font.getbbox(line)[1] 
-                        for line in subtitle_lines]
+    subtitle_heights = []
+    for line in subtitle_lines:
+        bbox = subtitle_font.getbbox(line)
+        line_height = bbox[3] - bbox[1]
+        stretched_height = int(line_height * 1.25)
+        subtitle_heights.append(stretched_height)
+    
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
     
     total_height = total_title_height + SPACING_TITLE_TO_SUBTITLE + total_subtitle_height
@@ -492,34 +535,32 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     
     # Draw title
     current_y = start_y
-    for line in title_lines:
+    for i, line in enumerate(title_lines):
         line_bbox = title_font.getbbox(line)
         line_width = line_bbox[2] - line_bbox[0]
-        line_height = line_bbox[3] - line_bbox[1]
         line_x = (width - line_width) // 2
         
-        draw_text_with_outline_shadow(
-            draw, line_x, current_y, line, title_font,
+        draw_sharp_stretched_text(
+            image, line_x, current_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
         
-        current_y += line_height + LINE_SPACING
+        current_y += title_heights[i] + LINE_SPACING
     
     # Draw subtitle
     current_y += SPACING_TITLE_TO_SUBTITLE
     
-    for line in subtitle_lines:
+    for i, line in enumerate(subtitle_lines):
         line_bbox = subtitle_font.getbbox(line)
         line_width = line_bbox[2] - line_bbox[0]
-        line_height = line_bbox[3] - line_bbox[1]
         line_x = (width - line_width) // 2
         
-        draw_text_with_outline_shadow(
-            draw, line_x, current_y, line, subtitle_font,
+        draw_sharp_stretched_text(
+            image, line_x, current_y, line, subtitle_font,
             COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
         )
         
-        current_y += line_height + LINE_SPACING
+        current_y += subtitle_heights[i] + LINE_SPACING
     
     return image
 
@@ -557,11 +598,10 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     logger.info("📋 STEP 4: Translate (OpenAI)")
     
     if mode == 3:
-        # Mode 3: separate title and subtitle
         lines = ocr_data['lines']
         if len(lines) >= 2:
-            title = ' '.join(lines[:-1])  # All except last
-            subtitle = lines[-1]  # Last line
+            title = ' '.join(lines[:-1])
+            subtitle = lines[-1]
         else:
             title = ocr_data['text']
             subtitle = ""
@@ -572,19 +612,19 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         title_translated = openai_translate(ocr_data['text'])
         subtitle_translated = ""
     
-    # Step 5: Create gradient (45% from bottom)
+    # Step 5: Create gradient
     logger.info("📋 STEP 5: Create Gradient")
     
     # Convert FLUX result to PIL
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
     
-    # Get actual image size (FLUX may have resized it)
+    # Get actual image size
     actual_width, actual_height = pil_image.size
     logger.info(f"📐 Image size: {actual_width}x{actual_height}")
     
-    # Create gradient matching actual size (45% coverage)
-    gradient = create_gradient(actual_width, actual_height, start_percent=45)
+    # Create smooth gradient (55% coverage, NO black bar)
+    gradient = create_gradient(actual_width, actual_height, start_percent=55)
     gradient_image = Image.fromarray(gradient, 'RGBA')
     
     # Apply gradient
