@@ -43,7 +43,7 @@ FONT_SIZE_MIN = 24  # Increased minimum (was 20)
 
 # Spacing
 SPACING_BOTTOM = 100  # px from bottom (increased from 20, was 60)
-SPACING_LOGO_TO_TITLE = 10  # px between logo and title (increased from 1)
+SPACING_LOGO_TO_TITLE = 8  # px between logo and title (increased from 1)
 SPACING_TITLE_TO_SUBTITLE = 10  # px between title and subtitle (increased from 2)
 LINE_SPACING = 8  # px between lines (increased from 1)
 LOGO_LINE_LENGTH = 300  # px on each side
@@ -243,7 +243,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 45) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
     """
     Create enhanced black gradient overlay with better saturation
     Starts from 45% (was 35%) for better coverage
@@ -260,7 +260,7 @@ def create_gradient(width: int, height: int, start_percent: int = 45) -> np.ndar
             # Enhanced gradient with better curve
             progress = (y - start_row) / (height - start_row)
             # Use cubic easing for smoother, more saturated gradient
-            alpha = int(255 * (progress ** 1.5))
+            alpha = int(255 * (progress ** 1.0))
         else:
             alpha = 0
         
