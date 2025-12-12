@@ -243,7 +243,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 60) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
     """
     Create enhanced black gradient overlay with better saturation
     Starts from 45% (was 35%) for better coverage
@@ -253,7 +253,7 @@ def create_gradient(width: int, height: int, start_percent: int = 60) -> np.ndar
     start_row = int(height * (1 - start_percent / 100))
     
     for y in range(height):
-        if y >= height - 10:
+        if y >= height - 200:
             # Bottom 10px fully black
             alpha = 255
         elif y >= start_row:
