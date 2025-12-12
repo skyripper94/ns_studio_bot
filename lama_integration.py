@@ -28,16 +28,16 @@ REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 openai.api_key = OPENAI_API_KEY
 
 # Colors
-COLOR_TURQUOISE = (0, 180, 185)  # #00B4B9 (PIL uses RGB)
+COLOR_TURQUOISE = (0, 206, 209)  # #00B4B9 (PIL uses RGB)
 COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
 
 # Font sizes (increased for better visibility)
-FONT_SIZE_MODE1 = 64  # Logo mode (was 52)
-FONT_SIZE_MODE2 = 62  # Text mode (was 50)
-FONT_SIZE_MODE3_TITLE = 60  # Content mode title (was 48)
-FONT_SIZE_MODE3_SUBTITLE = 48  # Content mode subtitle (was 38)
+FONT_SIZE_MODE1 = 80  # 64 * 1.25
+FONT_SIZE_MODE2 = 78  # 62 * 1.25
+FONT_SIZE_MODE3_TITLE = 75  # 60 * 1.25
+FONT_SIZE_MODE3_SUBTITLE = 60  # 48 * 1.25
 FONT_SIZE_LOGO = 18
 FONT_SIZE_MIN = 24  # Increased minimum (was 20)
 
@@ -243,7 +243,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 45) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 50) -> np.ndarray:
     """
     Create enhanced black gradient overlay with better saturation
     Starts from 45% (was 35%) for better coverage
@@ -253,7 +253,7 @@ def create_gradient(width: int, height: int, start_percent: int = 45) -> np.ndar
     start_row = int(height * (1 - start_percent / 100))
     
     for y in range(height):
-        if y >= height - 10:
+        if y >= height - 60:
             # Bottom 10px fully black
             alpha = 255
         elif y >= start_row:
@@ -329,7 +329,8 @@ def draw_text_with_outline_shadow(draw: ImageDraw.Draw, x: int, y: int,
                                    text: str, font: ImageFont.FreeTypeFont,
                                    fill_color: tuple, outline_color: tuple,
                                    shadow_offset: int = 2):
-    """Draw text with outline and shadow"""
+    """Draw text with outline, shadow and vertical gradient inside"""
+    
     # Shadow (behind)
     draw.text((x + shadow_offset, y + shadow_offset), text, font=font, 
               fill=(0, 0, 0, 128))
@@ -338,9 +339,30 @@ def draw_text_with_outline_shadow(draw: ImageDraw.Draw, x: int, y: int,
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
         draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
     
-    # Main text
-    draw.text((x, y), text, font=font, fill=fill_color)
-
+    # ГРАДИЕНТ ВНУТРИ ТЕКСТА (новое!)
+    bbox = font.getbbox(text)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    
+    # Создаем градиент
+    gradient = Image.new('RGBA', (text_width, text_height))
+    for py in range(text_height):
+        progress = py / text_height
+        r = int(0 + (fill_color[0] * progress))      # 0→206
+        g = int(150 + (fill_color[1] - 150) * progress)  # 150→206 (светлее вверху)
+        b = int(fill_color[2])
+        for px in range(text_width):
+            gradient.putpixel((px, py), (r, g, b, 255))
+    
+    # Маска из текста
+    mask = Image.new('L', (text_width, text_height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.text((0, 0), text, font=font, fill=255)
+    
+    # Применяем градиент через маску
+    temp = Image.new('RGBA', draw.im.size, (0, 0, 0, 0))
+    temp.paste(gradient, (x, y), mask)
+    draw.im.alpha_composite(temp)
 
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     """
