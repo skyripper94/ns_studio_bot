@@ -190,7 +190,6 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         logger.info("🚀 FLUX Kontext Pro starting...")
         
-        # Обрезаем только область с маской
         height, width = image.shape[:2]
         
         # Найти границы маски
@@ -198,16 +197,19 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         if len(mask_rows) == 0:
             return image
         
-        crop_start = max(0, mask_rows[0] - 100)  # 100px запас сверху
+        mask_start_row = mask_rows[0]  # ГДЕ МАСКА РЕАЛЬНО НАЧИНАЕТСЯ
+        context_buffer = 100  # Запас для контекста
+        
+        crop_start = max(0, mask_start_row - context_buffer)  # Обрезаем С запасом
         crop_end = height
         
         # Обрезаем изображение и маску
         cropped_image = image[crop_start:crop_end, :]
         cropped_mask = mask[crop_start:crop_end, :]
         
-        logger.info(f"✂️ Cropped to rows {crop_start}-{crop_end} (masked area + context)")
+        logger.info(f"✂️ Cropped: rows {crop_start}-{crop_end}, mask starts at {mask_start_row}")
         
-        # Конвертируем обрезанное
+        # Конвертируем
         image_rgb = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
@@ -252,37 +254,25 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert('RGB'))
         result_cropped = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        # СКЛЕИВАНИЕ С ПЛАВНЫМ ПЕРЕХОДОМ
+        # КЛЮЧЕВОЕ ОТЛИЧИЕ: вставляем ТОЛЬКО зону с маской!
         final_result = image.copy()
         
-        blend_zone = 50  # 50px для плавного перехода
+        # Сколько строк от crop_start до mask_start_row (буфер контекста)
+        buffer_offset = mask_start_row - crop_start
         
-        if crop_start > 0 and crop_start + blend_zone < height:
-            # Основная часть (после зоны blend)
-            final_result[crop_start + blend_zone:crop_end, :] = result_cropped[blend_zone:, :]
-            
-            # Зона плавного перехода (alpha blending)
-            for i in range(blend_zone):
-                alpha = i / blend_zone  # 0.0 -> 1.0 (постепенно)
-                y_original = crop_start + i
-                y_cropped = i
-                
-                # Плавное смешивание: оригинал → FLUX
-                final_result[y_original, :] = (
-                    image[y_original, :].astype(np.float32) * (1 - alpha) + 
-                    result_cropped[y_cropped, :].astype(np.float32) * alpha
-                ).astype(np.uint8)
-        else:
-            # Если crop_start = 0, просто вставляем
-            final_result[crop_start:crop_end, :] = result_cropped
+        # Берём из FLUX результата ТОЛЬКО часть начиная с buffer_offset
+        # (выбрасываем первые 100px которые были для контекста)
+        flux_masked_part = result_cropped[buffer_offset:, :]
         
-        logger.info("✅ FLUX done + blended seamlessly!")
+        # Вставляем ТОЛЬКО с mask_start_row (где маска реально начинается)
+        final_result[mask_start_row:crop_end, :] = flux_masked_part
+        
+        logger.info(f"✅ FLUX done! Inserted only masked area from row {mask_start_row}")
         return final_result
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
-
 
 def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
     """
