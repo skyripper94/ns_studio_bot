@@ -45,7 +45,7 @@ FONT_SIZE_MIN = 32
 SPACING_BOTTOM = 100
 SPACING_LOGO_TO_TITLE = 6
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 8
+LINE_SPACING = 13
 LOGO_LINE_LENGTH = 300
 
 # Layout
@@ -243,14 +243,14 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 70) -> np.ndarray:
     """
     Gradient with solid black base at bottom (100px) + smooth fade above
     """
     gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
     
     start_row = int(height * (1 - start_percent / 100))
-    black_base_height = 100  # Черная основа снизу
+    black_base_height = 180  # Черная основа снизу
     
     for y in range(height):
         if y >= height - black_base_height:
