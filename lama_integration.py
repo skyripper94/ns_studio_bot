@@ -45,7 +45,7 @@ FONT_SIZE_MIN = 32
 SPACING_BOTTOM = 100
 SPACING_LOGO_TO_TITLE = 6
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 24
+LINE_SPACING = 28
 LOGO_LINE_LENGTH = 300
 
 # Layout
@@ -243,7 +243,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 70) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
     """
     Gradient with solid black base at bottom (100px) + smooth fade above
     """
