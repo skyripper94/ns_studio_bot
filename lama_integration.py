@@ -198,7 +198,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             return image
         
         mask_start_row = mask_rows[0]  # ГДЕ МАСКА РЕАЛЬНО НАЧИНАЕТСЯ
-        context_buffer = 100  # Запас для контекста
+        context_buffer = 0  # Запас для контекста
         
         crop_start = max(0, mask_start_row - context_buffer)  # Обрезаем С запасом
         crop_end = height
