@@ -198,7 +198,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         if len(mask_rows) == 0:
             return image
         
-        crop_start = mask_rows[0]  # Первая строка с маской
+        crop_start = max(0, mask_rows[0] - 100)  # Первая строка с маской
         crop_end = height  # До конца
         
         # Обрезаем изображение и маску
