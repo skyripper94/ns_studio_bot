@@ -245,25 +245,27 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
     """
-    Create smooth black gradient overlay WITHOUT solid black bar
-    Starts from 55% and smoothly fades to black at bottom
+    Gradient with solid black base at bottom (100px) + smooth fade above
     """
     gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
     
     start_row = int(height * (1 - start_percent / 100))
+    black_base_height = 100  # Черная основа снизу
     
     for y in range(height):
-        if y >= start_row:
-            # Smooth gradient from start to bottom
-            progress = (y - start_row) / (height - start_row)
-            # Use power of 0.7 for faster darkening (more aggressive)
+        if y >= height - black_base_height:
+            # Solid black at bottom (100px)
+            alpha = 255
+        elif y >= start_row:
+            # Smooth gradient from start to black base
+            progress = (y - start_row) / (height - black_base_height - start_row)
             alpha = int(255 * (progress ** 0.7))
         else:
             alpha = 0
         
         gradient[y, :] = [0, 0, 0, alpha]
     
-    logger.info(f"✨ Created smooth gradient from row {start_row} ({start_percent}%)")
+    logger.info(f"✨ Gradient: {start_percent}% start + 100px black base")
     return gradient
 
 
@@ -361,7 +363,7 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
     temp = temp.resize((text_width, text_height), Image.LANCZOS)
     
     # Stretch +25%
-    stretched_height = int(text_height * 1.25)
+    stretched_height = int(text_height * 2.0)
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
     # Paste
