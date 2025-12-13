@@ -179,7 +179,8 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Remove text using FLUX Kontext Pro"""
+    """Remove text using FLUX Kontext Pro - ONLY on masked area"""
+    
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
         return opencv_fallback(image, mask)
@@ -189,14 +190,31 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         logger.info("🚀 FLUX Kontext Pro starting...")
         
-        # Convert to BytesIO
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # НОВОЕ: Обрезаем только область с маской
+        height, width = image.shape[:2]
+        
+        # Найти границы маски
+        mask_rows = np.where(mask.any(axis=1))[0]
+        if len(mask_rows) == 0:
+            return image
+        
+        crop_start = mask_rows[0]  # Первая строка с маской
+        crop_end = height  # До конца
+        
+        # Обрезаем изображение и маску
+        cropped_image = image[crop_start:crop_end, :]
+        cropped_mask = mask[crop_start:crop_end, :]
+        
+        logger.info(f"✂️ Cropped to rows {crop_start}-{crop_end} (only masked area)")
+        
+        # Конвертируем обрезанное
+        image_rgb = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        pil_mask = Image.fromarray(mask)
+        pil_mask = Image.fromarray(cropped_mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
@@ -204,7 +222,6 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         prompt = "naturally blend and restore the background, remove only the text, preserve all objects and original image content"
         
         logger.info("📤 Sending to FLUX...")
-        logger.info(f"🎯 Prompt: {prompt}")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -233,10 +250,14 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
-        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        result_cropped = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        logger.info("✅ FLUX Kontext Pro done!")
-        return result_bgr
+        # СКЛЕИВАЕМ: верх оригинала + низ обработанный
+        final_result = image.copy()
+        final_result[crop_start:crop_end, :] = result_cropped
+        
+        logger.info("✅ FLUX done + merged with original top!")
+        return final_result
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
