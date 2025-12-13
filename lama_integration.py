@@ -243,7 +243,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
     """
     Create smooth black gradient overlay WITHOUT solid black bar
     Starts from 55% and smoothly fades to black at bottom
@@ -325,46 +325,46 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
                                text: str, font: ImageFont.FreeTypeFont,
                                fill_color: tuple, outline_color: tuple,
                                shadow_offset: int = 2):
-    """
-    Draw super sharp text with 3x rendering + 25% vertical stretch
-    """
-    # Get text size
+    """Draw super sharp text with 3x rendering + 25% vertical stretch"""
+    
+    # Get text bounding box WITH offset
     bbox = font.getbbox(text)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     
-    # Create temporary image 3x for sharpness
+    # Create temp 3x
     scale = 3
-    temp_width = text_width * scale
-    temp_height = text_height * scale
-    
-    temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
+    temp = Image.new('RGBA', (text_width * scale, text_height * scale), (0, 0, 0, 0))
     temp_draw = ImageDraw.Draw(temp)
     
     # Font 3x
     font_3x = ImageFont.truetype(font.path, font.size * scale)
     
-    # Draw with 3x resolution
-    # Shadow
-    temp_draw.text((shadow_offset * scale, shadow_offset * scale), text, 
-                   font=font_3x, fill=(0, 0, 0, 128))
+    # Get bbox for 3x font and calculate offset
+    bbox_3x = font_3x.getbbox(text)
+    offset_x = -bbox_3x[0]  # Компенсация смещения
+    offset_y = -bbox_3x[1]  # Компенсация смещения
     
-    # Outline (8 directions)
+    # Shadow
+    temp_draw.text((offset_x + shadow_offset * scale, offset_y + shadow_offset * scale), 
+                   text, font=font_3x, fill=(0, 0, 0, 128))
+    
+    # Outline
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        temp_draw.text((dx * scale, dy * scale), text, 
-                       font=font_3x, fill=outline_color)
+        temp_draw.text((offset_x + dx * scale, offset_y + dy * scale), 
+                       text, font=font_3x, fill=outline_color)
     
     # Main text
-    temp_draw.text((0, 0), text, font=font_3x, fill=fill_color)
+    temp_draw.text((offset_x, offset_y), text, font=font_3x, fill=fill_color)
     
-    # Downscale to original size with high quality (for sharpness)
+    # Downscale
     temp = temp.resize((text_width, text_height), Image.LANCZOS)
     
-    # STRETCH VERTICALLY by 25%
+    # Stretch +25%
     stretched_height = int(text_height * 1.25)
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
-    # Paste stretched text into image
+    # Paste
     image.paste(temp_stretched, (x, y), temp_stretched)
 
 
