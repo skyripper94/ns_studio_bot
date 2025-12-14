@@ -179,7 +179,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """FLUX Kontext Pro: bottom area by mask boundary, no top edits, no blur band, no watermark show-through"""
+    """FLUX Kontext Pro: remove only text-like artifacts in bottom zone; no logo damage; no blur band; no show-through"""
 
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
@@ -216,59 +216,86 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         roi_h = roi.shape[0]
         boundary_local = boundary_y - crop_y0
 
-        # ---------- 2.1) Detect possible "text leak" near boundary (universal) ----------
-        def build_leak_guard(roi_bgr: np.ndarray) -> np.ndarray:
-            """
-            Returns mask (uint8 0/255) of text-like structures:
-            uses TOPHAT + BLACKHAT on L channel to catch bright/dark watermarks.
-            """
-            lab = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2LAB)
-            L, A, B = cv2.split(lab)
+        # ---------- 3) Build TEXT-like candidate mask inside ROI ----------
+        lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
+        L, A, B = cv2.split(lab)
 
-            k = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
-            tophat = cv2.morphologyEx(L, cv2.MORPH_TOPHAT, k)
-            blackhat = cv2.morphologyEx(L, cv2.MORPH_BLACKHAT, k)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        Lc = clahe.apply(L)
 
-            cand = cv2.max(tophat, blackhat)
-            cand = cv2.GaussianBlur(cand, (0, 0), 2)
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
+        tophat = cv2.morphologyEx(Lc, cv2.MORPH_TOPHAT, k)
+        blackhat = cv2.morphologyEx(Lc, cv2.MORPH_BLACKHAT, k)
+        cand = cv2.max(tophat, blackhat)
+        cand = cv2.GaussianBlur(cand, (0, 0), 1.6)
 
-            _, m = cv2.threshold(cand, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        thr = np.percentile(cand, 92)
+        thr = max(thr, 14)
+        text_mask = (cand >= thr).astype(np.uint8) * 255
 
-            m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
-            m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
-            return m
+        # лёгкая чистка шума до компонент
+        text_mask = cv2.morphologyEx(
+            text_mask, cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1
+        )
 
-        leak_guard_full = build_leak_guard(roi)
+        # ---------- 3.1) CC FILTER (важно для "звёздных" фонов) ----------
+        # Идея: выкидываем крошечные точки и огромные заливки, оставляем "похожие на буквы".
+        num, labels, stats, _ = cv2.connectedComponentsWithStats((text_mask > 0).astype(np.uint8), connectivity=8)
 
-        # анализируем только полосу вокруг границы, чтобы не "улетать" вверх по всему изображению
-        band_up = int(0.30 * roi_h)     # насколько вверх смотрим от boundary_local
-        band_down = int(0.10 * roi_h)   # немного вниз тоже
-        band_y0 = max(0, boundary_local - band_up)
-        band_y1 = min(roi_h, boundary_local + band_down)
+        roi_area = float(roi_h * w)
 
-        leak_band = leak_guard_full[band_y0:band_y1, :]
-        leak_row = (leak_band > 0).mean(axis=1)
-        leak_idx = np.where(leak_row > 0.004)[0]  # 0.2–1% обычно норм, тут 0.4%
+        # пороги (универсальные, масштабируются от размера ROI)
+        min_area = max(18, int(roi_area * 0.00003))      # отсекаем "пылинки"
+        max_area = int(roi_area * 0.08)                  # отсекаем слишком большие пятна
 
-        # ---------- 2.2) Choose hard_local automatically ----------
-        feather_px = 28
+        min_side = 6                                     # минимум по ширине/высоте компоненты
+        max_h = int(roi_h * 0.35)                        # буквы/водяной знак редко выше 35% ROI
+        max_w = int(w * 0.95)                            # почти весь кадр — подозрительно
 
-        # дефолтный подъём (если детектор не нашёл текст)
-        default_hard_cover_up = int(0.14 * roi_h)   # универсально ~14% ROI
-        hard_local = max(0, boundary_local - default_hard_cover_up)
+        filtered = np.zeros_like(text_mask)
 
-        # если нашли текст выше границы — поднимаем hard_local до верхней найденной строки (- запас)
-        if len(leak_idx) > 0:
-            top_text_local = band_y0 + int(leak_idx[0])
-            hard_local = max(0, top_text_local - 14)  # запас в пикселях
-            # ограничение, чтобы не залезать слишком высоко в кадр
-            hard_local = max(hard_local, max(0, boundary_local - int(0.45 * roi_h)))
+        for i in range(1, num):  # 0 — фон
+            x, y, cw, ch, area = stats[i]
 
-        feather_start = max(0, hard_local - feather_px)
+            if area < min_area or area > max_area:
+                continue
+            if cw < min_side or ch < min_side:
+                continue
+            if ch > max_h or cw > max_w:
+                continue
 
-        # ---------- 3) Mask for FLUX: start from hard_local ----------
-        mask_flux = np.zeros((roi_h, w), dtype=np.uint8)
-        mask_flux[hard_local:, :] = 255
+            ar = cw / float(ch)  # aspect ratio
+            # слишком тонкие "линии" и слишком экстремальные формы чаще не текст
+            if ar < 0.10 or ar > 30.0:
+                continue
+
+            # плотность: текст обычно не "залитый"
+            fill = area / float(cw * ch)
+            if fill < 0.03 or fill > 0.95:
+                continue
+
+            filtered[labels == i] = 255
+
+        text_mask = filtered
+
+        # ---------- 3.2) Enlarge mask a bit (capture halos) ----------
+        text_mask = cv2.dilate(
+            text_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=1
+        )
+
+        # ---------- 3.3) Limit to bottom zone (+ a bit above) ----------
+        search_up = 120
+        zone_mask = np.zeros((roi_h, w), dtype=np.uint8)
+        zone_mask[max(0, boundary_local - search_up):, :] = 255
+
+        mask_flux = cv2.bitwise_and(text_mask, zone_mask)
+
+        # fallback если детектор почти ничего не нашёл
+        if mask_flux.mean() < 0.2:
+            logger.warning("⚠️ text_mask empty-ish, fallback to full bottom zone")
+            mask_flux = np.zeros((roi_h, w), dtype=np.uint8)
+            mask_flux[boundary_local:, :] = 255
 
         # ---------- 4) Reflection padding ----------
         pad = 96
@@ -289,13 +316,10 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
         prompt = (
             "Remove only the text/watermark in the masked area. Preserve all unmasked details. "
-            "Reconstruct background with clean gradients. No blur bands. No global edits."
+            "Reconstruct the background naturally with clean gradients, no blur, no global changes."
         )
 
-        logger.info(
-            f"📤 FLUX ROI {crop_y0}-{crop_y1}, boundary_local={boundary_local}, "
-            f"hard_local={hard_local}, feather_start={feather_start}"
-        )
+        logger.info(f"📤 FLUX mask_mean={mask_flux.mean():.2f}, ROI rows {crop_y0}-{crop_y1}")
 
         output = replicate.run(
             REPLICATE_MODEL,
@@ -328,27 +352,17 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         if flux_roi.shape[:2] != (roi_h, w):
             flux_roi = cv2.resize(flux_roi, (w, roi_h), interpolation=cv2.INTER_LINEAR)
 
-        # ---------- 7) Feather blend, BUT never mix original where leak_guard says "text-like" ----------
-        y = np.arange(roi_h, dtype=np.float32).reshape(-1, 1)
-        alpha = (y - feather_start) / float(max(1, feather_px))
-        alpha = np.clip(alpha, 0.0, 1.0)
-        alpha[y >= hard_local] = 1.0
+        # ---------- 7) Paste back ONLY via SOFT mask ----------
+        mask_soft = cv2.GaussianBlur(mask_flux.astype(np.float32) / 255.0, (0, 0), 3.0)
+        mask_soft3 = np.dstack([mask_soft, mask_soft, mask_soft])
 
-        # Ключ: если пиксель похож на текст — alpha=1 (оригинал не подмешиваем вообще)
-        leak_guard = (leak_guard_full > 0)
-        alpha[leak_guard] = 1.0
-
-        alpha = np.repeat(alpha, w, axis=1)
-        alpha3 = np.dstack([alpha, alpha, alpha])
-
-        blended = roi.astype(np.float32) * (1.0 - alpha3) + flux_roi.astype(np.float32) * alpha3
+        blended = roi.astype(np.float32) * (1.0 - mask_soft3) + flux_roi.astype(np.float32) * mask_soft3
         blended = np.clip(blended, 0, 255).astype(np.uint8)
 
-        # ---------- 8) Paste back ----------
         final = image.copy()
         final[crop_y0:crop_y1, :] = blended
 
-        logger.info("✅ FLUX done! Universal leak guard enabled.")
+        logger.info("✅ FLUX done! CC-filtered text mask + soft paste.")
         return final
 
     except Exception as e:
