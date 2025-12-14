@@ -387,7 +387,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             return np.clip(out, 0, 255).astype(np.uint8)
 
         # старт градиента берём выше boundary, чтобы накрыть просветы (как в твоих примерах)
-        cover_up = max(220, int(0.22 * h))
+        cover_up = max(320, int(0.22 * h))
         cover_start = max(0, boundary_y - cover_up)
 
         final = apply_bottom_cover_gradient(final, start_y=cover_start, max_alpha=0.92)
