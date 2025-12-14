@@ -179,8 +179,14 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """FLUX Kontext Pro: bottom zone text removal with stable boundary, no top edits, no crop blur band,
-    and guaranteed 'no text visible under gradient' inside THIS function."""
+    """
+    Remove text/watermark using FLUX Kontext Pro.
+    Key behavior:
+    - boundary inferred from incoming mask, BUT raised to guarantee at least bottom 45% coverage
+    - FLUX mask is TEXT-ONLY (prevents smearing large gradients)
+    - search zone above boundary is expanded (catches watermark higher than the mask boundary)
+    - paste back via soft mask only (no row-feather strips)
+    """
 
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
@@ -191,9 +197,9 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
         h, w = image.shape[:2]
 
-        # ---------- 1) Robust boundary_y from mask ----------
+        # ---------- 1) Robust boundary_y from provided mask ----------
         mask_bin = (mask > 0).astype(np.uint8)
-        row_frac = mask_bin.mean(axis=1)
+        row_frac = mask_bin.mean(axis=1)  # [0..1] masked fraction per row
 
         row_threshold = 0.08
         stable_rows = 12
@@ -208,18 +214,29 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             boundary_y = int(h * 0.65)
             logger.warning("⚠️ Could not detect boundary from mask reliably, fallback to 65% height")
 
+        # ---------- 1.1) RAISE boundary to ensure at least bottom 45% is covered ----------
+        # bottom 45% => boundary at 55% height
+        desired_bottom = 0.50
+        boundary_target = int(h * (1.0 - desired_bottom))  # 0.55*h
+
+        # use the "higher" (smaller y) boundary
+        if boundary_y > boundary_target:
+            logger.info(f"⬆️ Raising boundary from {boundary_y} to {boundary_target} (bottom {int(desired_bottom*100)}%)")
+        boundary_y = min(boundary_y, boundary_target)
+
         # ---------- 2) ROI: bottom + context above ----------
-        context_buffer = 160
+        context_buffer = 160  # keep some context for clean inpaint edges
         crop_y0 = max(0, boundary_y - context_buffer)
         crop_y1 = h
 
         roi = image[crop_y0:crop_y1, :].copy()
         roi_h = roi.shape[0]
-        boundary_local = boundary_y - crop_y0
+        boundary_local = boundary_y - crop_y0  # boundary inside ROI
 
-        # ---------- 3) Build text-like mask (sensitive + CC filter) ----------
+        # ---------- 3) Build TEXT-like candidate mask inside ROI ----------
+        # Sensitive to both bright and dark watermark text: TOPHAT + BLACKHAT on L channel
         lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
-        L, A, B = cv2.split(lab)
+        L, _, _ = cv2.split(lab)
 
         clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
         Lc = clahe.apply(L)
@@ -230,12 +247,12 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         cand = cv2.max(tophat, blackhat)
         cand = cv2.GaussianBlur(cand, (0, 0), 1.3)
 
-        # Более чувствительный порог для слабого watermark под градиентом
+        # more sensitive threshold for faint watermark under gradients
         thr = np.percentile(cand, 86)
         thr = max(thr, 10)
         text_mask = (cand >= thr).astype(np.uint8) * 255
 
-        # чистка + склейка букв в строки
+        # clean + connect letters into lines
         text_mask = cv2.morphologyEx(
             text_mask, cv2.MORPH_OPEN,
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1
@@ -245,7 +262,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5)), iterations=1
         )
 
-        # --- CC FILTER (чтобы не ловить "звёзды" и шум) ---
+        # ---------- 3.1) Connected components filter (avoid stars/noise) ----------
         num, labels, stats, _ = cv2.connectedComponentsWithStats((text_mask > 0).astype(np.uint8), connectivity=8)
         roi_area = float(roi_h * w)
 
@@ -277,26 +294,30 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             filtered[labels == i] = 255
 
         text_mask = filtered
+
+        # widen a bit to catch text halos
         text_mask = cv2.dilate(
             text_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=1
         )
 
-        # ---------- 4) Adaptive zone ABOVE boundary (чтобы ловить watermark выше 35%) ----------
-        search_up = max(260, int(0.35 * roi_h))
+        # ---------- 4) Zone mask: allow masking ABOVE boundary (to catch watermark higher) ----------
+        # This is the key for your "text above still visible" cases.
+        search_up = max(480, int(0.45 * roi_h))  # подняли сильно вверх
         zone_start = max(0, boundary_local - search_up)
 
         zone_mask = np.zeros((roi_h, w), dtype=np.uint8)
         zone_mask[zone_start:, :] = 255
 
+        # FINAL mask for FLUX: TEXT-ONLY within the expanded zone
         mask_flux = cv2.bitwise_and(text_mask, zone_mask)
 
-        # fallback если детектор ничего не нашёл
+        # fallback: if detector failed, use expanded bottom zone (still can smear a bit)
         if mask_flux.mean() < 0.2:
             logger.warning("⚠️ text_mask empty-ish -> fallback to expanded bottom zone")
             mask_flux = np.zeros((roi_h, w), dtype=np.uint8)
             mask_flux[zone_start:, :] = 255
 
-        # ---------- 5) Reflection padding to avoid crop-edge blur band ----------
+        # ---------- 5) Reflection padding to avoid crop-edge 'healing' blur band ----------
         pad = 96
         roi_pad = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
         mask_pad = cv2.copyMakeBorder(mask_flux, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
@@ -319,8 +340,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         )
 
         logger.info(
-            f"📤 FLUX ROI rows {crop_y0}-{crop_y1}, boundary_y={boundary_y}, zone_start={zone_start}, "
-            f"mask_mean={mask_flux.mean():.2f}"
+            f"📤 FLUX: boundary_y={boundary_y}, crop={crop_y0}-{crop_y1}, "
+            f"boundary_local={boundary_local}, zone_start={zone_start}, mask_mean={mask_flux.mean():.2f}"
         )
 
         output = replicate.run(
@@ -331,7 +352,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 28
+                "num_inference_steps": 28,
             }
         )
 
@@ -350,11 +371,12 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert("RGB"))
         flux_pad = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
 
+        # remove padding
         flux_roi = flux_pad[pad:-pad, pad:-pad]
         if flux_roi.shape[:2] != (roi_h, w):
             flux_roi = cv2.resize(flux_roi, (w, roi_h), interpolation=cv2.INTER_LINEAR)
 
-        # ---------- 8) Paste back ONLY via SOFT mask (никаких row-feather) ----------
+        # ---------- 8) Paste back ONLY via SOFT mask ----------
         mask_soft = cv2.GaussianBlur(mask_flux.astype(np.float32) / 255.0, (0, 0), 3.0)
         mask_soft3 = np.dstack([mask_soft, mask_soft, mask_soft])
 
@@ -364,35 +386,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         final = image.copy()
         final[crop_y0:crop_y1, :] = blended_roi
 
-        # ---------- 9) GUARANTEE: no text visible under gradient (inside this function) ----------
-        # Это страховка от "супер слабых" watermark, которые не ловятся детектором/FLUX.
-        def apply_bottom_cover_gradient(img_bgr: np.ndarray, start_y: int, max_alpha: float = 0.92) -> np.ndarray:
-            hh, ww = img_bgr.shape[:2]
-            start_y = int(np.clip(start_y, 0, hh))
-            if start_y >= hh:
-                return img_bgr
-
-            out = img_bgr.astype(np.float32)
-            overlay = np.zeros_like(out)
-            # чёрный оверлей
-            # (0,0,0) уже
-
-            y = np.arange(hh, dtype=np.float32)
-            t = (y - start_y) / max(1.0, float(hh - start_y))
-            t = np.clip(t, 0.0, 1.0)
-            t = t * t * (3 - 2 * t)  # smoothstep
-            alpha = (t * max_alpha).reshape(hh, 1, 1)
-
-            out = out * (1.0 - alpha) + overlay * alpha
-            return np.clip(out, 0, 255).astype(np.uint8)
-
-        # старт градиента берём выше boundary, чтобы накрыть просветы (как в твоих примерах)
-        cover_up = max(320, int(0.22 * h))
-        cover_start = max(0, boundary_y - cover_up)
-
-        final = apply_bottom_cover_gradient(final, start_y=cover_start, max_alpha=0.92)
-
-        logger.info("✅ FLUX done! Text removed + guaranteed cover under gradient.")
+        logger.info("✅ FLUX done! Boundary raised to bottom 45%, text-only masking, soft paste.")
         return final
 
     except Exception as e:
