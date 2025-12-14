@@ -179,7 +179,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Remove text using FLUX Kontext Pro - with feathered mask"""
+    """Remove text using FLUX Kontext Pro - ONLY masked pixels"""
     
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
@@ -192,42 +192,38 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         height, width = image.shape[:2]
         
-        # КЛЮЧЕВОЕ: Размыть маску (feathering) для плавного перехода
-        feathered_mask = mask.copy()
-        
-        # Найти верхнюю границу маски
+        # Найти границы маски
         mask_rows = np.where(mask.any(axis=1))[0]
         if len(mask_rows) == 0:
             return image
         
-        mask_start = mask_rows[0]
-        feather_zone = 50  # 50px плавного перехода
+        mask_start_row = mask_rows[0]
+        context_buffer = 100  # Даём FLUX контекст
         
-        # Создать плавный переход в маске
-        for i in range(feather_zone):
-            y = mask_start - feather_zone + i
-            if y >= 0 and y < height:
-                alpha = int(255 * (i / feather_zone))  # 0 → 255
-                feathered_mask[y, :] = alpha
+        crop_start = max(0, mask_start_row - context_buffer)
+        crop_end = height
         
-        logger.info(f"✨ Created feathered mask with {feather_zone}px transition")
+        # Обрезаем изображение и маску
+        cropped_image = image[crop_start:crop_end, :]
+        cropped_mask = mask[crop_start:crop_end, :]
         
-        # Конвертируем ПОЛНОЕ изображение
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        logger.info(f"✂️ Cropped: rows {crop_start}-{crop_end} (mask at {mask_start_row})")
+        
+        # Конвертируем
+        image_rgb = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Размытая маска
-        pil_mask = Image.fromarray(feathered_mask)
+        pil_mask = Image.fromarray(cropped_mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        prompt = "naturally blend and restore the background, remove only the text in masked area, preserve all logos and objects outside the mask"
+        prompt = "naturally blend and restore the background, remove only the text"
         
-        logger.info("📤 Sending to FLUX with feathered mask...")
+        logger.info("📤 Sending to FLUX...")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -256,10 +252,20 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
-        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        flux_result = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        logger.info("✅ FLUX done!")
-        return result_bgr
+        # КЛЮЧЕВОЕ: Берём ТОЛЬКО пиксели где была маска!
+        final_result = image.copy()
+        
+        # Создаём маску для копирования (только где mask == 255)
+        copy_mask = cropped_mask > 0
+        
+        # Копируем из FLUX ТОЛЬКО замаскированные пиксели
+        for c in range(3):  # BGR channels
+            final_result[crop_start:crop_end, :, c][copy_mask] = flux_result[:, :, c][copy_mask]
+        
+        logger.info(f"✅ FLUX done! Copied ONLY masked pixels")
+        return final_result
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
