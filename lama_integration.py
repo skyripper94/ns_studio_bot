@@ -179,14 +179,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """
-    Remove text using FLUX Kontext Pro.
-    Fixes:
-    - ROI only (bottom area) so top logo is never touched
-    - reflection padding prevents crop-edge "healing" blur band
-    - NEW: prevents old text "show-through" by forcing hard replace below a raised boundary
-      (no mixing with original where watermark/text may exist)
-    """
+    """FLUX Kontext Pro: bottom area by mask boundary, no top edits, no blur band, no watermark show-through"""
 
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
@@ -223,19 +216,61 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         roi_h = roi.shape[0]
         boundary_local = boundary_y - crop_y0
 
-        # ---------- 2.1) NEW: shift boundary upward for "hard cover" ----------
-        # This prevents alpha-mixing original (with watermark) back into the result.
-        hard_cover_up = 70      # 40-120 typical; increase if watermark still shows
-        feather_px = 28         # 20-45 typical
+        # ---------- 2.1) Detect possible "text leak" near boundary (universal) ----------
+        def build_leak_guard(roi_bgr: np.ndarray) -> np.ndarray:
+            """
+            Returns mask (uint8 0/255) of text-like structures:
+            uses TOPHAT + BLACKHAT on L channel to catch bright/dark watermarks.
+            """
+            lab = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2LAB)
+            L, A, B = cv2.split(lab)
 
-        hard_local = max(0, boundary_local - hard_cover_up)
+            k = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
+            tophat = cv2.morphologyEx(L, cv2.MORPH_TOPHAT, k)
+            blackhat = cv2.morphologyEx(L, cv2.MORPH_BLACKHAT, k)
+
+            cand = cv2.max(tophat, blackhat)
+            cand = cv2.GaussianBlur(cand, (0, 0), 2)
+
+            _, m = cv2.threshold(cand, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+            m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
+            return m
+
+        leak_guard_full = build_leak_guard(roi)
+
+        # анализируем только полосу вокруг границы, чтобы не "улетать" вверх по всему изображению
+        band_up = int(0.30 * roi_h)     # насколько вверх смотрим от boundary_local
+        band_down = int(0.10 * roi_h)   # немного вниз тоже
+        band_y0 = max(0, boundary_local - band_up)
+        band_y1 = min(roi_h, boundary_local + band_down)
+
+        leak_band = leak_guard_full[band_y0:band_y1, :]
+        leak_row = (leak_band > 0).mean(axis=1)
+        leak_idx = np.where(leak_row > 0.004)[0]  # 0.2–1% обычно норм, тут 0.4%
+
+        # ---------- 2.2) Choose hard_local automatically ----------
+        feather_px = 28
+
+        # дефолтный подъём (если детектор не нашёл текст)
+        default_hard_cover_up = int(0.14 * roi_h)   # универсально ~14% ROI
+        hard_local = max(0, boundary_local - default_hard_cover_up)
+
+        # если нашли текст выше границы — поднимаем hard_local до верхней найденной строки (- запас)
+        if len(leak_idx) > 0:
+            top_text_local = band_y0 + int(leak_idx[0])
+            hard_local = max(0, top_text_local - 14)  # запас в пикселях
+            # ограничение, чтобы не залезать слишком высоко в кадр
+            hard_local = max(hard_local, max(0, boundary_local - int(0.45 * roi_h)))
+
         feather_start = max(0, hard_local - feather_px)
 
-        # ---------- 3) Mask for FLUX (start from hard_local, not boundary_local) ----------
+        # ---------- 3) Mask for FLUX: start from hard_local ----------
         mask_flux = np.zeros((roi_h, w), dtype=np.uint8)
         mask_flux[hard_local:, :] = 255
 
-        # ---------- 4) Reflection padding to avoid crop-edge blur band ----------
+        # ---------- 4) Reflection padding ----------
         pad = 96
         roi_pad = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
         mask_pad = cv2.copyMakeBorder(mask_flux, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
@@ -254,12 +289,12 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
         prompt = (
             "Remove only the text/watermark in the masked area. Preserve all unmasked details. "
-            "Naturally restore background with clean gradients, no blur bands, no global edits."
+            "Reconstruct background with clean gradients. No blur bands. No global edits."
         )
 
         logger.info(
-            f"📤 FLUX ROI rows {crop_y0}-{crop_y1}, boundary_y={boundary_y} "
-            f"(local={boundary_local}, hard_local={hard_local}, feather_start={feather_start})"
+            f"📤 FLUX ROI {crop_y0}-{crop_y1}, boundary_local={boundary_local}, "
+            f"hard_local={hard_local}, feather_start={feather_start}"
         )
 
         output = replicate.run(
@@ -270,8 +305,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 28,
-            },
+                "num_inference_steps": 28
+            }
         )
 
         # ---------- 6) Read result ----------
@@ -289,19 +324,19 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert("RGB"))
         flux_pad = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
 
-        # Remove padding
         flux_roi = flux_pad[pad:-pad, pad:-pad]
         if flux_roi.shape[:2] != (roi_h, w):
             flux_roi = cv2.resize(flux_roi, (w, roi_h), interpolation=cv2.INTER_LINEAR)
 
-        # ---------- 7) NEW: Feather blend moved ABOVE hard_local ----------
-        # alpha=0 above feather_start
-        # alpha ramps to 1 by hard_local
-        # alpha forced to 1 for all y >= hard_local  (no original mixing where text may exist)
+        # ---------- 7) Feather blend, BUT never mix original where leak_guard says "text-like" ----------
         y = np.arange(roi_h, dtype=np.float32).reshape(-1, 1)
         alpha = (y - feather_start) / float(max(1, feather_px))
         alpha = np.clip(alpha, 0.0, 1.0)
         alpha[y >= hard_local] = 1.0
+
+        # Ключ: если пиксель похож на текст — alpha=1 (оригинал не подмешиваем вообще)
+        leak_guard = (leak_guard_full > 0)
+        alpha[leak_guard] = 1.0
 
         alpha = np.repeat(alpha, w, axis=1)
         alpha3 = np.dstack([alpha, alpha, alpha])
@@ -313,7 +348,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         final = image.copy()
         final[crop_y0:crop_y1, :] = blended
 
-        logger.info("✅ FLUX done! Hard-covered bottom, smooth transition, top untouched.")
+        logger.info("✅ FLUX done! Universal leak guard enabled.")
         return final
 
     except Exception as e:
