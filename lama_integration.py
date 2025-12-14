@@ -179,7 +179,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Remove text using FLUX Kontext Pro - ONLY on masked area"""
+    """Remove text using FLUX Kontext Pro - with feathered mask"""
     
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
@@ -192,38 +192,42 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         height, width = image.shape[:2]
         
-        # Найти границы маски
+        # КЛЮЧЕВОЕ: Размыть маску (feathering) для плавного перехода
+        feathered_mask = mask.copy()
+        
+        # Найти верхнюю границу маски
         mask_rows = np.where(mask.any(axis=1))[0]
         if len(mask_rows) == 0:
             return image
         
-        mask_start_row = mask_rows[0]  # ГДЕ МАСКА РЕАЛЬНО НАЧИНАЕТСЯ
-        context_buffer = 0  # Запас для контекста
+        mask_start = mask_rows[0]
+        feather_zone = 50  # 50px плавного перехода
         
-        crop_start = max(0, mask_start_row - context_buffer)  # Обрезаем С запасом
-        crop_end = height
+        # Создать плавный переход в маске
+        for i in range(feather_zone):
+            y = mask_start - feather_zone + i
+            if y >= 0 and y < height:
+                alpha = int(255 * (i / feather_zone))  # 0 → 255
+                feathered_mask[y, :] = alpha
         
-        # Обрезаем изображение и маску
-        cropped_image = image[crop_start:crop_end, :]
-        cropped_mask = mask[crop_start:crop_end, :]
+        logger.info(f"✨ Created feathered mask with {feather_zone}px transition")
         
-        logger.info(f"✂️ Cropped: rows {crop_start}-{crop_end}, mask starts at {mask_start_row}")
-        
-        # Конвертируем
-        image_rgb = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
+        # Конвертируем ПОЛНОЕ изображение
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        pil_mask = Image.fromarray(cropped_mask)
+        # Размытая маска
+        pil_mask = Image.fromarray(feathered_mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        prompt = "naturally blend and restore the background, remove only the text, preserve all objects and original image content"
+        prompt = "naturally blend and restore the background, remove only the text in masked area, preserve all logos and objects outside the mask"
         
-        logger.info("📤 Sending to FLUX...")
+        logger.info("📤 Sending to FLUX with feathered mask...")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -252,27 +256,15 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
-        result_cropped = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        # КЛЮЧЕВОЕ ОТЛИЧИЕ: вставляем ТОЛЬКО зону с маской!
-        final_result = image.copy()
-        
-        # Сколько строк от crop_start до mask_start_row (буфер контекста)
-        buffer_offset = mask_start_row - crop_start
-        
-        # Берём из FLUX результата ТОЛЬКО часть начиная с buffer_offset
-        # (выбрасываем первые 100px которые были для контекста)
-        flux_masked_part = result_cropped[buffer_offset:, :]
-        
-        # Вставляем ТОЛЬКО с mask_start_row (где маска реально начинается)
-        final_result[mask_start_row:crop_end, :] = flux_masked_part
-        
-        logger.info(f"✅ FLUX done! Inserted only masked area from row {mask_start_row}")
-        return final_result
+        logger.info("✅ FLUX done!")
+        return result_bgr
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
+
 
 def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
     """
