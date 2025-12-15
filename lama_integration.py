@@ -180,10 +180,10 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    Universal safe:
-    - FLUX runs on full image (no crop artifacts)
-    - mask_flux is TEXT-ONLY in bottom zone (prevents smearing objects that enter bottom 35%)
-    - copy back ONLY masked pixels => logo/top never changes
+    Universal & safe when object enters bottom:
+    - build mask_flux ONLY in a narrow caption band (not whole bottom)
+    - text-only detection + strict CC filters + gradient-energy reject (anti wing/vehicle)
+    - run FLUX fullframe, copy back ONLY masked pixels
     """
 
     if not REPLICATE_API_TOKEN:
@@ -195,7 +195,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
         h, w = image.shape[:2]
 
-        # ---------- 1) boundary from provided mask ----------
+        # ---------- 1) boundary_y from incoming mask ----------
         mask_bin = (mask > 0).astype(np.uint8)
         row_frac = mask_bin.mean(axis=1)
 
@@ -212,17 +212,25 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             boundary_y = int(h * 0.65)
             logger.warning("⚠️ Could not detect boundary from mask reliably, fallback to 65% height")
 
-        # ---------- 2) Define SEARCH zone for text (bottom + band above boundary) ----------
-        # IMPORTANT: we do NOT mask the whole bottom; we only SEARCH there.
-        leak_up = max(220, int(0.18 * h))   # how high above boundary we look for ghost text
-        zone_y0 = max(0, boundary_y - leak_up)
-        zone_y1 = h
+        # ---------- 2) Define NARROW caption band (this is the key) ----------
+        # Мы ищем и чистим только там, где реально лежит текст (заголовок/цена).
+        # Под твой шаблон: текст обычно около boundary_y и ниже, а не весь низ.
+        band_up = max(220, int(0.20 * h))     # насколько выше границы ищем "призраки"
+        band_down = max(280, int(0.30 * h))   # насколько ниже границы (включая цену)
 
-        zone = image[zone_y0:zone_y1, :].copy()
-        zh = zone.shape[0]
+        band_y0 = max(0, boundary_y - band_up)
+        band_y1 = min(h, boundary_y + band_down)
 
-        # ---------- 3) Build text-candidate map (Tophat/Blackhat on L) ----------
-        lab = cv2.cvtColor(zone, cv2.COLOR_BGR2LAB)
+        # если вдруг граница низко — всё равно ограничиваемся нижней частью кадра
+        band_y0 = min(band_y0, int(0.65 * h))
+        band_y1 = max(band_y1, int(0.78 * h))
+        band_y1 = min(band_y1, h)
+
+        band = image[band_y0:band_y1, :].copy()
+        bh = band.shape[0]
+
+        # ---------- 3) Text candidate map ----------
+        lab = cv2.cvtColor(band, cv2.COLOR_BGR2LAB)
         L, _, _ = cv2.split(lab)
 
         clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
@@ -234,66 +242,75 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         cand = cv2.max(tophat, blackhat)
         cand = cv2.GaussianBlur(cand, (0, 0), 1.2)
 
-        # ---------- 4) Threshold + small cleanup (NO big close/dilate that creates rectangles) ----------
-        thr = np.percentile(cand, 86)   # sensitive enough for faint watermark under gradient
-        thr = max(thr, 10)
+        thr = max(10, np.percentile(cand, 86))
         m = (cand >= thr).astype(np.uint8) * 255
 
-        m = cv2.morphologyEx(
-            m, cv2.MORPH_OPEN,
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1
-        )
-        # slight connect strokes, but keep it modest
-        m = cv2.morphologyEx(
-            m, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5)), iterations=1
-        )
+        # лёгкая морфология (НЕ раздуваем в плашки)
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN,
+                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,
+                             cv2.getStructuringElement(cv2.MORPH_RECT, (13, 5)), iterations=1)
 
-        # ---------- 5) CC filter tuned to reject object edges (B-2 wing is usually too thin/too long) ----------
+        # ---------- 4) Gradient-energy map (anti object) ----------
+        gx = cv2.Sobel(Lc, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(Lc, cv2.CV_32F, 0, 1, ksize=3)
+        mag = cv2.magnitude(gx, gy)
+
+        # ---------- 5) CC filter: keep text-ish, reject wing-ish ----------
         num, labels, stats, _ = cv2.connectedComponentsWithStats((m > 0).astype(np.uint8), connectivity=8)
         filtered = np.zeros_like(m)
 
-        zone_area = float(zh * w)
-        min_area = max(18, int(zone_area * 0.00002))
-        max_area = int(zone_area * 0.04)
-
-        # key: reject very thin lines (wing edges), keep “letter height”
-        min_h = 10          # <-- important for B-2: wing edges often < 10px
-        max_h = int(zh * 0.35)
-        min_w = 20
+        band_area = float(bh * w)
+        min_area = max(20, int(band_area * 0.00002))
+        max_area = int(band_area * 0.02)
 
         for i in range(1, num):
             x, y, cw, ch, area = stats[i]
 
             if area < min_area or area > max_area:
                 continue
-            if ch < min_h or ch > max_h:
+
+            # текст имеет "высоту буквы", а не 1-2 пикселя линии
+            if ch < 10 or ch > int(0.22 * bh):
                 continue
-            if cw < min_w:
+            if cw < 18:
+                continue
+
+            # анти-крыло: слишком широкие/объектные компоненты выкидываем
+            if cw > int(0.70 * w):
                 continue
 
             ar = cw / float(ch)
-            if ar < 0.6 or ar > 60.0:
+            if ar < 1.2 or ar > 60.0:
                 continue
 
             fill = area / float(max(1, cw * ch))
-            if fill < 0.01 or fill > 0.90:
+            if fill < 0.01 or fill > 0.85:
                 continue
 
-            filtered[labels == i] = 255
+            # анти-объект по градиентной энергии:
+            # у крыла/деталей обычно высокая средняя mag, у текста под градиентом — ниже.
+            comp = (labels == i)
+            comp_mag_mean = float(mag[comp].mean()) if comp.any() else 0.0
+            # порог относительно распределения mag
+            mag_thr = float(np.percentile(mag, 80))
+            if comp_mag_mean > mag_thr:
+                continue
 
-        # small dilate to cover halos, but NOT too big
+            filtered[comp] = 255
+
+        # чуть расширим, чтобы снять ореол текста, но без "плашек"
         filtered = cv2.dilate(filtered, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
 
-        # ---------- 6) Compose full-size mask_flux (TEXT-ONLY) ----------
+        # ---------- 6) Compose full-size mask_flux ONLY in caption band ----------
         mask_flux = np.zeros((h, w), dtype=np.uint8)
-        mask_flux[zone_y0:zone_y1, :] = filtered
+        mask_flux[band_y0:band_y1, :] = filtered
 
-        # Hard protection: everything above zone_y0 is zero => logos never touched
-        mask_flux[:zone_y0, :] = 0
+        # доп. защита верха: ничего выше band_y0 не трогаем
+        mask_flux[:band_y0, :] = 0
 
-        if mask_flux.mean() < 0.05:
-            logger.warning("⚠️ mask_flux too small/empty, fallback to original")
+        if mask_flux.mean() < 0.03:
+            logger.warning("⚠️ mask_flux too small/empty -> returning original")
             return image
 
         # ---------- 7) Send FULL image + mask to FLUX ----------
@@ -313,7 +330,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             "Naturally restore the background. No global edits."
         )
 
-        logger.info(f"📤 FLUX FULLFRAME boundary_y={boundary_y}, zone={zone_y0}-{zone_y1}, mask_mean={mask_flux.mean():.2f}")
+        logger.info(f"📤 FLUX FULLFRAME band={band_y0}-{band_y1}, mask_mean={mask_flux.mean():.2f}")
 
         output = replicate.run(
             REPLICATE_MODEL,
@@ -348,7 +365,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         for c in range(3):
             final[:, :, c][copy_mask] = flux_result[:, :, c][copy_mask]
 
-        logger.info("✅ FLUX done! Text-only mask => objects (wing/rover) stay intact.")
+        logger.info("✅ FLUX done! Caption-band text-only mask => wing/object stays intact.")
         return final
 
     except Exception as e:
