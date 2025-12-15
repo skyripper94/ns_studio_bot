@@ -313,7 +313,7 @@ def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndar
     gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
     
     start_row = int(height * (1 - start_percent / 100))
-    black_base_height = 160  # Черная основа снизу
+    black_base_height = 180  # Черная основа снизу
     
     for y in range(height):
         if y >= height - black_base_height:
@@ -322,7 +322,7 @@ def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndar
         elif y >= start_row:
             # Smooth gradient from start to black base
             progress = (y - start_row) / (height - black_base_height - start_row)
-            alpha = int(255 * (progress ** 0.7))
+            alpha = int(255 * (progress ** 0.5))
         else:
             alpha = 0
         
