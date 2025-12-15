@@ -144,10 +144,11 @@ def openai_translate(text: str, context: str = "") -> str:
 "SpaceX Starlink Satellite Constellation" → "Спутниковая сеть SpaceX Starlink"
 "$10 billion" → "$10 млрд."
 "We Share Insights That Expand Your View" → "Делимся знаниями, расширяющими кругозор"
+"Northrop B-2 Spirit" → "Бомбардировщик Northrop B-2 Spirit"
 """
         
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Переведи и адаптируй: {text}"}
