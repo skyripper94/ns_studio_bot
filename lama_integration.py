@@ -34,15 +34,15 @@ COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
 
 # Font sizes (ORIGINAL SIZES - before *1.25)
-FONT_SIZE_MODE1 = 50  # Original
-FONT_SIZE_MODE2 = 48  # Original
-FONT_SIZE_MODE3_TITLE = 46  # Original
-FONT_SIZE_MODE3_SUBTITLE = 38  # Original
+FONT_SIZE_MODE1 = 48  # Original
+FONT_SIZE_MODE2 = 46  # Original
+FONT_SIZE_MODE3_TITLE = 42  # Original
+FONT_SIZE_MODE3_SUBTITLE = 36  # Original
 FONT_SIZE_LOGO = 18
-FONT_SIZE_MIN = 32
+FONT_SIZE_MIN = 36
 
 # Spacing
-SPACING_BOTTOM = 100
+SPACING_BOTTOM = 140
 SPACING_LOGO_TO_TITLE = 6
 SPACING_TITLE_TO_SUBTITLE = 10
 LINE_SPACING = 34
@@ -148,7 +148,7 @@ def openai_translate(text: str, context: str = "") -> str:
 """
         
         response = openai.ChatCompletion.create(
-            model="gpt-4.1",
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Переведи и адаптируй: {text}"}
