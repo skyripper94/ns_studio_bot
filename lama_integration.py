@@ -37,15 +37,15 @@ COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
 FONT_SIZE_MODE1 = 48  # Original
 FONT_SIZE_MODE2 = 46  # Original
 FONT_SIZE_MODE3_TITLE = 44  # Original
-FONT_SIZE_MODE3_SUBTITLE = 42  # Original
+FONT_SIZE_MODE3_SUBTITLE = 40  # Original
 FONT_SIZE_LOGO = 18
-FONT_SIZE_MIN = 32
+FONT_SIZE_MIN = 24
 
 # Spacing
-SPACING_BOTTOM = 100
-SPACING_LOGO_TO_TITLE = 6
+SPACING_BOTTOM = 140  # Increased from 100 to prevent text cutoff
+SPACING_LOGO_TO_TITLE = 4
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 34
+LINE_SPACING = 14  # Restored from 8 (was changed accidentally)
 LOGO_LINE_LENGTH = 300
 
 # Layout
@@ -267,7 +267,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
     """
     Create smooth black gradient overlay WITHOUT solid black bar
     Starts from 55% and smoothly fades to black at bottom
@@ -615,6 +615,20 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     if ocr_data['boxes']:
         for box in ocr_data['boxes']:
             cv2.fillPoly(mask, [box], 255)
+        
+        # Find topmost Y coordinate of text
+        min_y = min(box[:, 1].min() for box in ocr_data['boxes'])
+        
+        # For mode 1 (with logo): add zone ABOVE text for logo + lines
+        if mode == 1:
+            # Logo + lines are ~80-100px above title
+            logo_zone_height = 100
+            logo_zone_start = max(0, min_y - logo_zone_height)
+            
+            # Fill logo zone
+            mask[logo_zone_start:min_y, :] = 255
+            
+            logger.info(f"📐 Mode 1: Added logo zone (rows {logo_zone_start}-{min_y})")
         
         # Expand mask to capture text edges and anti-aliasing
         kernel = np.ones((15, 15), dtype=np.uint8)  # Larger kernel for better coverage
