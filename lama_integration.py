@@ -315,7 +315,7 @@ def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndar
     gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
     
     start_row = int(height * (1 - start_percent / 100))
-    black_base_height = 160  # Черная основа снизу
+    black_base_height = 120  # Черная основа снизу
     
     for y in range(height):
         if y >= height - black_base_height:
