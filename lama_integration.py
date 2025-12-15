@@ -244,8 +244,10 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         mask_buffer.seek(0)
 
         prompt = (
-            "Remove only the text in the masked area. Preserve all unmasked details. "
-            "Naturally restore the background with clean gradients, no blur bands, no global edits."
+            "Completely remove and erase ALL text in the masked area. "
+            "Fill with clean natural background matching surroundings. "
+            "No text remnants, no ghosting, no artifacts. "
+            "Preserve all unmasked content exactly."
         )
 
         logger.info(f"📤 FLUX ROI rows {crop_y0}-{crop_y1}, boundary_y={boundary_y} (local={boundary_local})")
@@ -258,7 +260,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 28
+                "num_inference_steps": 35
             }
         )
 
@@ -647,13 +649,17 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         logger.warning("⚠️ No text detected")
         return image, ocr_data
     
-    # Step 2: Create mask for bottom 35%
     logger.info("📋 STEP 2: Create Mask (Bottom 35%)")
     height, width = image.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
     mask_start = int(height * 0.65)
     mask[mask_start:, :] = 255
-    logger.info(f"📐 Mask: rows {mask_start}-{height} (35% bottom)")
+    
+    # Расширить маску морфологически
+    kernel = np.ones((15, 15), np.uint8)
+    mask = cv2.dilate(mask, kernel, iterations=2)
+    
+    logger.info(f"📐 Mask: rows {mask_start}-{height} + dilation (2 iter)")  # <-- ОБНОВЛЕНО
     
     # Step 3: Remove text with FLUX
     logger.info("📋 STEP 3: Remove Text (FLUX Kontext Pro)")
