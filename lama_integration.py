@@ -180,78 +180,36 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Remove text using FLUX Kontext Pro - bottom area from mask boundary, no top changes, no blur band"""
-
+    """FLUX inpainting - SIMPLE AND CLEAN"""
+    
     if not REPLICATE_API_TOKEN:
-        logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
+        logger.warning("⚠️ REPLICATE_API_TOKEN not set")
         return opencv_fallback(image, mask)
-
+    
     try:
         import replicate
-
-        h, w = image.shape[:2]
-
-        # ---------- 1) Robust boundary_y from mask ----------
-        # mask expected: mostly 0 above boundary, mostly 255 below boundary (can "float")
-        mask_bin = (mask > 0).astype(np.uint8)
-        row_frac = mask_bin.mean(axis=1)  # доля замаскированных пикселей в каждой строке [0..1]
-
-        # Порог "маска реально началась": 5–15% ширины строки замаскировано
-        row_threshold = 0.08
-        # Чтобы отсечь шум: требуем, чтобы порог держался N строк подряд
-        stable_rows = 12
-
-        boundary_y = None
-        # ищем первую строку, начиная с которой следующие stable_rows строк тоже "масочные"
-        for y in range(0, h - stable_rows):
-            if row_frac[y] >= row_threshold and np.all(row_frac[y:y + stable_rows] >= row_threshold):
-                boundary_y = y
-                break
-
-        # fallback: если не нашли (маска странная) — берём 65%
-        if boundary_y is None:
-            boundary_y = int(h * 0.65)
-            logger.warning("⚠️ Could not detect boundary from mask reliably, fallback to 65% height")
-
-        # ---------- 2) ROI: bottom + small context above ----------
-        context_buffer = 160  # 120-220 обычно норм
-        crop_y0 = max(0, boundary_y - context_buffer)
-        crop_y1 = h
-
-        roi = image[crop_y0:crop_y1, :].copy()
-        roi_h = roi.shape[0]
-        boundary_local = boundary_y - crop_y0  # граница внутри ROI
-
-        # Маска для FLUX: всё ниже границы (внутри ROI)
-        mask_flux = np.zeros((roi_h, w), dtype=np.uint8)
-        mask_flux[boundary_local:, :] = 255
-
-        # ---------- 3) Reflection padding to avoid "healing crop edge" ----------
-        pad = 96  # 64-128
-        roi_pad = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
-        mask_pad = cv2.copyMakeBorder(mask_flux, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
-
-        # ---------- 4) Encode ----------
-        roi_rgb = cv2.cvtColor(roi_pad, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(roi_rgb)
+        
+        logger.info("🚀 FLUX Kontext Pro - removing text from bottom 35%")
+        
+        # Конвертируем изображение в RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
-
-        pil_mask = Image.fromarray(mask_pad)
+        
+        # Конвертируем маску
+        pil_mask = Image.fromarray(mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
-
-        prompt = (
-            "Completely remove and erase ALL text in the masked area. "
-            "Fill with clean natural background matching surroundings. "
-            "No text remnants, no ghosting, no artifacts. "
-            "Preserve all unmasked content exactly."
-        )
-
-        logger.info(f"📤 FLUX ROI rows {crop_y0}-{crop_y1}, boundary_y={boundary_y} (local={boundary_local})")
-
+        
+        # Простой и четкий промпт
+        prompt = "Remove all text from the masked area and restore the natural background seamlessly"
+        
+        logger.info("📤 Sending full image to FLUX...")
+        
+        # Вызов FLUX
         output = replicate.run(
             REPLICATE_MODEL,
             input={
@@ -260,11 +218,11 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 45
+                "num_inference_steps": 50  # Больше итераций = лучше качество
             }
         )
-
-        # ---------- 5) Read result ----------
+        
+        # Получаем результат
         if hasattr(output, 'read'):
             result_bytes = output.read()
         elif isinstance(output, str):
@@ -272,37 +230,17 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         elif isinstance(output, list) and len(output) > 0:
             result_bytes = requests.get(output[0], timeout=60).content
         else:
-            logger.error(f"❌ Unknown output: {type(output)}")
+            logger.error(f"❌ Unknown output type: {type(output)}")
             return opencv_fallback(image, mask)
-
+        
+        # Конвертируем обратно
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
-        flux_pad = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-
-        # remove padding
-        flux_roi = flux_pad[pad:-pad, pad:-pad]
-        if flux_roi.shape[:2] != (roi_h, w):
-            flux_roi = cv2.resize(flux_roi, (w, roi_h), interpolation=cv2.INTER_LINEAR)
-
-        # ---------- 6) Feather blend at boundary (kills the "strip") ----------
-        feather_px = 28  # 20-45
-        y = np.arange(roi_h, dtype=np.float32).reshape(-1, 1)
-
-        alpha = (y - boundary_local) / float(feather_px)
-        alpha = np.clip(alpha, 0.0, 1.0)
-        alpha = np.repeat(alpha, w, axis=1)
-        alpha3 = np.dstack([alpha, alpha, alpha])
-
-        blended = roi.astype(np.float32) * (1.0 - alpha3) + flux_roi.astype(np.float32) * alpha3
-        blended = np.clip(blended, 0, 255).astype(np.uint8)
-
-        # ---------- 7) Paste back ----------
-        final = image.copy()
-        final[crop_y0:crop_y1, :] = blended
-
-        logger.info("✅ FLUX done! Boundary from mask, smooth transition, top untouched.")
-        return final
-
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        
+        logger.info("✅ FLUX done! Text removed from bottom 35%")
+        return result_bgr
+        
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
