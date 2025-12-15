@@ -272,7 +272,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
+def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
     """
     Create smooth black gradient overlay WITHOUT solid black bar
     Starts from 55% and smoothly fades to black at bottom
@@ -286,7 +286,7 @@ def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndar
             # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
             # Use power of 0.7 for faster darkening (more aggressive)
-            alpha = int(255 * (progress ** 0.7))
+            alpha = int(255 * (progress ** 0.9))
         else:
             alpha = 0
         
@@ -390,7 +390,7 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
     temp = temp.resize((text_width, text_height), Image.LANCZOS)
     
     # STRETCH VERTICALLY by 25%
-    stretched_height = int(text_height * 1.25)
+    stretched_height = int(text_height * 2.0)
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
     # Paste stretched text into image
