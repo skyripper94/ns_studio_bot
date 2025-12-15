@@ -180,11 +180,12 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    FLUX Kontext Pro:
-    - boundary from mask, but raised to cover at least bottom 45%
-    - text-only mask for FLUX (mask_inpaint)
-    - STRICT core mask for blending back (mask_paste) to prevent "transparent band"
-    - reflection padding to avoid crop-edge blur band
+    Stable strategy:
+    - boundary from input mask, but raised to guarantee bottom 45% coverage
+    - FLUX inpaint mask: WIDE band (so text is surely removed)
+    - paste back: text-like mask + a small "guard strip" around the title line
+    - color-match FLUX ROI to original ROI (prevents visible band/rectangle)
+    - paste with soft mask only
     """
 
     if not REPLICATE_API_TOKEN:
@@ -196,7 +197,20 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
         h, w = image.shape[:2]
 
-        # ---------- 1) Robust boundary_y from mask ----------
+        # =======================
+        # TUNING (set once)
+        # =======================
+        MIN_BOTTOM = 0.45          # поднятая планка: работаем минимум с нижними 45%
+        CONTEXT_BUFFER = 180       # чуть больше контекста, меньше артефактов
+        SEARCH_UP_PX = 520         # насколько вверх над boundary ловим слабый watermark
+        PAD = 96
+        STEPS = 28
+
+        # guard strip around title line to catch faint "ghost text" that detector may miss
+        GUARD_UP = 140             # px above boundary_local
+        GUARD_DOWN = 140           # px below boundary_local
+
+        # ---------------- 1) boundary_y from mask ----------------
         mask_bin = (mask > 0).astype(np.uint8)
         row_frac = mask_bin.mean(axis=1)
 
@@ -213,21 +227,19 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             boundary_y = int(h * 0.65)
             logger.warning("⚠️ Could not detect boundary from mask reliably, fallback to 65% height")
 
-        # ---------- 1.1) Raise boundary to bottom 45% (boundary <= 0.55*h) ----------
-        desired_bottom = 0.45
-        boundary_target = int(h * (1.0 - desired_bottom))  # 0.55*h
+        # ---------------- 1.1) raise boundary to bottom 45% ----------------
+        boundary_target = int(h * (1.0 - MIN_BOTTOM))  # 0.55*h
         boundary_y = min(boundary_y, boundary_target)
 
-        # ---------- 2) ROI: bottom + context above ----------
-        context_buffer = 160
-        crop_y0 = max(0, boundary_y - context_buffer)
+        # ---------------- 2) ROI crop ----------------
+        crop_y0 = max(0, boundary_y - CONTEXT_BUFFER)
         crop_y1 = h
 
         roi = image[crop_y0:crop_y1, :].copy()
         roi_h = roi.shape[0]
         boundary_local = boundary_y - crop_y0
 
-        # ---------- 3) Build candidate map for text/watermark ----------
+        # ---------------- 3) build candidate "text energy" map ----------------
         lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
         L, _, _ = cv2.split(lab)
 
@@ -238,65 +250,48 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         tophat = cv2.morphologyEx(Lc, cv2.MORPH_TOPHAT, k)
         blackhat = cv2.morphologyEx(Lc, cv2.MORPH_BLACKHAT, k)
         cand = cv2.max(tophat, blackhat)
-        cand = cv2.GaussianBlur(cand, (0, 0), 1.3)
+        cand = cv2.GaussianBlur(cand, (0, 0), 1.2)
 
-        # ---------- 4) Expanded zone ABOVE boundary (catch watermark higher) ----------
-        search_up = max(420, int(0.45 * roi_h))
-        zone_start = max(0, boundary_local - search_up)
+        # ---------------- 4) zone (allow text above boundary) ----------------
+        zone_start = max(0, boundary_local - max(SEARCH_UP_PX, int(0.50 * roi_h)))
         zone_mask = np.zeros((roi_h, w), dtype=np.uint8)
         zone_mask[zone_start:, :] = 255
 
-        # ---------- 5) Two masks: inpaint (wider) vs paste (strict core) ----------
+        # ---------------- 5) INPAINT mask (wide band, guaranteed removal) ----------------
+        # Делай именно "полосой": иначе слабый watermark иногда не ловится.
+        mask_inpaint = np.zeros((roi_h, w), dtype=np.uint8)
+        mask_inpaint[zone_start:, :] = 255
 
-        # 5.1 INPAINT mask (sensitive): catches faint watermark, can be wider
-        thr_lo = max(10, np.percentile(cand, 86))
-        m_lo = (cand >= thr_lo).astype(np.uint8) * 255
-        m_lo = cv2.morphologyEx(m_lo, cv2.MORPH_OPEN,
-                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
-        # close helps connect broken letters for inpaint ONLY
-        m_lo = cv2.morphologyEx(m_lo, cv2.MORPH_CLOSE,
-                                cv2.getStructuringElement(cv2.MORPH_RECT, (21, 5)), iterations=1)
-        m_lo = cv2.dilate(m_lo, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=1)
+        # ---------------- 6) PASTE mask (where we actually replace pixels) ----------------
+        # (a) text-like detector (not too strict, иначе буквы вернутся)
+        thr = max(10, np.percentile(cand, 86))
+        m_txt = (cand >= thr).astype(np.uint8) * 255
+        m_txt = cv2.morphologyEx(
+            m_txt, cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1
+        )
+        m_txt = cv2.morphologyEx(
+            m_txt, cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (25, 7)), iterations=1
+        )
+        m_txt = cv2.dilate(m_txt, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=1)
+        m_txt = cv2.bitwise_and(m_txt, zone_mask)
 
-        mask_inpaint = cv2.bitwise_and(m_lo, zone_mask)
+        # (b) guard strip around the title line (kills faint ghosts even if detector misses)
+        y0g = max(0, boundary_local - GUARD_UP)
+        y1g = min(roi_h, boundary_local + GUARD_DOWN)
+        m_guard = np.zeros((roi_h, w), dtype=np.uint8)
+        m_guard[y0g:y1g, :] = 255
+        m_guard = cv2.bitwise_and(m_guard, zone_mask)
 
-        # 5.2 PASTE mask (strict): only cores of letters, NO big "pills"
-        # use higher threshold + edge gating
-        thr_hi = max(14, np.percentile(cand, 94))
-        m_hi = (cand >= thr_hi).astype(np.uint8) * 255
-        m_hi = cv2.morphologyEx(m_hi, cv2.MORPH_OPEN,
-                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+        # final paste mask
+        mask_paste = cv2.bitwise_or(m_txt, m_guard)
 
-        # edge gating: keep only stroke-like pixels (prevents filled rectangles)
-        gx = cv2.Sobel(Lc, cv2.CV_32F, 1, 0, ksize=3)
-        gy = cv2.Sobel(Lc, cv2.CV_32F, 0, 1, ksize=3)
-        mag = cv2.magnitude(gx, gy)
-        edge_thr = np.percentile(mag, 88)
-        edge = (mag >= edge_thr).astype(np.uint8) * 255
+        # ---------------- 7) Reflection padding ----------------
+        roi_pad = cv2.copyMakeBorder(roi, PAD, PAD, PAD, PAD, cv2.BORDER_REFLECT_101)
+        inpaint_pad = cv2.copyMakeBorder(mask_inpaint, PAD, PAD, PAD, PAD, cv2.BORDER_CONSTANT, value=0)
 
-        m_core = cv2.bitwise_and(m_hi, edge)
-        m_core = cv2.dilate(m_core, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)
-
-        mask_paste = cv2.bitwise_and(m_core, zone_mask)
-
-        # If paste mask too small, fallback to a slightly eroded inpaint mask (still safer than full inpaint)
-        if mask_paste.mean() < 0.05:
-            tmp = cv2.erode(mask_inpaint, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
-            mask_paste = tmp
-
-        # If inpaint mask is empty-ish, fallback to expanded bottom zone (last resort)
-        if mask_inpaint.mean() < 0.2:
-            logger.warning("⚠️ inpaint mask empty-ish -> fallback to expanded bottom zone")
-            mask_inpaint = np.zeros((roi_h, w), dtype=np.uint8)
-            mask_inpaint[zone_start:, :] = 255
-            # paste should still be small; keep existing mask_paste
-
-        # ---------- 6) Reflection padding ----------
-        pad = 96
-        roi_pad = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
-        inpaint_pad = cv2.copyMakeBorder(mask_inpaint, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
-
-        # ---------- 7) Encode ----------
+        # ---------------- 8) Encode + FLUX ----------------
         roi_rgb = cv2.cvtColor(roi_pad, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(roi_rgb)
         img_buffer = BytesIO()
@@ -314,8 +309,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         )
 
         logger.info(
-            f"📤 FLUX: boundary_y={boundary_y}, crop={crop_y0}-{crop_y1}, zone_start={zone_start}, "
-            f"inpaint_mean={mask_inpaint.mean():.2f}, paste_mean={mask_paste.mean():.2f}"
+            f"📤 FLUX: boundary_y={boundary_y}, crop={crop_y0}-{crop_y1}, "
+            f"zone_start={zone_start}, paste_mean={mask_paste.mean():.2f}"
         )
 
         output = replicate.run(
@@ -326,11 +321,10 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 28
+                "num_inference_steps": STEPS,
             }
         )
 
-        # ---------- 8) Read result ----------
         if hasattr(output, "read"):
             result_bytes = output.read()
         elif isinstance(output, str):
@@ -345,13 +339,28 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert("RGB"))
         flux_pad = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
 
-        # remove padding
-        flux_roi = flux_pad[pad:-pad, pad:-pad]
+        flux_roi = flux_pad[PAD:-PAD, PAD:-PAD]
         if flux_roi.shape[:2] != (roi_h, w):
             flux_roi = cv2.resize(flux_roi, (w, roi_h), interpolation=cv2.INTER_LINEAR)
 
-        # ---------- 9) Paste back ONLY via SOFT *paste* mask (strict) ----------
-        mask_soft = cv2.GaussianBlur(mask_paste.astype(np.float32) / 255.0, (0, 0), 2.2)
+        # ---------------- 9) COLOR-MATCH flux_roi -> roi on UNMASKED area (removes "band") ----------------
+        # подгоняем L*a*b* статистику по зоне, где мы НЕ вставляем
+        unmask = (mask_paste == 0) & (zone_mask > 0)
+        if unmask.mean() > 0.10:
+            roi_lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB).astype(np.float32)
+            flx_lab = cv2.cvtColor(flux_roi, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+            for ch in range(3):
+                a = roi_lab[:, :, ch][unmask]
+                b = flx_lab[:, :, ch][unmask]
+                ma, sa = float(a.mean()), float(a.std() + 1e-6)
+                mb, sb = float(b.mean()), float(b.std() + 1e-6)
+                flx_lab[:, :, ch] = (flx_lab[:, :, ch] - mb) * (sa / sb) + ma
+
+            flux_roi = cv2.cvtColor(np.clip(flx_lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
+
+        # ---------------- 10) Paste back with SOFT paste mask ----------------
+        mask_soft = cv2.GaussianBlur(mask_paste.astype(np.float32) / 255.0, (0, 0), 3.0)
         mask_soft3 = np.dstack([mask_soft, mask_soft, mask_soft])
 
         blended_roi = roi.astype(np.float32) * (1.0 - mask_soft3) + flux_roi.astype(np.float32) * mask_soft3
@@ -360,7 +369,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         final = image.copy()
         final[crop_y0:crop_y1, :] = blended_roi
 
-        logger.info("✅ FLUX done! Two-mask strategy prevents horizontal band.")
+        logger.info("✅ FLUX done! Raised boundary + wide inpaint + guarded paste + color-match.")
         return final
 
     except Exception as e:
