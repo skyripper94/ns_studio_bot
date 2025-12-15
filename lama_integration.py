@@ -180,7 +180,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """FLUX - send ONLY bottom 35% to avoid touching top"""
+    """FLUX - use REAL mask, expand slightly, composite properly"""
     
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set")
@@ -189,15 +189,22 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     try:
         import replicate
         
-        logger.info("🚀 FLUX - processing ONLY bottom 35%")
+        logger.info("🚀 FLUX - processing with REAL mask")
         
         height, width = image.shape[:2]
         
         # Обрезать ТОЛЬКО нижние 35%
         crop_start = int(height * 0.65)
         bottom_crop = image[crop_start:, :].copy()
+        mask_crop = mask[crop_start:, :].copy()
         
         logger.info(f"✂️ Cropped bottom: rows {crop_start}-{height}")
+        
+        # Расширить маску немного (захватить края букв)
+        kernel = np.ones((7, 7), dtype=np.uint8)  # Небольшое ядро
+        mask_expanded = cv2.dilate(mask_crop, kernel, iterations=1)
+        
+        logger.info("📐 Expanded mask to capture text edges")
         
         # Конвертируем обрезанную часть
         crop_rgb = cv2.cvtColor(bottom_crop, cv2.COLOR_BGR2RGB)
@@ -206,18 +213,15 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         pil_crop.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Маска = ВСЯ обрезанная область (полностью белая)
-        crop_height = bottom_crop.shape[0]
-        full_mask = np.ones((crop_height, width), dtype=np.uint8) * 255
-        
-        pil_mask = Image.fromarray(full_mask)
+        # Используем РЕАЛЬНУЮ расширенную маску
+        pil_mask = Image.fromarray(mask_expanded)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
         prompt = "Remove all text and restore natural background"
         
-        logger.info("📤 Sending bottom 35% to FLUX...")
+        logger.info("📤 Sending to FLUX with REAL mask...")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -246,11 +250,19 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert('RGB'))
         result_crop = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
+        # КОМПОЗИТИНГ ПО МАСКЕ (не вставляем всё, только где маска!)
+        # Размыть маску для плавного перехода
+        mask_feathered = cv2.GaussianBlur(mask_expanded.astype(float), (21, 21), 0) / 255.0
+        mask_3ch = np.stack([mask_feathered] * 3, axis=-1)
+        
+        # Композит: где маска=0 → оригинал, где маска=1 → FLUX
+        composited = (bottom_crop * (1 - mask_3ch) + result_crop * mask_3ch).astype(np.uint8)
+        
         # Вставить результат в оригинал
         final = image.copy()
-        final[crop_start:, :] = result_crop
+        final[crop_start:, :] = composited
         
-        logger.info("✅ FLUX done! Bottom 35% processed, top UNTOUCHED")
+        logger.info("✅ FLUX done! Composited by mask, no blur outside text areas")
         return final
         
     except Exception as e:
