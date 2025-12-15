@@ -36,13 +36,13 @@ COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
 # Font sizes (ORIGINAL SIZES - before *1.25)
 FONT_SIZE_MODE1 = 48  # Original
 FONT_SIZE_MODE2 = 46  # Original
-FONT_SIZE_MODE3_TITLE = 42  # Original
-FONT_SIZE_MODE3_SUBTITLE = 36  # Original
+FONT_SIZE_MODE3_TITLE = 44  # Original
+FONT_SIZE_MODE3_SUBTITLE = 42  # Original
 FONT_SIZE_LOGO = 18
-FONT_SIZE_MIN = 36
+FONT_SIZE_MIN = 32
 
 # Spacing
-SPACING_BOTTOM = 140
+SPACING_BOTTOM = 100
 SPACING_LOGO_TO_TITLE = 6
 SPACING_TITLE_TO_SUBTITLE = 10
 LINE_SPACING = 34
@@ -58,11 +58,11 @@ FONT_PATH = '/app/fonts/WaffleSoft.otf'
 def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = 35) -> dict:
     """
     OCR using Google Vision API on bottom portion of image
-    Returns: dict with 'text' and 'lines'
+    Returns: dict with 'text', 'lines', 'boxes' (bounding boxes for precise masking)
     """
     if not GOOGLE_VISION_API_KEY:
         logger.warning("⚠️ GOOGLE_VISION_API_KEY not set")
-        return {'text': '', 'lines': []}
+        return {'text': '', 'lines': [], 'boxes': []}
     
     try:
         # Crop bottom portion
@@ -93,29 +93,46 @@ def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = 35) -> dict:
         
         if 'responses' not in result or not result['responses']:
             logger.warning("⚠️ No OCR results")
-            return {'text': '', 'lines': []}
+            return {'text': '', 'lines': [], 'boxes': []}
         
         response_data = result['responses'][0]
         
         if 'textAnnotations' not in response_data:
             logger.warning("⚠️ No text detected")
-            return {'text': '', 'lines': []}
+            return {'text': '', 'lines': [], 'boxes': []}
+        
+        annotations = response_data['textAnnotations']
         
         # First annotation is full text
-        full_text = response_data['textAnnotations'][0]['description']
+        full_text = annotations[0]['description']
         logger.info(f"📝 Detected text: {full_text}")
         
         # Extract lines
         lines = [line.strip() for line in full_text.split('\n') if line.strip()]
         
+        # Extract bounding boxes for ALL detected words (skip first - it's the full text)
+        boxes = []
+        for annotation in annotations[1:]:  # Skip first (full text block)
+            if 'boundingPoly' in annotation:
+                vertices = annotation['boundingPoly']['vertices']
+                # Convert to numpy array and offset by crop_start
+                box = np.array([
+                    [v.get('x', 0), v.get('y', 0) + crop_start] 
+                    for v in vertices
+                ], dtype=np.int32)
+                boxes.append(box)
+        
+        logger.info(f"📐 Found {len(boxes)} text bounding boxes")
+        
         return {
             'text': full_text,
-            'lines': lines
+            'lines': lines,
+            'boxes': boxes  # Array of bounding polygons in ORIGINAL image coordinates
         }
         
     except Exception as e:
         logger.error(f"❌ Google Vision OCR error: {e}")
-        return {'text': '', 'lines': []}
+        return {'text': '', 'lines': [], 'boxes': []}
 
 
 def openai_translate(text: str, context: str = "") -> str:
@@ -144,7 +161,6 @@ def openai_translate(text: str, context: str = "") -> str:
 "SpaceX Starlink Satellite Constellation" → "Спутниковая сеть SpaceX Starlink"
 "$10 billion" → "$10 млрд."
 "We Share Insights That Expand Your View" → "Делимся знаниями, расширяющими кругозор"
-"Northrop B-2 Spirit" → "Бомбардировщик Northrop B-2 Spirit"
 """
         
         response = openai.ChatCompletion.create(
@@ -180,48 +196,32 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """FLUX - use REAL mask, expand slightly, composite properly"""
-    
+    """FLUX - use precise mask, composite only masked areas"""
     if not REPLICATE_API_TOKEN:
-        logger.warning("⚠️ REPLICATE_API_TOKEN not set")
+        logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
         return opencv_fallback(image, mask)
     
     try:
         import replicate
         
-        logger.info("🚀 FLUX - processing with REAL mask")
+        logger.info("🚀 FLUX - processing with precise mask")
         
-        height, width = image.shape[:2]
-        
-        # Обрезать ТОЛЬКО нижние 35%
-        crop_start = int(height * 0.65)
-        bottom_crop = image[crop_start:, :].copy()
-        mask_crop = mask[crop_start:, :].copy()
-        
-        logger.info(f"✂️ Cropped bottom: rows {crop_start}-{height}")
-        
-        # Расширить маску немного (захватить края букв)
-        kernel = np.ones((7, 7), dtype=np.uint8)  # Небольшое ядро
-        mask_expanded = cv2.dilate(mask_crop, kernel, iterations=1)
-        
-        logger.info("📐 Expanded mask to capture text edges")
-        
-        # Конвертируем обрезанную часть
-        crop_rgb = cv2.cvtColor(bottom_crop, cv2.COLOR_BGR2RGB)
-        pil_crop = Image.fromarray(crop_rgb)
+        # Convert full image to RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(image_rgb)
         img_buffer = BytesIO()
-        pil_crop.save(img_buffer, format='PNG')
+        pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Используем РЕАЛЬНУЮ расширенную маску
-        pil_mask = Image.fromarray(mask_expanded)
+        # Use the precise mask as-is
+        pil_mask = Image.fromarray(mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        prompt = "Remove all text and restore natural background"
+        prompt = "Remove all text and restore natural background seamlessly"
         
-        logger.info("📤 Sending to FLUX with REAL mask...")
+        logger.info("📤 Sending full image + precise mask to FLUX...")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -235,64 +235,59 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             }
         )
         
-        # Получаем результат
+        # Get result
         if hasattr(output, 'read'):
             result_bytes = output.read()
         elif isinstance(output, str):
-            result_bytes = requests.get(output, timeout=60).content
+            response = requests.get(output, timeout=60)
+            result_bytes = response.content
         elif isinstance(output, list) and len(output) > 0:
-            result_bytes = requests.get(output[0], timeout=60).content
+            response = requests.get(output[0], timeout=60)
+            result_bytes = response.content
         else:
-            logger.error(f"❌ Unknown output")
+            logger.error(f"❌ Unknown output: {type(output)}")
             return opencv_fallback(image, mask)
         
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
-        result_crop = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        # КОМПОЗИТИНГ ПО МАСКЕ (не вставляем всё, только где маска!)
-        # Размыть маску для плавного перехода
-        mask_feathered = cv2.GaussianBlur(mask_expanded.astype(float), (21, 21), 0) / 255.0
+        # Composite by mask with feathering
+        mask_feathered = cv2.GaussianBlur(mask.astype(float), (21, 21), 0) / 255.0
         mask_3ch = np.stack([mask_feathered] * 3, axis=-1)
         
-        # Композит: где маска=0 → оригинал, где маска=1 → FLUX
-        composited = (bottom_crop * (1 - mask_3ch) + result_crop * mask_3ch).astype(np.uint8)
+        # Where mask=0 → original, where mask=1 → FLUX result
+        composited = (image * (1 - mask_3ch) + result_bgr * mask_3ch).astype(np.uint8)
         
-        # Вставить результат в оригинал
-        final = image.copy()
-        final[crop_start:, :] = composited
-        
-        logger.info("✅ FLUX done! Composited by mask, no blur outside text areas")
-        return final
+        logger.info("✅ FLUX done! Composited by precise mask")
+        return composited
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
-        
 
-def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
+
+def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
     """
-    Gradient with solid black base at bottom (100px) + smooth fade above
+    Create smooth black gradient overlay WITHOUT solid black bar
+    Starts from 55% and smoothly fades to black at bottom
     """
     gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
     
     start_row = int(height * (1 - start_percent / 100))
-    black_base_height = 120  # Черная основа снизу
     
     for y in range(height):
-        if y >= height - black_base_height:
-            # Solid black at bottom (100px)
-            alpha = 255
-        elif y >= start_row:
-            # Smooth gradient from start to black base
-            progress = (y - start_row) / (height - black_base_height - start_row)
-            alpha = int(255 * (progress ** 0.9))
+        if y >= start_row:
+            # Smooth gradient from start to bottom
+            progress = (y - start_row) / (height - start_row)
+            # Use power of 0.7 for faster darkening (more aggressive)
+            alpha = int(255 * (progress ** 0.7))
         else:
             alpha = 0
         
         gradient[y, :] = [0, 0, 0, alpha]
     
-    logger.info(f"✨ Gradient: {start_percent}% start + 100px black base")
+    logger.info(f"✨ Created smooth gradient from row {start_row} ({start_percent}%)")
     return gradient
 
 
@@ -354,46 +349,46 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
                                text: str, font: ImageFont.FreeTypeFont,
                                fill_color: tuple, outline_color: tuple,
                                shadow_offset: int = 2):
-    """Draw super sharp text with 3x rendering + 25% vertical stretch"""
-    
-    # Get text bounding box WITH offset
+    """
+    Draw super sharp text with 3x rendering + 25% vertical stretch
+    """
+    # Get text size
     bbox = font.getbbox(text)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     
-    # Create temp 3x
+    # Create temporary image 3x for sharpness
     scale = 3
-    temp = Image.new('RGBA', (text_width * scale, text_height * scale), (0, 0, 0, 0))
+    temp_width = text_width * scale
+    temp_height = text_height * scale
+    
+    temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
     temp_draw = ImageDraw.Draw(temp)
     
     # Font 3x
     font_3x = ImageFont.truetype(font.path, font.size * scale)
     
-    # Get bbox for 3x font and calculate offset
-    bbox_3x = font_3x.getbbox(text)
-    offset_x = -bbox_3x[0]  # Компенсация смещения
-    offset_y = -bbox_3x[1]  # Компенсация смещения
-    
+    # Draw with 3x resolution
     # Shadow
-    temp_draw.text((offset_x + shadow_offset * scale, offset_y + shadow_offset * scale), 
-                   text, font=font_3x, fill=(0, 0, 0, 128))
+    temp_draw.text((shadow_offset * scale, shadow_offset * scale), text, 
+                   font=font_3x, fill=(0, 0, 0, 128))
     
-    # Outline
+    # Outline (8 directions)
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        temp_draw.text((offset_x + dx * scale, offset_y + dy * scale), 
-                       text, font=font_3x, fill=outline_color)
+        temp_draw.text((dx * scale, dy * scale), text, 
+                       font=font_3x, fill=outline_color)
     
     # Main text
-    temp_draw.text((offset_x, offset_y), text, font=font_3x, fill=fill_color)
+    temp_draw.text((0, 0), text, font=font_3x, fill=fill_color)
     
-    # Downscale
+    # Downscale to original size with high quality (for sharpness)
     temp = temp.resize((text_width, text_height), Image.LANCZOS)
     
-    # Stretch +25%
-    stretched_height = int(text_height * 2.0)
+    # STRETCH VERTICALLY by 25%
+    stretched_height = int(text_height * 1.25)
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
-    # Paste
+    # Paste stretched text into image
     image.paste(temp_stretched, (x, y), temp_stretched)
 
 
@@ -611,13 +606,27 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         logger.warning("⚠️ No text detected")
         return image, ocr_data
     
-    logger.info("📋 STEP 2: Create Mask (Bottom 35%)")
+    # Step 2: Create PRECISE mask from OCR bounding boxes
+    logger.info("📋 STEP 2: Create PRECISE Mask from OCR bounding boxes")
     height, width = image.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
-    mask_start = int(height * 0.65)
-    mask[mask_start:, :] = 255
     
-    logger.info(f"📐 Mask: rows {mask_start}-{height} + dilation (2 iter)")  # <-- ОБНОВЛЕНО
+    # Draw bounding boxes on mask
+    if ocr_data['boxes']:
+        for box in ocr_data['boxes']:
+            cv2.fillPoly(mask, [box], 255)
+        
+        # Expand mask to capture text edges and anti-aliasing
+        kernel = np.ones((15, 15), dtype=np.uint8)  # Larger kernel for better coverage
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        
+        logger.info(f"📐 Created precise mask from {len(ocr_data['boxes'])} text boxes + dilation")
+    else:
+        # Fallback: mask bottom 35% if no boxes found
+        logger.warning("⚠️ No bounding boxes, using bottom 35% fallback")
+        mask_start = int(height * 0.65)
+        mask[mask_start:, :] = 255
+        logger.info(f"📐 Fallback mask: rows {mask_start}-{height} (35% bottom)")
     
     # Step 3: Remove text with FLUX
     logger.info("📋 STEP 3: Remove Text (FLUX Kontext Pro)")
