@@ -180,7 +180,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """FLUX inpainting - SIMPLE AND CLEAN"""
+    """FLUX - send ONLY bottom 35% to avoid touching top"""
     
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set")
@@ -189,27 +189,36 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     try:
         import replicate
         
-        logger.info("🚀 FLUX Kontext Pro - removing text from bottom 35%")
+        logger.info("🚀 FLUX - processing ONLY bottom 35%")
         
-        # Конвертируем изображение в RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(image_rgb)
+        height, width = image.shape[:2]
+        
+        # Обрезать ТОЛЬКО нижние 35%
+        crop_start = int(height * 0.65)
+        bottom_crop = image[crop_start:, :].copy()
+        
+        logger.info(f"✂️ Cropped bottom: rows {crop_start}-{height}")
+        
+        # Конвертируем обрезанную часть
+        crop_rgb = cv2.cvtColor(bottom_crop, cv2.COLOR_BGR2RGB)
+        pil_crop = Image.fromarray(crop_rgb)
         img_buffer = BytesIO()
-        pil_image.save(img_buffer, format='PNG')
+        pil_crop.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Конвертируем маску
-        pil_mask = Image.fromarray(mask)
+        # Маска = ВСЯ обрезанная область (полностью белая)
+        crop_height = bottom_crop.shape[0]
+        full_mask = np.ones((crop_height, width), dtype=np.uint8) * 255
+        
+        pil_mask = Image.fromarray(full_mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        # Простой и четкий промпт
-        prompt = "Remove all text from the masked area and restore the natural background seamlessly"
+        prompt = "Remove all text and restore natural background"
         
-        logger.info("📤 Sending full image to FLUX...")
+        logger.info("📤 Sending bottom 35% to FLUX...")
         
-        # Вызов FLUX
         output = replicate.run(
             REPLICATE_MODEL,
             input={
@@ -218,7 +227,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 50  # Больше итераций = лучше качество
+                "num_inference_steps": 50
             }
         )
         
@@ -230,21 +239,24 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         elif isinstance(output, list) and len(output) > 0:
             result_bytes = requests.get(output[0], timeout=60).content
         else:
-            logger.error(f"❌ Unknown output type: {type(output)}")
+            logger.error(f"❌ Unknown output")
             return opencv_fallback(image, mask)
         
-        # Конвертируем обратно
         result_pil = Image.open(BytesIO(result_bytes))
         result_rgb = np.array(result_pil.convert('RGB'))
-        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        result_crop = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        logger.info("✅ FLUX done! Text removed from bottom 35%")
-        return result_bgr
+        # Вставить результат в оригинал
+        final = image.copy()
+        final[crop_start:, :] = result_crop
+        
+        logger.info("✅ FLUX done! Bottom 35% processed, top UNTOUCHED")
+        return final
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
-
+        
 
 def create_gradient(width: int, height: int, start_percent: int = 65) -> np.ndarray:
     """
