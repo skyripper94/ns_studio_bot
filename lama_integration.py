@@ -252,6 +252,11 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert('RGB'))
         result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
+        # Check if FLUX changed the size - resize back to original if needed
+        if result_bgr.shape[:2] != image.shape[:2]:
+            logger.warning(f"⚠️ FLUX changed size from {image.shape[:2]} to {result_bgr.shape[:2]}, resizing back")
+            result_bgr = cv2.resize(result_bgr, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+        
         # Composite by mask with feathering
         mask_feathered = cv2.GaussianBlur(mask.astype(float), (21, 21), 0) / 255.0
         mask_3ch = np.stack([mask_feathered] * 3, axis=-1)
@@ -385,7 +390,7 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
     temp = temp.resize((text_width, text_height), Image.LANCZOS)
     
     # STRETCH VERTICALLY by 25%
-    stretched_height = int(text_height * 2.0)
+    stretched_height = int(text_height * 1.25)
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
     # Paste stretched text into image
