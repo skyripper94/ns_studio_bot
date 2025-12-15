@@ -260,7 +260,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 35
+                "num_inference_steps": 45
             }
         )
 
@@ -654,10 +654,6 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     mask = np.zeros((height, width), dtype=np.uint8)
     mask_start = int(height * 0.65)
     mask[mask_start:, :] = 255
-    
-    # Расширить маску морфологически
-    kernel = np.ones((15, 15), np.uint8)
-    mask = cv2.dilate(mask, kernel, iterations=2)
     
     logger.info(f"📐 Mask: rows {mask_start}-{height} + dilation (2 iter)")  # <-- ОБНОВЛЕНО
     
