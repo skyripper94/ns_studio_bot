@@ -179,12 +179,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """
-    Universal & safe when object enters bottom:
-    - build mask_flux ONLY in a narrow caption band (not whole bottom)
-    - text-only detection + strict CC filters + gradient-energy reject (anti wing/vehicle)
-    - run FLUX fullframe, copy back ONLY masked pixels
-    """
+    """Remove text using FLUX Kontext Pro - bottom area from mask boundary, no top changes, no blur band"""
 
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
@@ -195,142 +190,64 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
         h, w = image.shape[:2]
 
-        # ---------- 1) boundary_y from incoming mask ----------
+        # ---------- 1) Robust boundary_y from mask ----------
+        # mask expected: mostly 0 above boundary, mostly 255 below boundary (can "float")
         mask_bin = (mask > 0).astype(np.uint8)
-        row_frac = mask_bin.mean(axis=1)
+        row_frac = mask_bin.mean(axis=1)  # доля замаскированных пикселей в каждой строке [0..1]
 
+        # Порог "маска реально началась": 5–15% ширины строки замаскировано
         row_threshold = 0.08
+        # Чтобы отсечь шум: требуем, чтобы порог держался N строк подряд
         stable_rows = 12
 
         boundary_y = None
+        # ищем первую строку, начиная с которой следующие stable_rows строк тоже "масочные"
         for y in range(0, h - stable_rows):
             if row_frac[y] >= row_threshold and np.all(row_frac[y:y + stable_rows] >= row_threshold):
                 boundary_y = y
                 break
 
+        # fallback: если не нашли (маска странная) — берём 65%
         if boundary_y is None:
             boundary_y = int(h * 0.65)
             logger.warning("⚠️ Could not detect boundary from mask reliably, fallback to 65% height")
 
-        # ---------- 2) Define NARROW caption band (this is the key) ----------
-        # Мы ищем и чистим только там, где реально лежит текст (заголовок/цена).
-        # Под твой шаблон: текст обычно около boundary_y и ниже, а не весь низ.
-        band_up = max(220, int(0.20 * h))     # насколько выше границы ищем "призраки"
-        band_down = max(280, int(0.30 * h))   # насколько ниже границы (включая цену)
+        # ---------- 2) ROI: bottom + small context above ----------
+        context_buffer = 160  # 120-220 обычно норм
+        crop_y0 = max(0, boundary_y - context_buffer)
+        crop_y1 = h
 
-        band_y0 = max(0, boundary_y - band_up)
-        band_y1 = min(h, boundary_y + band_down)
+        roi = image[crop_y0:crop_y1, :].copy()
+        roi_h = roi.shape[0]
+        boundary_local = boundary_y - crop_y0  # граница внутри ROI
 
-        # если вдруг граница низко — всё равно ограничиваемся нижней частью кадра
-        band_y0 = min(band_y0, int(0.65 * h))
-        band_y1 = max(band_y1, int(0.78 * h))
-        band_y1 = min(band_y1, h)
+        # Маска для FLUX: всё ниже границы (внутри ROI)
+        mask_flux = np.zeros((roi_h, w), dtype=np.uint8)
+        mask_flux[boundary_local:, :] = 255
 
-        band = image[band_y0:band_y1, :].copy()
-        bh = band.shape[0]
+        # ---------- 3) Reflection padding to avoid "healing crop edge" ----------
+        pad = 96  # 64-128
+        roi_pad = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
+        mask_pad = cv2.copyMakeBorder(mask_flux, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
 
-        # ---------- 3) Text candidate map ----------
-        lab = cv2.cvtColor(band, cv2.COLOR_BGR2LAB)
-        L, _, _ = cv2.split(lab)
-
-        clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-        Lc = clahe.apply(L)
-
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
-        tophat = cv2.morphologyEx(Lc, cv2.MORPH_TOPHAT, k)
-        blackhat = cv2.morphologyEx(Lc, cv2.MORPH_BLACKHAT, k)
-        cand = cv2.max(tophat, blackhat)
-        cand = cv2.GaussianBlur(cand, (0, 0), 1.2)
-
-        thr = max(10, np.percentile(cand, 86))
-        m = (cand >= thr).astype(np.uint8) * 255
-
-        # лёгкая морфология (НЕ раздуваем в плашки)
-        m = cv2.morphologyEx(m, cv2.MORPH_OPEN,
-                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
-        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,
-                             cv2.getStructuringElement(cv2.MORPH_RECT, (13, 5)), iterations=1)
-
-        # ---------- 4) Gradient-energy map (anti object) ----------
-        gx = cv2.Sobel(Lc, cv2.CV_32F, 1, 0, ksize=3)
-        gy = cv2.Sobel(Lc, cv2.CV_32F, 0, 1, ksize=3)
-        mag = cv2.magnitude(gx, gy)
-
-        # ---------- 5) CC filter: keep text-ish, reject wing-ish ----------
-        num, labels, stats, _ = cv2.connectedComponentsWithStats((m > 0).astype(np.uint8), connectivity=8)
-        filtered = np.zeros_like(m)
-
-        band_area = float(bh * w)
-        min_area = max(20, int(band_area * 0.00002))
-        max_area = int(band_area * 0.02)
-
-        for i in range(1, num):
-            x, y, cw, ch, area = stats[i]
-
-            if area < min_area or area > max_area:
-                continue
-
-            # текст имеет "высоту буквы", а не 1-2 пикселя линии
-            if ch < 10 or ch > int(0.22 * bh):
-                continue
-            if cw < 18:
-                continue
-
-            # анти-крыло: слишком широкие/объектные компоненты выкидываем
-            if cw > int(0.70 * w):
-                continue
-
-            ar = cw / float(ch)
-            if ar < 1.2 or ar > 60.0:
-                continue
-
-            fill = area / float(max(1, cw * ch))
-            if fill < 0.01 or fill > 0.85:
-                continue
-
-            # анти-объект по градиентной энергии:
-            # у крыла/деталей обычно высокая средняя mag, у текста под градиентом — ниже.
-            comp = (labels == i)
-            comp_mag_mean = float(mag[comp].mean()) if comp.any() else 0.0
-            # порог относительно распределения mag
-            mag_thr = float(np.percentile(mag, 80))
-            if comp_mag_mean > mag_thr:
-                continue
-
-            filtered[comp] = 255
-
-        # чуть расширим, чтобы снять ореол текста, но без "плашек"
-        filtered = cv2.dilate(filtered, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
-
-        # ---------- 6) Compose full-size mask_flux ONLY in caption band ----------
-        mask_flux = np.zeros((h, w), dtype=np.uint8)
-        mask_flux[band_y0:band_y1, :] = filtered
-
-        # доп. защита верха: ничего выше band_y0 не трогаем
-        mask_flux[:band_y0, :] = 0
-
-        if mask_flux.mean() < 0.03:
-            logger.warning("⚠️ mask_flux too small/empty -> returning original")
-            return image
-
-        # ---------- 7) Send FULL image + mask to FLUX ----------
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(image_rgb)
+        # ---------- 4) Encode ----------
+        roi_rgb = cv2.cvtColor(roi_pad, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(roi_rgb)
         img_buffer = BytesIO()
-        pil_image.save(img_buffer, format="PNG")
+        pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
 
-        pil_mask = Image.fromarray(mask_flux)
+        pil_mask = Image.fromarray(mask_pad)
         mask_buffer = BytesIO()
-        pil_mask.save(mask_buffer, format="PNG")
+        pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
 
         prompt = (
-            "Remove only the text/watermark in the masked area. Preserve everything outside the mask. "
-            "Naturally restore the background. No global edits."
+            "Remove only the text in the masked area. Preserve all unmasked details. "
+            "Naturally restore the background with clean gradients, no blur bands, no global edits."
         )
 
-        logger.info(f"📤 FLUX FULLFRAME band={band_y0}-{band_y1}, mask_mean={mask_flux.mean():.2f}")
+        logger.info(f"📤 FLUX ROI rows {crop_y0}-{crop_y1}, boundary_y={boundary_y} (local={boundary_local})")
 
         output = replicate.run(
             REPLICATE_MODEL,
@@ -344,8 +261,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             }
         )
 
-        # ---------- 8) Read result ----------
-        if hasattr(output, "read"):
+        # ---------- 5) Read result ----------
+        if hasattr(output, 'read'):
             result_bytes = output.read()
         elif isinstance(output, str):
             result_bytes = requests.get(output, timeout=60).content
@@ -356,16 +273,31 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
             return opencv_fallback(image, mask)
 
         result_pil = Image.open(BytesIO(result_bytes))
-        result_rgb = np.array(result_pil.convert("RGB"))
-        flux_result = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        result_rgb = np.array(result_pil.convert('RGB'))
+        flux_pad = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
 
-        # ---------- 9) Copy back ONLY masked pixels ----------
+        # remove padding
+        flux_roi = flux_pad[pad:-pad, pad:-pad]
+        if flux_roi.shape[:2] != (roi_h, w):
+            flux_roi = cv2.resize(flux_roi, (w, roi_h), interpolation=cv2.INTER_LINEAR)
+
+        # ---------- 6) Feather blend at boundary (kills the "strip") ----------
+        feather_px = 28  # 20-45
+        y = np.arange(roi_h, dtype=np.float32).reshape(-1, 1)
+
+        alpha = (y - boundary_local) / float(feather_px)
+        alpha = np.clip(alpha, 0.0, 1.0)
+        alpha = np.repeat(alpha, w, axis=1)
+        alpha3 = np.dstack([alpha, alpha, alpha])
+
+        blended = roi.astype(np.float32) * (1.0 - alpha3) + flux_roi.astype(np.float32) * alpha3
+        blended = np.clip(blended, 0, 255).astype(np.uint8)
+
+        # ---------- 7) Paste back ----------
         final = image.copy()
-        copy_mask = mask_flux > 0
-        for c in range(3):
-            final[:, :, c][copy_mask] = flux_result[:, :, c][copy_mask]
+        final[crop_y0:crop_y1, :] = blended
 
-        logger.info("✅ FLUX done! Caption-band text-only mask => wing/object stays intact.")
+        logger.info("✅ FLUX done! Boundary from mask, smooth transition, top untouched.")
         return final
 
     except Exception as e:
