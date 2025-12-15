@@ -38,14 +38,14 @@ FONT_SIZE_MODE1 = 48  # Original
 FONT_SIZE_MODE2 = 46  # Original
 FONT_SIZE_MODE3_TITLE = 44  # Original
 FONT_SIZE_MODE3_SUBTITLE = 40  # Original
-FONT_SIZE_LOGO = 18
-FONT_SIZE_MIN = 24
+FONT_SIZE_LOGO = 20
+FONT_SIZE_MIN = 36
 
 # Spacing
 SPACING_BOTTOM = 140  # Increased from 100 to prevent text cutoff
 SPACING_LOGO_TO_TITLE = 4
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 14  # Restored from 8 (was changed accidentally)
+LINE_SPACING = 24 
 LOGO_LINE_LENGTH = 300
 
 # Layout
