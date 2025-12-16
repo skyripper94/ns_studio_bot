@@ -684,8 +684,15 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     gradient = create_gradient(actual_width, actual_height, start_percent=55)
     gradient_image = Image.fromarray(gradient, 'RGBA')
     
-    # Apply gradient
-    pil_image = Image.alpha_composite(pil_image, gradient_image)
+    # Apply gradient as INDEPENDENT layer (overwrite, not blend)
+    img_np = np.array(pil_image.convert('RGB'))
+    grad_alpha = gradient[:, :, 3] / 255.0  # Extract alpha channel
+    
+    # Darken each RGB channel based on gradient alpha
+    for i in range(3):
+        img_np[:, :, i] = (img_np[:, :, i] * (1 - grad_alpha)).astype(np.uint8)
+    
+    pil_image = Image.fromarray(img_np).convert('RGBA')
     
     # Step 6: Render text
     logger.info(f"📋 STEP 6: Render Text (Mode {mode})")
