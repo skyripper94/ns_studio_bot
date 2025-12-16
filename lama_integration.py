@@ -206,7 +206,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        prompt = "Remove all text, lines, logos and restore natural background seamlessly"
+        prompt = "Remove all text, lines, logos in the MASKED area only. Preserve original background, colors, texture and sharpness. Do not blur. Do not change unmasked areas."
         
         logger.info("📤 Sending to FLUX...")
         
@@ -250,6 +250,55 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
+
+
+def flux_kontext_inpaint_bottom_roi(image: np.ndarray, mask_start: int, overlap_px: int = 120) -> np.ndarray:
+    """
+    Inpaint ONLY the bottom area by sending a cropped ROI to FLUX, then paste back with a soft blend seam.
+
+    Why:
+    - Prevents FLUX from touching/restoring/repainting the top of the frame (since we don't send it).
+    - Avoids a hard seam / blur at the crop boundary by using an overlap band and alpha blending.
+
+    Args:
+        image: original BGR image
+        mask_start: Y row index where bottom masked area starts in ORIGINAL image coordinates
+        overlap_px: how many pixels ABOVE mask_start to include for context + blending seam
+    """
+    h, w = image.shape[:2]
+    mask_start = int(np.clip(mask_start, 0, h))
+
+    # ROI includes a small band above the mask boundary (for context), but we will blend that band with original
+    roi_start = max(0, mask_start - int(overlap_px))
+    roi = image[roi_start:h, :]
+
+    # Mask only the true bottom part inside ROI coords
+    roi_h = h - roi_start
+    mask_roi = np.zeros((roi_h, w), dtype=np.uint8)
+    local_mask_start = mask_start - roi_start
+    if local_mask_start < roi_h:
+        mask_roi[local_mask_start:, :] = 255
+
+    # Run FLUX only on ROI
+    roi_clean = flux_kontext_inpaint(roi, mask_roi)
+
+    # Paste back with a soft seam (no "мыло" at boundary)
+    out = image.copy()
+    overlap_h = local_mask_start
+
+    if overlap_h > 0:
+        # alpha from 0..1 across overlap band (top keeps original, bottom moves to cleaned)
+        alpha = np.linspace(0.0, 1.0, overlap_h, dtype=np.float32)[:, None, None]
+        top_orig = roi[:overlap_h].astype(np.float32)
+        top_new = roi_clean[:overlap_h].astype(np.float32)
+        blended = top_orig * (1.0 - alpha) + top_new * alpha
+        out[roi_start:mask_start, :] = np.clip(blended, 0, 255).astype(np.uint8)
+
+    # Fully replace bottom masked region
+    out[mask_start:h, :] = roi_clean[overlap_h:, :]
+
+    return out
+
 
 
 def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> Image.Image:
@@ -577,7 +626,7 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     # STEP 3: FLUX removes everything in mask
     # ========================================
     logger.info("📋 STEP 3: Remove content (FLUX Kontext Pro)")
-    clean_image = flux_kontext_inpaint(image, mask)
+    clean_image = flux_kontext_inpaint_bottom_roi(image, mask_start=mask_start, overlap_px=120)
     
     # ========================================
     # STEP 4: Translate
