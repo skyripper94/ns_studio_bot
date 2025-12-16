@@ -45,7 +45,7 @@ FONT_SIZE_MIN = 36
 SPACING_BOTTOM = 140
 SPACING_LOGO_TO_TITLE = 4
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 32
+LINE_SPACING = 14
 LOGO_LINE_LENGTH = 300
 
 # Layout
@@ -252,7 +252,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int, start_percent: int = 65) -> Image.Image:
+def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> Image.Image:
     """
     Create gradient as a separate RGBA layer
     Transparent at top, black at bottom
@@ -265,7 +265,7 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 65) -> I
         if y >= start_row:
             # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            alpha = int(255 * (progress ** 0.7))
+            alpha = int(255 * (progress ** 0.4))
             
             for x in range(width):
                 gradient.putpixel((x, y), (0, 0, 0, alpha))
