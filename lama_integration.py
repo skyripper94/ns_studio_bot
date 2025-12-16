@@ -462,12 +462,12 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-    actual_height = draw_sharp_stretched_text(
-        image, line_x, title_y, line, title_font,
-        COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-    )
+        actual_height = draw_sharp_stretched_text(
+            image, line_x, title_y, line, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
+        )
 
-    current_y += actual_height + LINE_SPACING  # ✅ ПРАВИЛЬНО
+        title_y += actual_height + LINE_SPACING
     
     return image
 
@@ -567,11 +567,11 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_x = (width - line_width) // 2
         
         actual_height = draw_sharp_stretched_text(
-            image, line_x, current_y, line, subtitle_font,
-            COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
+            image, line_x, current_y, line, title_font,  # ✅ title_font
+            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-
-        current_y += actual_height + LINE_SPACING  # ✅ ПРАВИЛЬНО
+    
+        current_y += actual_height + LINE_SPACING
     
     # Draw subtitle
     current_y += SPACING_TITLE_TO_SUBTITLE
