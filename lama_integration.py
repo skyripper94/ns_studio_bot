@@ -43,9 +43,9 @@ FONT_SIZE_MIN = 36
 
 # Spacing - МЕНЯЙ ЭТИ ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ
 SPACING_BOTTOM = 140          # Отступ снизу
-SPACING_LOGO_TO_TITLE = 6    # Расстояние от лого до заголовка
+SPACING_LOGO_TO_TITLE = 2   # Расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = 10  # Расстояние между заголовком и подзаголовком
-LINE_SPACING = 32              # Расстояние между строками текста
+LINE_SPACING = 8             # Расстояние между строками текста
 LOGO_LINE_LENGTH = 300        # Длина линий возле лого
 
 # Layout
@@ -298,7 +298,7 @@ def create_gradient_layer(width: int, height: int, gradient_start_percent: int =
 
         # Soft fade: slow start at top, faster near bottom
         # (gamma > 1 makes the upper part more "gentle")
-        gamma = 2.9
+        gamma = 4.8
         t = t ** gamma
 
         alpha_1d = (255.0 * t).astype(np.uint8)
@@ -731,8 +731,8 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     # lift_black: насколько поднять черное дно снизу
     gradient_layer = create_gradient_layer(
         actual_width, actual_height, 
-        gradient_start_percent=55,  # В центре градиент начинается на 55% от верха
-        lift_black=70  # Черное дно поднято на 70px
+        gradient_start_percent=65,  # В центре градиент начинается на 55% от верха
+        lift_black=120  # Черное дно поднято на 120px
     )
     
     # IMPORTANT LAYER ORDER:
