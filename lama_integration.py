@@ -4,7 +4,7 @@ Complete Workflow (SIMPLIFIED):
 2. Remove EVERYTHING in bottom 35% (FLUX Kontext Pro) - маска всегда 35%
 3. Translate & adapt (OpenAI GPT-4)
 4. Apply gradient LAYER on top
-5. Render text on top of gradient with 2x letter spacing
+5. Render text on top of gradient
 """
 
 import os
@@ -34,20 +34,19 @@ COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 
 # Font sizes
-FONT_SIZE_MODE1 = 48
-FONT_SIZE_MODE2 = 46
-FONT_SIZE_MODE3_TITLE = 44
+FONT_SIZE_MODE1 = 54
+FONT_SIZE_MODE2 = 48
+FONT_SIZE_MODE3_TITLE = 46
 FONT_SIZE_MODE3_SUBTITLE = 40
-FONT_SIZE_LOGO = 20
+FONT_SIZE_LOGO = 22
 FONT_SIZE_MIN = 36
 
 # Spacing
 SPACING_BOTTOM = 140
 SPACING_LOGO_TO_TITLE = 2
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 3
+LINE_SPACING = 8
 LOGO_LINE_LENGTH = 300
-LETTER_SPACING_MULTIPLIER = 2.0
 
 # Layout
 TEXT_WIDTH_PERCENT = 0.9
@@ -253,10 +252,10 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int, start_percent: int = 45) -> Image.Image:
+def create_gradient_layer(width: int, height: int, start_percent: int = 65) -> Image.Image:
     """
     Create gradient as a separate RGBA layer
-    Transparent at top, black at bottom with brighter fade
+    Transparent at top, black at bottom
     """
     gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     
@@ -264,9 +263,8 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 45) -> I
     
     for y in range(height):
         if y >= start_row:
-            # Smoother, brighter gradient
+            # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            # Use power of 0.7 for brighter fade
             alpha = int(255 * (progress ** 0.7))
             
             for x in range(width):
@@ -276,67 +274,10 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 45) -> I
     return gradient
 
 
-def calculate_stretched_text_width(text: str, font: ImageFont.FreeTypeFont) -> int:
-    """Calculate width of text with letter spacing applied"""
-    if not text:
-        return 0
-    
-    total_width = 0
-    for i, char in enumerate(text):
-        bbox = font.getbbox(char)
-        char_width = bbox[2] - bbox[0]
-        total_width += char_width
-        
-        # Add spacing between characters (not after last one)
-        if i < len(text) - 1:
-            total_width += int(char_width * (LETTER_SPACING_MULTIPLIER - 1))
-    
-    return total_width
-
-
-def draw_stretched_text(draw: ImageDraw.Draw, x: int, y: int, 
-                       text: str, font: ImageFont.FreeTypeFont,
-                       fill_color: tuple, outline_color: tuple,
-                       shadow_offset: int = 2) -> tuple:
-    """
-    Draw text with letter spacing (stretched)
-    Returns: (total_width, height)
-    """
-    if not text:
-        return 0, 0
-    
-    current_x = x
-    max_height = 0
-    
-    for char in text:
-        # Shadow
-        draw.text((current_x + shadow_offset, y + shadow_offset), 
-                 char, font=font, fill=(0, 0, 0, 128))
-        
-        # Outline (8 directions)
-        for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-            draw.text((current_x + dx, y + dy), char, font=font, fill=outline_color)
-        
-        # Main character
-        draw.text((current_x, y), char, font=font, fill=fill_color)
-        
-        # Get character dimensions
-        bbox = font.getbbox(char)
-        char_width = bbox[2] - bbox[0]
-        char_height = bbox[3] - bbox[1]
-        max_height = max(max_height, char_height)
-        
-        # Move to next character position with spacing
-        current_x += char_width + int(char_width * (LETTER_SPACING_MULTIPLIER - 1))
-    
-    total_width = current_x - x
-    return total_width, max_height
-
-
 def calculate_adaptive_font_size(text: str, font_path: str, max_width: int, 
                                   initial_size: int, min_size: int = 20) -> tuple:
     """
-    Calculate font size that fits text within max_width (with letter spacing)
+    Calculate font size that fits text within max_width
     Returns: (font_size, font_object, lines)
     """
     font_size = initial_size
@@ -345,14 +286,15 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
         try:
             font = ImageFont.truetype(font_path, font_size)
             
-            # Split into lines and check width with letter spacing
+            # Split into lines and check width
             words = text.split()
             lines = []
             current_line = []
             
             for word in words:
                 test_line = ' '.join(current_line + [word])
-                width = calculate_stretched_text_width(test_line, font)
+                bbox = font.getbbox(test_line)
+                width = bbox[2] - bbox[0]
                 
                 if width <= max_width:
                     current_line.append(word)
@@ -369,7 +311,7 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
             
             # Check if all lines fit
             fits = all(
-                calculate_stretched_text_width(line, font) <= max_width
+                font.getbbox(line)[2] - font.getbbox(line)[0] <= max_width
                 for line in lines
             )
             
@@ -386,9 +328,31 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
     return min_size, font, [text]
 
 
+def draw_text_with_effects(draw: ImageDraw.Draw, x: int, y: int, 
+                            text: str, font: ImageFont.FreeTypeFont,
+                            fill_color: tuple, outline_color: tuple,
+                            shadow_offset: int = 2) -> int:
+    """
+    Draw text with shadow and outline
+    Returns: height of drawn text
+    """
+    # Shadow
+    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill=(0, 0, 0, 128))
+    
+    # Outline (8 directions)
+    for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
+        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
+    
+    # Main text
+    draw.text((x, y), text, font=font, fill=fill_color)
+    
+    bbox = font.getbbox(text)
+    return bbox[3] - bbox[1]
+
+
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     """
-    Mode 1: Logo + 2 lines + Title (UPPERCASE) with letter spacing
+    Mode 1: Logo + 2 lines + Title (UPPERCASE)
     """
     draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
@@ -405,11 +369,8 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     # Calculate heights
     title_heights = []
     for line in title_lines:
-        _, line_height = draw_stretched_text(
-            ImageDraw.Draw(Image.new('RGBA', (1, 1))), 0, 0,
-            line, title_font, (0,0,0), (0,0,0)
-        )
-        title_heights.append(line_height)
+        bbox = title_font.getbbox(line)
+        title_heights.append(bbox[3] - bbox[1])
     
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
@@ -443,15 +404,16 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     # Logo text
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
     
-    # Draw title with letter spacing
+    # Draw title
     title_y = start_y + logo_height + SPACING_LOGO_TO_TITLE
     
     for i, line in enumerate(title_lines):
-        line_width = calculate_stretched_text_width(line, title_font)
+        line_bbox = title_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_stretched_text(draw, line_x, title_y, line, title_font,
-                           COLOR_TURQUOISE, COLOR_OUTLINE)
+        draw_text_with_effects(draw, line_x, title_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
         title_y += title_heights[i] + LINE_SPACING
     
@@ -460,7 +422,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
 
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     """
-    Mode 2: Title only (no logo) (UPPERCASE) with letter spacing
+    Mode 2: Title only (no logo) (UPPERCASE)
     """
     draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
@@ -477,25 +439,23 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     # Calculate heights
     title_heights = []
     for line in title_lines:
-        _, line_height = draw_stretched_text(
-            ImageDraw.Draw(Image.new('RGBA', (1, 1))), 0, 0,
-            line, title_font, (0,0,0), (0,0,0)
-        )
-        title_heights.append(line_height)
+        bbox = title_font.getbbox(line)
+        title_heights.append(bbox[3] - bbox[1])
     
     total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
     # Start position
     start_y = height - SPACING_BOTTOM - total_height
     
-    # Draw title with letter spacing
+    # Draw title
     current_y = start_y
     for i, line in enumerate(title_lines):
-        line_width = calculate_stretched_text_width(line, title_font)
+        line_bbox = title_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_stretched_text(draw, line_x, current_y, line, title_font,
-                           COLOR_TURQUOISE, COLOR_OUTLINE)
+        draw_text_with_effects(draw, line_x, current_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
         current_y += title_heights[i] + LINE_SPACING
     
@@ -505,7 +465,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
 def render_mode3_content(image: Image.Image, title_translated: str, 
                          subtitle_translated: str) -> Image.Image:
     """
-    Mode 3: Title + Subtitle (BOTH UPPERCASE) with letter spacing
+    Mode 3: Title + Subtitle (BOTH UPPERCASE)
     """
     draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
@@ -529,19 +489,13 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     # Calculate heights
     title_heights = []
     for line in title_lines:
-        _, line_height = draw_stretched_text(
-            ImageDraw.Draw(Image.new('RGBA', (1, 1))), 0, 0,
-            line, title_font, (0,0,0), (0,0,0)
-        )
-        title_heights.append(line_height)
+        bbox = title_font.getbbox(line)
+        title_heights.append(bbox[3] - bbox[1])
     
     subtitle_heights = []
     for line in subtitle_lines:
-        _, line_height = draw_stretched_text(
-            ImageDraw.Draw(Image.new('RGBA', (1, 1))), 0, 0,
-            line, subtitle_font, (0,0,0), (0,0,0)
-        )
-        subtitle_heights.append(line_height)
+        bbox = subtitle_font.getbbox(line)
+        subtitle_heights.append(bbox[3] - bbox[1])
     
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
@@ -551,26 +505,28 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     # Start position
     start_y = height - SPACING_BOTTOM - total_height
     
-    # Draw title with letter spacing
+    # Draw title
     current_y = start_y
     for i, line in enumerate(title_lines):
-        line_width = calculate_stretched_text_width(line, title_font)
+        line_bbox = title_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_stretched_text(draw, line_x, current_y, line, title_font,
-                           COLOR_TURQUOISE, COLOR_OUTLINE)
+        draw_text_with_effects(draw, line_x, current_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
         current_y += title_heights[i] + LINE_SPACING
     
-    # Draw subtitle with letter spacing
+    # Draw subtitle
     current_y += SPACING_TITLE_TO_SUBTITLE
     
     for i, line in enumerate(subtitle_lines):
-        line_width = calculate_stretched_text_width(line, subtitle_font)
+        line_bbox = subtitle_font.getbbox(line)
+        line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_stretched_text(draw, line_x, current_y, line, subtitle_font,
-                           COLOR_WHITE, COLOR_OUTLINE)
+        draw_text_with_effects(draw, line_x, current_y, line, subtitle_font,
+                               COLOR_WHITE, COLOR_OUTLINE)
         
         current_y += subtitle_heights[i] + LINE_SPACING
     
@@ -585,8 +541,8 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     1. OCR → get text for translation
     2. MASK = bottom 35% (ALWAYS) → FLUX removes EVERYTHING (text, lines, logo)
     3. Translate text
-    4. Apply gradient LAYER on top of clean image (higher and brighter)
-    5. Render text on top of gradient with letter spacing
+    4. Apply gradient LAYER on top of clean image
+    5. Render text on top of gradient
     
     Returns: (result_image, ocr_data)
     """
@@ -646,7 +602,7 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     # ========================================
     # STEP 5: Convert to PIL and apply gradient LAYER
     # ========================================
-    logger.info("📋 STEP 5: Apply gradient LAYER (higher and brighter)")
+    logger.info("📋 STEP 5: Apply gradient LAYER")
     
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
@@ -654,18 +610,18 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     actual_width, actual_height = pil_image.size
     logger.info(f"📐 Image size: {actual_width}x{actual_height}")
     
-    # Create gradient as separate layer (higher and brighter)
-    gradient_layer = create_gradient_layer(actual_width, actual_height, start_percent=45)
+    # Create gradient as separate layer
+    gradient_layer = create_gradient_layer(actual_width, actual_height, start_percent=55)
     
     # SIMPLE: composite gradient ON TOP of image
     pil_image = Image.alpha_composite(pil_image, gradient_layer)
     
-    logger.info("✅ Gradient layer applied (higher and brighter)")
+    logger.info("✅ Gradient layer applied")
     
     # ========================================
-    # STEP 6: Render text ON TOP of gradient with letter spacing
+    # STEP 6: Render text ON TOP of gradient
     # ========================================
-    logger.info(f"📋 STEP 6: Render Text with Letter Spacing (Mode {mode})")
+    logger.info(f"📋 STEP 6: Render Text (Mode {mode})")
     
     if mode == 1:
         pil_image = render_mode1_logo(pil_image, title_translated)
@@ -679,7 +635,7 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
     
     logger.info("=" * 60)
-    logger.info("✅ WORKFLOW COMPLETED WITH LETTER SPACING!")
+    logger.info("✅ WORKFLOW COMPLETED!")
     logger.info("=" * 60)
     
     return result_bgr, ocr_data
