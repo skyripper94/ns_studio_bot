@@ -328,28 +328,6 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
     return min_size, font, [text]
 
 
-def draw_text_with_effects(draw: ImageDraw.Draw, x: int, y: int, 
-                            text: str, font: ImageFont.FreeTypeFont,
-                            fill_color: tuple, outline_color: tuple,
-                            shadow_offset: int = 2) -> int:
-    """
-    Draw text with shadow and outline
-    Returns: height of drawn text
-    """
-    # Shadow
-    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill=(0, 0, 0, 128))
-    
-    # Outline (8 directions)
-    for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
-    
-    # Main text
-    draw.text((x, y), text, font=font, fill=fill_color)
-    
-    bbox = font.getbbox(text)
-    return bbox[3] - bbox[1]
-
-
 def draw_sharp_stretched_text(image: Image.Image, x: int, y: int, 
                                text: str, font: ImageFont.FreeTypeFont,
                                fill_color: tuple, outline_color: tuple,
@@ -466,7 +444,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
             image, line_x, title_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-
+        
         title_y += actual_height + LINE_SPACING
     
     return image
@@ -510,7 +488,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
             image, line_x, current_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-
+        
         current_y += actual_height + LINE_SPACING
     
     return image
@@ -567,10 +545,10 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_x = (width - line_width) // 2
         
         actual_height = draw_sharp_stretched_text(
-            image, line_x, current_y, line, title_font,  # ✅ title_font
+            image, line_x, current_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-    
+        
         current_y += actual_height + LINE_SPACING
     
     # Draw subtitle
@@ -585,8 +563,8 @@ def render_mode3_content(image: Image.Image, title_translated: str,
             image, line_x, current_y, line, subtitle_font,
             COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
         )
-
-        current_y += actual_height + LINE_SPACING  # ✅ ПРАВИЛЬНО
+        
+        current_y += actual_height + LINE_SPACING
     
     return image
 
