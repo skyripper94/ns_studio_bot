@@ -1,0 +1,19 @@
+# CRITICAL: All tokens MUST be set for text removal to work!
+
+# Telegram Bot Token (from @BotFather)
+TELEGRAM_TOKEN=8062829424:AAHcNJIuD_lAVygoU7dpmKMGeinU7FlwS18
+
+# Replicate API Token - REQUIRED FOR TEXT REMOVAL!
+# Get from: https://replicate.com/account/api-tokens
+REPLICATE_API_TOKEN=r8_JWqoNZ2MFOMs9QPUNRKgQHDO09csICN2xYAp2
+
+# Google Vision API Key - REQUIRED FOR OCR!
+# Get from: https://console.cloud.google.com/apis/credentials
+GOOGLE_VISION_API_KEY=AIzaSyDh31Pt8CYCb5KXhA1lJZbDgPKuAMUs340
+
+# OpenAI API Key - REQUIRED FOR TRANSLATION!
+# Get from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=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
+
+# Device (cpu or cuda)
+DEVICE=cpu
