@@ -340,31 +340,39 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
     bbox = font.getbbox(text)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
+
+    # ADD PADDING for descenders (хвостики букв)
+    padding = int(font.size * 0.3)  # 30% от размера шрифта
+    text_height_with_padding = text_height + padding * 2
     
     # Create temporary image 3x for sharpness
     scale = 3
     temp_width = text_width * scale
-    temp_height = text_height * scale
+    temp_height = text_height_with_padding * scale
     
     temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
     temp_draw = ImageDraw.Draw(temp)
+                                   
+    # Draw with padding offset
+    y_offset = padding * scale  # Сдвиг вниз на размер паддинга                               
     
     # Font 3x
     font_3x = ImageFont.truetype(font.path, font.size * scale)
     
     # Draw with 3x resolution
     # Shadow
-    temp_draw.text((shadow_offset * scale, shadow_offset * scale), text, 
-                   font=font_3x, fill=(0, 0, 0, 128))
+    temp_draw.text((shadow_offset * scale, y_offset + shadow_offset * scale), text, 
+               font=font_3x, fill=(0, 0, 0, 128))
     
     # Outline (8 directions)
+    # Outline
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        temp_draw.text((dx * scale, dy * scale), text, 
+        temp_draw.text((dx * scale, y_offset + dy * scale), text, 
                        font=font_3x, fill=outline_color)
     
     # Main text
-    temp_draw.text((0, 0), text, font=font_3x, fill=fill_color)
-    
+    temp_draw.text((0, y_offset), text, font=font_3x, fill=fill_color)
+        
     # Downscale to original size with high quality (for sharpness)
     temp = temp.resize((text_width, text_height), Image.LANCZOS)
     
