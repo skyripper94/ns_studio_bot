@@ -43,16 +43,16 @@ FONT_SIZE_MIN = 36
 
 # Spacing - МЕНЯЙ ЭТИ ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ
 SPACING_BOTTOM = 140          # Отступ снизу
-SPACING_LOGO_TO_TITLE = 2   # Расстояние от лого до заголовка
+SPACING_LOGO_TO_TITLE = 1   # Расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = 10  # Расстояние между заголовком и подзаголовком
-LINE_SPACING = 8             # Расстояние между строками текста
+LINE_SPACING = 2             # Расстояние между строками текста
 LOGO_LINE_LENGTH = 300        # Длина линий возле лого
 
 # Layout
 TEXT_WIDTH_PERCENT = 0.9
 
 # Text stretch settings
-TEXT_STRETCH_MULTIPLIER = 2.0  # Вертикальное растягивание текста (2.0 = 100% растяжения)
+TEXT_STRETCH_MULTIPLIER = 1.9  # Вертикальное растягивание текста (1.9 = 90% растяжения)
 TEXT_PADDING_PERCENT = 0.3     # Padding для хвостиков букв (30% от размера шрифта)
 def effective_line_spacing() -> int:
     """
@@ -298,7 +298,7 @@ def create_gradient_layer(width: int, height: int, gradient_start_percent: int =
 
         # Soft fade: slow start at top, faster near bottom
         # (gamma > 1 makes the upper part more "gentle")
-        gamma = 4.8
+        gamma = 1.9
         t = t ** gamma
 
         alpha_1d = (255.0 * t).astype(np.uint8)
@@ -731,7 +731,7 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     # lift_black: насколько поднять черное дно снизу
     gradient_layer = create_gradient_layer(
         actual_width, actual_height, 
-        gradient_start_percent=65,  # В центре градиент начинается на 55% от верха
+        gradient_start_percent=75,  # В центре градиент начинается на 75% от верха
         lift_black=120  # Черное дно поднято на 120px
     )
     
