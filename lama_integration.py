@@ -373,11 +373,11 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
     # Main text
     temp_draw.text((0, y_offset), text, font=font_3x, fill=fill_color)
         
-    # Downscale to original size with high quality (for sharpness)
-    temp = temp.resize((text_width, text_height), Image.LANCZOS)
-    
+    # Downscale to original size WITH PADDING (for sharpness)
+    temp = temp.resize((text_width, text_height_with_padding), Image.LANCZOS)
+
     # STRETCH VERTICALLY by 100%
-    stretched_height = int(text_height * 2.0)  # +100% vertical stretch
+    stretched_height = int(text_height_with_padding * 2.0)  # +100% vertical stretch
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
     # Paste stretched text into image
