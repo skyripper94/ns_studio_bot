@@ -45,7 +45,7 @@ FONT_SIZE_MIN = 36
 SPACING_BOTTOM = 140          # Отступ снизу
 SPACING_LOGO_TO_TITLE = 2     # Расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = 10  # Расстояние между заголовком и подзаголовком
-LINE_SPACING = 14              # Расстояние между строками текста
+LINE_SPACING = 32              # Расстояние между строками текста
 LOGO_LINE_LENGTH = 300        # Длина линий возле лого
 
 # Layout
@@ -256,79 +256,75 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int, start_percent: int = 55, 
+def create_gradient_layer(width: int, height: int, gradient_start_percent: int = 30, 
                           lift_black: int = 40) -> Image.Image:
     """
-    Create OVAL gradient as a separate RGBA layer
-    Transparent at top, black at bottom
+    Create SMOOTH OVAL gradient - starts HIGH and GENTLY fades down
     
     Args:
         width: Image width
         height: Image height
-        start_percent: Where gradient starts (55 = 45% from top)
-        lift_black: How many pixels to lift the solid black area (40 = поднять чернь на 40px)
+        gradient_start_percent: Where gradient STARTS from TOP (30 = starts at 30% from top)
+        lift_black: How many pixels to lift the solid black area from bottom
     """
     gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     
-    # Calculate gradient start row
-    start_row = int(height * (1 - start_percent / 100))
+    # Gradient starts HIGH from top
+    start_row = int(height * (gradient_start_percent / 100))  # 30% = row 300 on 1000px image
     
-    # Lift black base up
+    # Solid black starts near bottom (lifted up)
     solid_black_start = height - lift_black
     
-    # Oval parameters
-    center_x = width / 2
+    # Total gradient height
     gradient_height = solid_black_start - start_row
     
-    # Ellipse radii
-    a = width / 2  # Horizontal radius (half width)
-    b = gradient_height  # Vertical radius
+    logger.info(f"✨ Creating SMOOTH OVAL gradient:")
+    logger.info(f"   Gradient starts: row {start_row} ({gradient_start_percent}% from TOP)")
+    logger.info(f"   Solid black starts: row {solid_black_start}")
+    logger.info(f"   Gradient height: {gradient_height}px")
     
-    logger.info(f"✨ Creating OVAL gradient:")
-    logger.info(f"   Start row: {start_row}, Black start: {solid_black_start}")
-    logger.info(f"   Oval params: a={a:.1f}, b={b:.1f}")
+    # Oval parameters for horizontal variation
+    center_x = width / 2
     
     for y in range(height):
         if y < start_row:
-            # Above gradient - fully transparent
+            # Above gradient start - fully transparent
             continue
         elif y >= solid_black_start:
-            # Solid black area (lifted)
+            # Solid black area (bottom)
             for x in range(width):
                 gradient.putpixel((x, y), (0, 0, 0, 255))
         else:
-            # Gradient area with OVAL shape
+            # SMOOTH gradient area with OVAL shape
             for x in range(width):
                 # Distance from center X
                 dx = abs(x - center_x)
                 
-                # Oval formula: for given x, calculate effective y position
-                # We want gradient to start earlier at center, later at edges
-                
                 # Normalize x position (0 = center, 1 = edge)
                 x_norm = dx / (width / 2)
                 
-                # Calculate how much to push gradient down at this X
-                # At center (x_norm=0): no push
-                # At edge (x_norm=1): maximum push
-                edge_push = int(b * 0.3 * (x_norm ** 2))  # Quadratic falloff
+                # Oval effect: push gradient down more at edges
+                # At center: starts earlier, at edges: starts later
+                edge_push = int(gradient_height * 0.15 * (x_norm ** 2))  # Reduced from 0.3 to 0.15 for gentler oval
                 
-                # Effective Y for gradient calculation
+                # Effective Y for this pixel
                 effective_y = y + edge_push
                 
                 if effective_y >= solid_black_start:
-                    # This pixel reached solid black
+                    # Reached solid black
                     gradient.putpixel((x, y), (0, 0, 0, 255))
                 else:
-                    # Calculate gradient progress
+                    # Calculate gradient progress (0.0 to 1.0)
                     progress = (effective_y - start_row) / (solid_black_start - start_row)
-                    progress = max(0, min(1, progress))
+                    progress = max(0.0, min(1.0, progress))
                     
-                    # Apply smooth curve
-                    alpha = int(255 * (progress ** 0.6))
+                    # SOFT SMOOTH curve - starts very transparent, slowly builds up
+                    # Using higher power for GENTLER transition
+                    alpha = int(255 * (progress ** 2.5))  # ** 2.5 for smooth gentle fade
+                    
                     gradient.putpixel((x, y), (0, 0, 0, alpha))
     
-    logger.info(f"✅ OVAL gradient created")
+    logger.info(f"✅ SMOOTH OVAL gradient created")
     return gradient
 
 
