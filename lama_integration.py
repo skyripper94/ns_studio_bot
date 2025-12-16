@@ -1,9 +1,10 @@
 """
-Complete Workflow:
-1. OCR (Google Vision API on bottom 35%)
-2. Remove text (FLUX Kontext Pro)
+Complete Workflow (SIMPLIFIED):
+1. OCR (Google Vision API on bottom 35%) - для получения текста
+2. Remove EVERYTHING in bottom 35% (FLUX Kontext Pro) - маска всегда 35%
 3. Translate & adapt (OpenAI GPT-4)
-4. Render gradient + text with custom styling
+4. Apply gradient LAYER on top
+5. Render text on top of gradient
 """
 
 import os
@@ -31,21 +32,20 @@ openai.api_key = OPENAI_API_KEY
 COLOR_TURQUOISE = (0, 206, 209)  # #00CED1 (PIL uses RGB)
 COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
-COLOR_SHADOW = (0, 0, 0, 128)  # Semi-transparent black
 
-# Font sizes (ORIGINAL SIZES - before *1.25)
-FONT_SIZE_MODE1 = 48  # Original
-FONT_SIZE_MODE2 = 46  # Original
-FONT_SIZE_MODE3_TITLE = 44  # Original
-FONT_SIZE_MODE3_SUBTITLE = 40  # Original
+# Font sizes
+FONT_SIZE_MODE1 = 48
+FONT_SIZE_MODE2 = 46
+FONT_SIZE_MODE3_TITLE = 44
+FONT_SIZE_MODE3_SUBTITLE = 40
 FONT_SIZE_LOGO = 20
 FONT_SIZE_MIN = 36
 
 # Spacing
-SPACING_BOTTOM = 140  # Increased from 100 to prevent text cutoff
+SPACING_BOTTOM = 140
 SPACING_LOGO_TO_TITLE = 4
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = 32 
+LINE_SPACING = 32
 LOGO_LINE_LENGTH = 300
 
 # Layout
@@ -58,11 +58,11 @@ FONT_PATH = '/app/fonts/WaffleSoft.otf'
 def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = 35) -> dict:
     """
     OCR using Google Vision API on bottom portion of image
-    Returns: dict with 'text', 'lines', 'boxes' (bounding boxes for precise masking)
+    Returns: dict with 'text', 'lines'
     """
     if not GOOGLE_VISION_API_KEY:
         logger.warning("⚠️ GOOGLE_VISION_API_KEY not set")
-        return {'text': '', 'lines': [], 'boxes': []}
+        return {'text': '', 'lines': []}
     
     try:
         # Crop bottom portion
@@ -93,13 +93,13 @@ def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = 35) -> dict:
         
         if 'responses' not in result or not result['responses']:
             logger.warning("⚠️ No OCR results")
-            return {'text': '', 'lines': [], 'boxes': []}
+            return {'text': '', 'lines': []}
         
         response_data = result['responses'][0]
         
         if 'textAnnotations' not in response_data:
             logger.warning("⚠️ No text detected")
-            return {'text': '', 'lines': [], 'boxes': []}
+            return {'text': '', 'lines': []}
         
         annotations = response_data['textAnnotations']
         
@@ -110,29 +110,14 @@ def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = 35) -> dict:
         # Extract lines
         lines = [line.strip() for line in full_text.split('\n') if line.strip()]
         
-        # Extract bounding boxes for ALL detected words (skip first - it's the full text)
-        boxes = []
-        for annotation in annotations[1:]:  # Skip first (full text block)
-            if 'boundingPoly' in annotation:
-                vertices = annotation['boundingPoly']['vertices']
-                # Convert to numpy array and offset by crop_start
-                box = np.array([
-                    [v.get('x', 0), v.get('y', 0) + crop_start] 
-                    for v in vertices
-                ], dtype=np.int32)
-                boxes.append(box)
-        
-        logger.info(f"📐 Found {len(boxes)} text bounding boxes")
-        
         return {
             'text': full_text,
-            'lines': lines,
-            'boxes': boxes  # Array of bounding polygons in ORIGINAL image coordinates
+            'lines': lines
         }
         
     except Exception as e:
         logger.error(f"❌ Google Vision OCR error: {e}")
-        return {'text': '', 'lines': [], 'boxes': []}
+        return {'text': '', 'lines': []}
 
 
 def openai_translate(text: str, context: str = "") -> str:
@@ -196,7 +181,9 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """FLUX - use precise mask, composite only masked areas"""
+    """
+    FLUX Kontext Pro - remove everything in masked area
+    """
     if not REPLICATE_API_TOKEN:
         logger.warning("⚠️ REPLICATE_API_TOKEN not set, using OpenCV")
         return opencv_fallback(image, mask)
@@ -204,7 +191,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     try:
         import replicate
         
-        logger.info("🚀 FLUX - processing with precise mask")
+        logger.info("🚀 FLUX - removing content in masked area")
         
         # Convert full image to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -213,15 +200,15 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Use the precise mask as-is
+        # Use mask
         pil_mask = Image.fromarray(mask)
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        prompt = "Remove all text and restore natural background seamlessly"
+        prompt = "Remove all text, lines, logos and restore natural background seamlessly"
         
-        logger.info("📤 Sending full image + precise mask to FLUX...")
+        logger.info("📤 Sending to FLUX...")
         
         output = replicate.run(
             REPLICATE_MODEL,
@@ -252,32 +239,25 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         result_rgb = np.array(result_pil.convert('RGB'))
         result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        # Check if FLUX changed the size - resize back to original if needed
+        # Resize back to original if needed
         if result_bgr.shape[:2] != image.shape[:2]:
-            logger.warning(f"⚠️ FLUX changed size from {image.shape[:2]} to {result_bgr.shape[:2]}, resizing back")
+            logger.warning(f"⚠️ FLUX changed size, resizing back")
             result_bgr = cv2.resize(result_bgr, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LANCZOS4)
         
-        # Composite by mask with feathering
-        mask_feathered = cv2.GaussianBlur(mask.astype(float), (21, 21), 0) / 255.0
-        mask_3ch = np.stack([mask_feathered] * 3, axis=-1)
-        
-        # Where mask=0 → original, where mask=1 → FLUX result
-        composited = (image * (1 - mask_3ch) + result_bgr * mask_3ch).astype(np.uint8)
-        
-        logger.info("✅ FLUX done! Composited by precise mask")
-        return composited
+        logger.info("✅ FLUX done!")
+        return result_bgr
         
     except Exception as e:
         logger.error(f"❌ FLUX error: {e}")
         return opencv_fallback(image, mask)
 
 
-def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndarray:
+def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> Image.Image:
     """
-    Create smooth black gradient overlay WITHOUT solid black bar
-    Starts from 55% and smoothly fades to black at bottom
+    Create gradient as a separate RGBA layer
+    Transparent at top, black at bottom
     """
-    gradient = np.zeros((height, width, 4), dtype=np.uint8)  # RGBA
+    gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     
     start_row = int(height * (1 - start_percent / 100))
     
@@ -285,14 +265,12 @@ def create_gradient(width: int, height: int, start_percent: int = 55) -> np.ndar
         if y >= start_row:
             # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            # Use power of 0.7 for faster darkening (more aggressive)
             alpha = int(255 * (progress ** 0.9))
-        else:
-            alpha = 0
-        
-        gradient[y, :] = [0, 0, 0, alpha]
+            
+            for x in range(width):
+                gradient.putpixel((x, y), (0, 0, 0, alpha))
     
-    logger.info(f"✨ Created smooth gradient from row {start_row} ({start_percent}%)")
+    logger.info(f"✨ Created gradient layer from row {start_row} ({start_percent}%)")
     return gradient
 
 
@@ -350,57 +328,33 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
     return min_size, font, [text]
 
 
-def draw_sharp_stretched_text(image: Image.Image, x: int, y: int, 
-                               text: str, font: ImageFont.FreeTypeFont,
-                               fill_color: tuple, outline_color: tuple,
-                               shadow_offset: int = 2):
+def draw_text_with_effects(draw: ImageDraw.Draw, x: int, y: int, 
+                            text: str, font: ImageFont.FreeTypeFont,
+                            fill_color: tuple, outline_color: tuple,
+                            shadow_offset: int = 2) -> int:
     """
-    Draw super sharp text with 3x rendering + 25% vertical stretch
+    Draw text with shadow and outline
+    Returns: height of drawn text
     """
-    # Get text size
-    bbox = font.getbbox(text)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    
-    # Create temporary image 3x for sharpness
-    scale = 3
-    temp_width = text_width * scale
-    temp_height = text_height * scale
-    
-    temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
-    temp_draw = ImageDraw.Draw(temp)
-    
-    # Font 3x
-    font_3x = ImageFont.truetype(font.path, font.size * scale)
-    
-    # Draw with 3x resolution
     # Shadow
-    temp_draw.text((shadow_offset * scale, shadow_offset * scale), text, 
-                   font=font_3x, fill=(0, 0, 0, 128))
+    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill=(0, 0, 0, 128))
     
     # Outline (8 directions)
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        temp_draw.text((dx * scale, dy * scale), text, 
-                       font=font_3x, fill=outline_color)
+        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
     
     # Main text
-    temp_draw.text((0, 0), text, font=font_3x, fill=fill_color)
+    draw.text((x, y), text, font=font, fill=fill_color)
     
-    # Downscale to original size with high quality (for sharpness)
-    temp = temp.resize((text_width, text_height), Image.LANCZOS)
-    
-    # STRETCH VERTICALLY by 25%
-    stretched_height = int(text_height * 2.0)
-    temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
-    
-    # Paste stretched text into image
-    image.paste(temp_stretched, (x, y), temp_stretched)
+    bbox = font.getbbox(text)
+    return bbox[3] - bbox[1]
 
 
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     """
     Mode 1: Logo + 2 lines + Title (UPPERCASE)
     """
+    draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
@@ -412,13 +366,11 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE1
     )
     
-    # Calculate total height needed (with 25% stretch)
+    # Calculate heights
     title_heights = []
     for line in title_lines:
         bbox = title_font.getbbox(line)
-        line_height = bbox[3] - bbox[1]
-        stretched_height = int(line_height * 1.25)  # +25% vertical
-        title_heights.append(stretched_height)
+        title_heights.append(bbox[3] - bbox[1])
     
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
@@ -429,14 +381,13 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_width = logo_bbox[2] - logo_bbox[0]
     logo_height = logo_bbox[3] - logo_bbox[1]
     
-    # Total construction height
+    # Total height
     total_height = logo_height + SPACING_LOGO_TO_TITLE + total_title_height
     
     # Start Y position
     start_y = height - SPACING_BOTTOM - total_height
     
     # Draw logo
-    draw = ImageDraw.Draw(image, 'RGBA')
     logo_x = (width - logo_width) // 2
     logo_y = start_y
     
@@ -453,7 +404,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     # Logo text
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
     
-    # Draw title with sharp + stretched rendering
+    # Draw title
     title_y = start_y + logo_height + SPACING_LOGO_TO_TITLE
     
     for i, line in enumerate(title_lines):
@@ -461,10 +412,8 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_sharp_stretched_text(
-            image, line_x, title_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, title_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
         title_y += title_heights[i] + LINE_SPACING
     
@@ -475,6 +424,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     """
     Mode 2: Title only (no logo) (UPPERCASE)
     """
+    draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
@@ -486,13 +436,11 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE2
     )
     
-    # Total height (with 25% stretch)
+    # Calculate heights
     title_heights = []
     for line in title_lines:
         bbox = title_font.getbbox(line)
-        line_height = bbox[3] - bbox[1]
-        stretched_height = int(line_height * 1.25)
-        title_heights.append(stretched_height)
+        title_heights.append(bbox[3] - bbox[1])
     
     total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
@@ -506,10 +454,8 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_sharp_stretched_text(
-            image, line_x, current_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, current_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
         current_y += title_heights[i] + LINE_SPACING
     
@@ -521,6 +467,7 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     """
     Mode 3: Title + Subtitle (BOTH UPPERCASE)
     """
+    draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
@@ -539,20 +486,16 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         subtitle_translated, FONT_PATH, max_text_width, subtitle_initial_size
     )
     
-    # Total height (with 25% stretch)
+    # Calculate heights
     title_heights = []
     for line in title_lines:
         bbox = title_font.getbbox(line)
-        line_height = bbox[3] - bbox[1]
-        stretched_height = int(line_height * 1.25)
-        title_heights.append(stretched_height)
+        title_heights.append(bbox[3] - bbox[1])
     
     subtitle_heights = []
     for line in subtitle_lines:
         bbox = subtitle_font.getbbox(line)
-        line_height = bbox[3] - bbox[1]
-        stretched_height = int(line_height * 1.25)
-        subtitle_heights.append(stretched_height)
+        subtitle_heights.append(bbox[3] - bbox[1])
     
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
@@ -569,10 +512,8 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_sharp_stretched_text(
-            image, line_x, current_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, current_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
         current_y += title_heights[i] + LINE_SPACING
     
@@ -584,10 +525,8 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_sharp_stretched_text(
-            image, line_x, current_y, line, subtitle_font,
-            COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, current_y, line, subtitle_font,
+                               COLOR_WHITE, COLOR_OUTLINE)
         
         current_y += subtitle_heights[i] + LINE_SPACING
     
@@ -597,13 +536,25 @@ def render_mode3_content(image: Image.Image, title_translated: str,
 def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     """
     Full workflow for modes 1, 2, 3
+    
+    SIMPLE LOGIC:
+    1. OCR → get text for translation
+    2. MASK = bottom 35% (ALWAYS) → FLUX removes EVERYTHING (text, lines, logo)
+    3. Translate text
+    4. Apply gradient LAYER on top of clean image
+    5. Render text on top of gradient
+    
     Returns: (result_image, ocr_data)
     """
     logger.info("=" * 60)
     logger.info(f"🚀 FULL WORKFLOW - MODE {mode}")
     logger.info("=" * 60)
     
-    # Step 1: OCR on bottom 35%
+    height, width = image.shape[:2]
+    
+    # ========================================
+    # STEP 1: OCR (just to get text)
+    # ========================================
     logger.info("📋 STEP 1: OCR (Google Vision)")
     ocr_data = google_vision_ocr(image, crop_bottom_percent=35)
     
@@ -611,47 +562,26 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         logger.warning("⚠️ No text detected")
         return image, ocr_data
     
-    # Step 2: Create PRECISE mask from OCR bounding boxes
-    logger.info("📋 STEP 2: Create PRECISE Mask from OCR bounding boxes")
-    height, width = image.shape[:2]
+    # ========================================
+    # STEP 2: Create SIMPLE mask = bottom 35%
+    # This removes EVERYTHING: text, lines, logo, gradient
+    # ========================================
+    logger.info("📋 STEP 2: Create mask (bottom 35%)")
     mask = np.zeros((height, width), dtype=np.uint8)
+    mask_start = int(height * 0.65)  # 35% from bottom
+    mask[mask_start:, :] = 255
     
-    # Draw bounding boxes on mask
-    if ocr_data['boxes']:
-        for box in ocr_data['boxes']:
-            cv2.fillPoly(mask, [box], 255)
-        
-        # Find topmost Y coordinate of text
-        min_y = min(box[:, 1].min() for box in ocr_data['boxes'])
-        
-        # For mode 1 (with logo): add zone ABOVE text for logo + lines
-        if mode == 1:
-            # Logo + lines are ~80-100px above title
-            logo_zone_height = 100
-            logo_zone_start = max(0, min_y - logo_zone_height)
-            
-            # Fill logo zone
-            mask[logo_zone_start:min_y, :] = 255
-            
-            logger.info(f"📐 Mode 1: Added logo zone (rows {logo_zone_start}-{min_y})")
-        
-        # Expand mask to capture text edges and anti-aliasing
-        kernel = np.ones((15, 15), dtype=np.uint8)  # Larger kernel for better coverage
-        mask = cv2.dilate(mask, kernel, iterations=2)
-        
-        logger.info(f"📐 Created precise mask from {len(ocr_data['boxes'])} text boxes + dilation")
-    else:
-        # Fallback: mask bottom 35% if no boxes found
-        logger.warning("⚠️ No bounding boxes, using bottom 35% fallback")
-        mask_start = int(height * 0.65)
-        mask[mask_start:, :] = 255
-        logger.info(f"📐 Fallback mask: rows {mask_start}-{height} (35% bottom)")
+    logger.info(f"📐 Mask: rows {mask_start}-{height} (bottom 35%)")
     
-    # Step 3: Remove text with FLUX
-    logger.info("📋 STEP 3: Remove Text (FLUX Kontext Pro)")
+    # ========================================
+    # STEP 3: FLUX removes everything in mask
+    # ========================================
+    logger.info("📋 STEP 3: Remove content (FLUX Kontext Pro)")
     clean_image = flux_kontext_inpaint(image, mask)
     
-    # Step 4: Translate
+    # ========================================
+    # STEP 4: Translate
+    # ========================================
     logger.info("📋 STEP 4: Translate (OpenAI)")
     
     if mode == 3:
@@ -669,32 +599,28 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         title_translated = openai_translate(ocr_data['text'])
         subtitle_translated = ""
     
-    # Step 5: Create gradient
-    logger.info("📋 STEP 5: Create Gradient")
+    # ========================================
+    # STEP 5: Convert to PIL and apply gradient LAYER
+    # ========================================
+    logger.info("📋 STEP 5: Apply gradient LAYER")
     
-    # Convert FLUX result to PIL
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
     
-    # Get actual image size
     actual_width, actual_height = pil_image.size
     logger.info(f"📐 Image size: {actual_width}x{actual_height}")
     
-    # Create smooth gradient (55% coverage, NO black bar)
-    gradient = create_gradient(actual_width, actual_height, start_percent=55)
-    gradient_image = Image.fromarray(gradient, 'RGBA')
+    # Create gradient as separate layer
+    gradient_layer = create_gradient_layer(actual_width, actual_height, start_percent=55)
     
-    # Apply gradient as INDEPENDENT layer (overwrite, not blend)
-    img_np = np.array(pil_image.convert('RGB'))
-    grad_alpha = gradient[:, :, 3] / 255.0  # Extract alpha channel
+    # SIMPLE: composite gradient ON TOP of image
+    pil_image = Image.alpha_composite(pil_image, gradient_layer)
     
-    # Darken each RGB channel based on gradient alpha
-    for i in range(3):
-        img_np[:, :, i] = (img_np[:, :, i] * (1 - grad_alpha)).astype(np.uint8)
+    logger.info("✅ Gradient layer applied")
     
-    pil_image = Image.fromarray(img_np).convert('RGBA')
-    
-    # Step 6: Render text
+    # ========================================
+    # STEP 6: Render text ON TOP of gradient
+    # ========================================
     logger.info(f"📋 STEP 6: Render Text (Mode {mode})")
     
     if mode == 1:
@@ -704,7 +630,7 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     elif mode == 3:
         pil_image = render_mode3_content(pil_image, title_translated, subtitle_translated)
     
-    # Convert back
+    # Convert back to BGR
     result_rgb = np.array(pil_image.convert('RGB'))
     result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
     
