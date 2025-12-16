@@ -232,7 +232,6 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "num_inference_steps": 100,  # MAXIMUM steps
                 "guidance_scale": 15.0,      # MAXIMUM guidance
                 "strength": 1.0,             # MAXIMUM strength
-                "prompt_strength": 1.0,      # MAXIMUM prompt adherence
                 "seed": 42                   # Fixed seed for consistency
             }
         )
