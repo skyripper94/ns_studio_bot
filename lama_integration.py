@@ -43,9 +43,9 @@ FONT_SIZE_MIN = 36
 
 # Spacing - МЕНЯЙ ЭТИ ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ
 SPACING_BOTTOM = 140          # Отступ снизу
-SPACING_LOGO_TO_TITLE = 2     # Расстояние от лого до заголовка
+SPACING_LOGO_TO_TITLE = 6    # Расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = 10  # Расстояние между заголовком и подзаголовком
-LINE_SPACING = 12              # Расстояние между строками текста
+LINE_SPACING = 32              # Расстояние между строками текста
 LOGO_LINE_LENGTH = 300        # Длина линий возле лого
 
 # Layout
@@ -54,6 +54,13 @@ TEXT_WIDTH_PERCENT = 0.9
 # Text stretch settings
 TEXT_STRETCH_MULTIPLIER = 2.0  # Вертикальное растягивание текста (2.0 = 100% растяжения)
 TEXT_PADDING_PERCENT = 0.3     # Padding для хвостиков букв (30% от размера шрифта)
+def effective_line_spacing() -> int:
+    """
+    LINE_SPACING is defined in "base" pixels, but we stretch text vertically
+    (TEXT_STRETCH_MULTIPLIER). If we don't scale the gap too, small LINE_SPACING
+    changes look like they "do nothing".
+    """
+    return max(0, int(LINE_SPACING * TEXT_STRETCH_MULTIPLIER))
 
 # Font path
 FONT_PATH = '/app/fonts/WaffleSoft.otf'
@@ -256,90 +263,58 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int, gradient_start_percent: int = 30, 
+def create_gradient_layer(width: int, height: int, gradient_start_percent: int = 30,
                           lift_black: int = 40) -> Image.Image:
     """
-    Create CONVEX OVAL gradient - BULGES UP in center (where text is), flat/absent at edges
-    
+    Classic vertical gradient:
+    - bottom: solid black
+    - going up: smoothly fades to transparent
+    - top: fully transparent
+
     Args:
         width: Image width
         height: Image height
-        gradient_start_percent: Where gradient STARTS from TOP at CENTER (30 = starts at 30% from top in center)
-        lift_black: How many pixels to lift the solid black area from bottom
+        gradient_start_percent: where the fade starts from the TOP (e.g. 55 = start fade at 55% height)
+        lift_black: how many pixels to lift the fully-black bottom block upward
+                   (keeps a small "solid" base for maximum readability)
     """
-    gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    
-    # Gradient starts HIGH in CENTER
-    center_start_row = int(height * (gradient_start_percent / 100))
-    
-    # Solid black starts near bottom (lifted up)
-    solid_black_start = height - lift_black
-    
-    # Center gradient height
-    center_gradient_height = solid_black_start - center_start_row
-    
-    logger.info(f"✨ Creating CONVEX OVAL gradient:")
-    logger.info(f"   Center gradient starts: row {center_start_row} ({gradient_start_percent}% from TOP)")
-    logger.info(f"   Solid black starts: row {solid_black_start}")
-    logger.info(f"   Center gradient height: {center_gradient_height}px")
-    
-    # Oval parameters
-    center_x = width / 2
-    
-    # How much to PUSH DOWN gradient at edges (convex = push down at edges)
-    edge_push_amount = int(center_gradient_height * 0.5)  # Push down 50% of gradient height at edges
-    
-    logger.info(f"   Edge push down: {edge_push_amount}px (creates convex bulge)")
-    
-    for y in range(height):
-        if y >= solid_black_start:
-            # Solid black area (bottom)
-            for x in range(width):
-                gradient.putpixel((x, y), (0, 0, 0, 255))
-        else:
-            # Gradient area with CONVEX OVAL shape
-            for x in range(width):
-                # Distance from center X
-                dx = abs(x - center_x)
-                
-                # Normalize x position (0 = center, 1 = edge)
-                x_norm = dx / (width / 2)
-                
-                # CONVEX effect: PUSH DOWN gradient at edges
-                # At center (x_norm=0): no push, gradient starts at center_start_row
-                # At edges (x_norm=1): push down by edge_push_amount
-                edge_push = int(edge_push_amount * (x_norm ** 1.5))  # Power controls sharpness of oval
-                
-                # Effective start row for this X position
-                effective_start_row = center_start_row + edge_push
-                
-                if y < effective_start_row:
-                    # Above gradient start for this X position - transparent
-                    continue
-                elif effective_start_row >= solid_black_start:
-                    # Gradient completely pushed below solid black - no gradient here
-                    continue
-                else:
-                    # In gradient zone
-                    effective_gradient_height = solid_black_start - effective_start_row
-                    
-                    if effective_gradient_height <= 0:
-                        # No gradient space
-                        continue
-                    
-                    # Calculate gradient progress (0.0 to 1.0)
-                    progress = (y - effective_start_row) / effective_gradient_height
-                    progress = max(0.0, min(1.0, progress))
-                    
-                    # SOFT SMOOTH curve - starts very transparent, slowly builds up
-                    alpha = int(255 * (progress ** 2.5))  # ** 2.5 for smooth gentle fade
-                    
-                    gradient.putpixel((x, y), (0, 0, 0, alpha))
-    
-    logger.info(f"✅ CONVEX OVAL gradient created (bulges up in center)")
-    return gradient
+    # Where the fade starts (above this it's fully transparent)
+    start_y = int(height * (gradient_start_percent / 100))
 
+    # Where solid black begins
+    solid_black_start = max(0, min(height, height - lift_black))
 
+    # Degenerate cases (avoid division by zero)
+    if solid_black_start <= start_y:
+        # Just put solid black at the very bottom part
+        alpha_1d = np.zeros((height,), dtype=np.uint8)
+        alpha_1d[solid_black_start:] = 255
+    else:
+        y = np.arange(height, dtype=np.float32)
+
+        # t: 0 at start_y, 1 at solid_black_start
+        t = (y - float(start_y)) / float(solid_black_start - start_y)
+        t = np.clip(t, 0.0, 1.0)
+
+        # Soft fade: slow start at top, faster near bottom
+        # (gamma > 1 makes the upper part more "gentle")
+        gamma = 2.9
+        t = t ** gamma
+
+        alpha_1d = (255.0 * t).astype(np.uint8)
+        alpha_1d[:start_y] = 0
+        alpha_1d[solid_black_start:] = 255
+
+    # Expand to 2D alpha mask and build RGBA image
+    alpha = np.repeat(alpha_1d[:, None], width, axis=1)
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+    rgba[..., 3] = alpha
+
+    logger.info(
+        f"✨ Creating CLASSIC vertical gradient: start_y={start_y}, solid_black_start={solid_black_start}, "
+        f"lift_black={lift_black}, start%={gradient_start_percent}"
+    )
+    return Image.fromarray(rgba, 'RGBA')
 def calculate_adaptive_font_size(text: str, font_path: str, max_width: int, 
                                   initial_size: int, min_size: int = 20) -> tuple:
     """
@@ -480,6 +455,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
+    line_gap = effective_line_spacing()
     # Convert to UPPERCASE
     title_translated = title_translated.upper()
     
@@ -494,7 +470,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         stretched = calculate_stretched_height(title_font, line)
         title_heights.append(stretched)
     
-    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * line_gap
     
     # Logo
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
@@ -538,9 +514,11 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
             image, line_x, title_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-        
-        title_y += actual_height + LINE_SPACING
-    
+        if i < len(title_lines) - 1:
+            title_y += actual_height + line_gap
+        else:
+            title_y += actual_height
+
     return image
 
 
@@ -552,6 +530,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
+    line_gap = effective_line_spacing()
     # Convert to UPPERCASE
     title_translated = title_translated.upper()
     
@@ -566,7 +545,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         stretched = calculate_stretched_height(title_font, line)
         title_heights.append(stretched)
     
-    total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
+    total_height = sum(title_heights) + (len(title_lines) - 1) * line_gap
     
     # Start position
     start_y = height - SPACING_BOTTOM - total_height
@@ -582,9 +561,11 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
             image, line_x, current_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-        
-        current_y += actual_height + LINE_SPACING
-    
+        if i < len(title_lines) - 1:
+            current_y += actual_height + line_gap
+        else:
+            current_y += actual_height
+
     return image
 
 
@@ -597,6 +578,7 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
+    line_gap = effective_line_spacing()
     # Convert to UPPERCASE
     title_translated = title_translated.upper()
     subtitle_translated = subtitle_translated.upper()
@@ -623,8 +605,8 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         stretched = calculate_stretched_height(subtitle_font, line)
         subtitle_heights.append(stretched)
     
-    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
-    total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * line_gap
+    total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * line_gap
     
     total_height = total_title_height + SPACING_TITLE_TO_SUBTITLE + total_subtitle_height
     
@@ -642,9 +624,11 @@ def render_mode3_content(image: Image.Image, title_translated: str,
             image, line_x, current_y, line, title_font,
             COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
         )
-        
-        current_y += actual_height + LINE_SPACING
-    
+        if i < len(title_lines) - 1:
+            current_y += actual_height + line_gap
+        else:
+            current_y += actual_height
+
     # Draw subtitle
     current_y += SPACING_TITLE_TO_SUBTITLE
     
@@ -657,9 +641,11 @@ def render_mode3_content(image: Image.Image, title_translated: str,
             image, line_x, current_y, line, subtitle_font,
             COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
         )
-        
-        current_y += actual_height + LINE_SPACING
-    
+        if i < len(subtitle_lines) - 1:
+            current_y += actual_height + line_gap
+        else:
+            current_y += actual_height
+
     return image
 
 
@@ -671,7 +657,7 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     1. OCR → get text for translation
     2. FLUX removes EVERYTHING in bottom 35% (text, lines, logo, gradient)
     3. Translate text
-    4. Apply CONVEX gradient LAYER on top of clean image (separate layer)
+    4. Apply CLASSIC vertical gradient LAYER on top of clean image (separate layer)
     5. Render text on top of gradient
     
     Returns: (result_image, ocr_data)
@@ -730,9 +716,9 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         subtitle_translated = ""
     
     # ========================================
-    # STEP 5: Convert to PIL and apply CONVEX gradient LAYER
+    # STEP 5: Convert to PIL and apply CLASSIC vertical gradient LAYER
     # ========================================
-    logger.info("📋 STEP 5: Apply CONVEX OVAL gradient LAYER")
+    logger.info("📋 STEP 5: Apply CLASSIC vertical gradient LAYER")
     
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
@@ -740,19 +726,24 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     actual_width, actual_height = pil_image.size
     logger.info(f"📐 Image size: {actual_width}x{actual_height}")
     
-    # Create CONVEX OVAL gradient as separate layer
+    # Create CLASSIC vertical gradient as separate layer
     # gradient_start_percent: где начинается градиент в ЦЕНТРЕ (выше = раньше)
     # lift_black: насколько поднять черное дно снизу
     gradient_layer = create_gradient_layer(
         actual_width, actual_height, 
         gradient_start_percent=55,  # В центре градиент начинается на 55% от верха
-        lift_black=40  # Черное дно поднято на 40px
+        lift_black=70  # Черное дно поднято на 70px
     )
     
-    # Composite gradient ON TOP of clean image (separate layer)
+    # IMPORTANT LAYER ORDER:
+    #   1) clean background (RGBA)
+    #   2) gradient layer (RGBA)
+    #   3) text (last/top layer)
+    #
+    # Therefore: we composite the gradient BEFORE any text rendering.
     pil_image = Image.alpha_composite(pil_image, gradient_layer)
     
-    logger.info("✅ CONVEX OVAL gradient layer applied")
+    logger.info("✅ CLASSIC vertical gradient layer applied")
     
     # ========================================
     # STEP 6: Render text ON TOP of gradient
