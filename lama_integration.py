@@ -1,7 +1,7 @@
 """
-Complete Workflow (FIXED):
+Complete Workflow (FINAL FIX):
 1. OCR (Google Vision API on bottom 35%)
-2. Remove EVERYTHING in bottom 35% (FLUX Kontext Pro) - ENHANCED
+2. Remove EVERYTHING in bottom 35% (FLUX Kontext Pro) - WITH ROI CROP
 3. Translate & adapt (OpenAI GPT-4)
 4. Apply gradient LAYER on top
 5. Render text on top of gradient
@@ -184,7 +184,7 @@ def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    FLUX Kontext Pro - ENHANCED for better text removal
+    FLUX Kontext Pro - MAXIMUM STRENGTH text removal
     """
     if not REPLICATE_API_TOKEN:
         logger.error("❌ REPLICATE_API_TOKEN NOT SET! Using fallback...")
@@ -193,45 +193,34 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     try:
         import replicate
         
-        logger.info("🚀 FLUX ENHANCED - aggressive text removal")
-        logger.info(f"📊 API Token present: {bool(REPLICATE_API_TOKEN)}")
+        logger.info("🚀 FLUX MAXIMUM - aggressive text removal")
         
-        # Convert full image to RGB
+        # Convert to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(image_rgb)
-        
-        # Save for debugging
-        debug_path = "/tmp/debug_input.png"
-        pil_image.save(debug_path)
-        logger.info(f"💾 Saved input to {debug_path}")
         
         img_buffer = BytesIO()
         pil_image.save(img_buffer, format='PNG')
         img_buffer.seek(0)
         
-        # Use mask
+        # Convert mask
         pil_mask = Image.fromarray(mask)
-        
-        # Save mask for debugging
-        debug_mask_path = "/tmp/debug_mask.png"
-        pil_mask.save(debug_mask_path)
-        logger.info(f"💾 Saved mask to {debug_mask_path}")
-        
         mask_buffer = BytesIO()
         pil_mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        # ENHANCED PROMPT - more aggressive
-        prompt = """COMPLETELY REMOVE and ERASE ALL text, letters, numbers, words, symbols, logos, watermarks, 
-        lines, decorative elements in the masked area. Fill with clean background matching surrounding area.
-        CRITICAL: NO text should remain. Clean uniform background only. Seamless inpainting."""
+        # MAXIMUM STRENGTH PROMPT
+        prompt = """COMPLETELY ERASE and REMOVE ALL: text, letters, numbers, words, symbols, logos, 
+        watermarks, lines, decorations, gradients, overlays, ANY foreground elements in masked area.
+        Fill ONLY with clean, natural background texture matching surrounding unmasked area.
+        CRITICAL: Absolutely NO text or overlays should remain. Pure background restoration only."""
         
-        logger.info("📤 Sending to FLUX with enhanced prompt...")
+        logger.info("📤 Sending to FLUX with MAXIMUM parameters...")
         
-        # Initialize Replicate client
+        # Initialize client with token
         client = replicate.Client(api_token=REPLICATE_API_TOKEN)
         
-        # Run with enhanced parameters
+        # Run with MAXIMUM parameters
         output = client.run(
             "black-forest-labs/flux-kontext-pro",
             input={
@@ -240,45 +229,40 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
                 "mask": mask_buffer,
                 "output_format": "png",
                 "go_fast": False,
-                "num_inference_steps": 75,  # Increased for better quality
-                "guidance_scale": 10.0,  # Added for stronger prompt adherence
-                "strength": 1.0  # Maximum strength for inpainting
+                "num_inference_steps": 100,  # MAXIMUM steps
+                "guidance_scale": 15.0,      # MAXIMUM guidance
+                "strength": 1.0,             # MAXIMUM strength
+                "prompt_strength": 1.0,      # MAXIMUM prompt adherence
+                "seed": 42                   # Fixed seed for consistency
             }
         )
         
-        logger.info("⏳ Waiting for FLUX result...")
+        logger.info("⏳ Processing with FLUX...")
         
         # Get result
         if hasattr(output, 'read'):
             result_bytes = output.read()
         elif isinstance(output, str):
-            logger.info(f"📥 Downloading from URL: {output[:50]}...")
-            response = requests.get(output, timeout=60)
+            response = requests.get(output, timeout=90)
             result_bytes = response.content
         elif isinstance(output, list) and len(output) > 0:
-            logger.info(f"📥 Downloading from URL list: {output[0][:50]}...")
-            response = requests.get(output[0], timeout=60)
+            response = requests.get(output[0], timeout=90)
             result_bytes = response.content
         else:
-            logger.error(f"❌ Unknown output type: {type(output)}")
+            logger.error(f"❌ Unexpected output type: {type(output)}")
             return opencv_fallback(image, mask)
         
         result_pil = Image.open(BytesIO(result_bytes))
-        
-        # Save result for debugging
-        debug_result_path = "/tmp/debug_result.png"
-        result_pil.save(debug_result_path)
-        logger.info(f"💾 Saved FLUX result to {debug_result_path}")
-        
         result_rgb = np.array(result_pil.convert('RGB'))
         result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
         
-        # Resize back to original if needed
+        # Resize if needed
         if result_bgr.shape[:2] != image.shape[:2]:
-            logger.warning(f"⚠️ FLUX changed size from {image.shape[:2]} to {result_bgr.shape[:2]}, resizing back")
-            result_bgr = cv2.resize(result_bgr, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+            logger.warning(f"⚠️ Resizing from {result_bgr.shape[:2]} to {image.shape[:2]}")
+            result_bgr = cv2.resize(result_bgr, (image.shape[1], image.shape[0]), 
+                                   interpolation=cv2.INTER_LANCZOS4)
         
-        logger.info("✅ FLUX ENHANCED completed!")
+        logger.info("✅ FLUX MAXIMUM completed!")
         return result_bgr
         
     except Exception as e:
@@ -286,24 +270,65 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def flux_kontext_inpaint_bottom_roi(image: np.ndarray, mask_start: int, overlap_px: int = 60) -> np.ndarray:
+def flux_kontext_inpaint_bottom_roi(image: np.ndarray, mask_start: int, overlap_px: int = 150) -> np.ndarray:
     """
-    Enhanced version with better masking
+    Inpaint ONLY bottom ROI to preserve top logos
+    Enhanced overlap and blending for seamless result
     """
     h, w = image.shape[:2]
     mask_start = int(np.clip(mask_start, 0, h))
     
-    logger.info(f"🔧 Processing bottom ROI: from row {mask_start} to {h}")
+    logger.info(f"🔧 Processing bottom ROI with overlap")
     
-    # Create FULL mask for entire bottom area
-    mask_full = np.zeros((h, w), dtype=np.uint8)
-    mask_full[mask_start:, :] = 255
+    # ROI with overlap for context
+    roi_start = max(0, mask_start - overlap_px)
+    roi = image[roi_start:h, :]
+    roi_h = h - roi_start
     
-    # Process FULL image with mask
-    logger.info(f"🎯 Sending FULL image with mask to FLUX")
-    result = flux_kontext_inpaint(image, mask_full)
+    logger.info(f"📐 ROI: rows {roi_start}-{h} (overlap: {overlap_px}px)")
     
-    return result
+    # Create mask for ROI (mask only actual bottom part)
+    mask_roi = np.zeros((roi_h, w), dtype=np.uint8)
+    local_mask_start = mask_start - roi_start
+    if local_mask_start < roi_h:
+        mask_roi[local_mask_start:, :] = 255
+    
+    # Save ROI for debugging
+    cv2.imwrite("/tmp/debug_roi.png", roi)
+    cv2.imwrite("/tmp/debug_roi_mask.png", mask_roi)
+    
+    # Process ROI with FLUX
+    roi_clean = flux_kontext_inpaint(roi, mask_roi)
+    
+    # Enhanced blending
+    out = image.copy()
+    
+    # Create smooth blend in overlap zone
+    if overlap_px > 0 and local_mask_start > 0:
+        blend_height = min(overlap_px, local_mask_start)
+        
+        # Cosine interpolation for smoother blend
+        alpha = np.zeros((blend_height, 1, 1), dtype=np.float32)
+        for i in range(blend_height):
+            # Cosine curve for smoother transition
+            t = i / float(blend_height)
+            alpha[i] = 0.5 * (1 + np.cos(np.pi * (1 - t)))
+        
+        # Apply blend
+        blend_start = mask_start - blend_height
+        blend_end = mask_start
+        
+        orig_part = image[blend_start:blend_end].astype(np.float32)
+        new_part = roi_clean[:blend_height].astype(np.float32)
+        
+        blended = orig_part * (1.0 - alpha) + new_part * alpha
+        out[blend_start:blend_end] = np.clip(blended, 0, 255).astype(np.uint8)
+    
+    # Copy clean bottom part
+    out[mask_start:h] = roi_clean[local_mask_start:]
+    
+    logger.info("✅ ROI processing with blend completed")
+    return out
 
 
 def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> Image.Image:
@@ -312,17 +337,18 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> I
     Transparent at top, black at bottom
     """
     gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(gradient)
     
     start_row = int(height * (1 - start_percent / 100))
     
-    for y in range(height):
-        if y >= start_row:
-            # Smooth gradient from start to bottom
-            progress = (y - start_row) / (height - start_row)
-            alpha = int(255 * (progress ** 0.7))
-            
-            for x in range(width):
-                gradient.putpixel((x, y), (0, 0, 0, alpha))
+    # Smoother gradient with more steps
+    for y in range(start_row, height):
+        progress = (y - start_row) / (height - start_row)
+        # Exponential curve for smoother gradient
+        alpha = int(255 * (progress ** 0.8))
+        
+        # Draw horizontal line with alpha
+        draw.rectangle([(0, y), (width, y+1)], fill=(0, 0, 0, alpha))
     
     logger.info(f"✨ Created gradient layer from row {start_row} ({start_percent}%)")
     return gradient
@@ -589,64 +615,35 @@ def render_mode3_content(image: Image.Image, title_translated: str,
 
 def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     """
-    Full workflow for modes 1, 2, 3 - ENHANCED VERSION
-    
-    CRITICAL FIX:
-    1. OCR → get text for translation
-    2. MASK = bottom 35% → FLUX removes EVERYTHING with enhanced parameters
-    3. Translate text
-    4. Apply gradient LAYER on top of clean image
-    5. Render text on top of gradient
+    Full workflow - FINAL VERSION with ROI
     
     Returns: (result_image, ocr_data)
     """
     logger.info("=" * 60)
-    logger.info(f"🚀 FULL WORKFLOW ENHANCED - MODE {mode}")
-    logger.info(f"📊 API TOKENS STATUS:")
-    logger.info(f"   REPLICATE: {'✅ SET' if REPLICATE_API_TOKEN else '❌ NOT SET'}")
-    logger.info(f"   GOOGLE_VISION: {'✅ SET' if GOOGLE_VISION_API_KEY else '❌ NOT SET'}")
-    logger.info(f"   OPENAI: {'✅ SET' if OPENAI_API_KEY else '❌ NOT SET'}")
+    logger.info(f"🚀 FULL WORKFLOW FINAL - MODE {mode}")
+    logger.info(f"📊 API TOKENS:")
+    logger.info(f"   REPLICATE: {'✅' if REPLICATE_API_TOKEN else '❌ MISSING'}")
+    logger.info(f"   GOOGLE_VISION: {'✅' if GOOGLE_VISION_API_KEY else '❌ MISSING'}")
+    logger.info(f"   OPENAI: {'✅' if OPENAI_API_KEY else '❌ MISSING'}")
     logger.info("=" * 60)
-    
-    if not REPLICATE_API_TOKEN:
-        logger.error("❌ CRITICAL: REPLICATE_API_TOKEN not set! Text removal will fail!")
     
     height, width = image.shape[:2]
     
-    # ========================================
-    # STEP 1: OCR (just to get text)
-    # ========================================
-    logger.info("📋 STEP 1: OCR (Google Vision)")
+    # STEP 1: OCR
+    logger.info("📋 STEP 1: OCR")
     ocr_data = google_vision_ocr(image, crop_bottom_percent=35)
     
     if not ocr_data['text']:
         logger.warning("⚠️ No text detected")
         return image, ocr_data
     
-    # ========================================
-    # STEP 2: Create mask for bottom 35%
-    # ========================================
-    logger.info("📋 STEP 2: Create mask (bottom 35%)")
-    mask_start = int(height * 0.65)  # 35% from bottom
+    # STEP 2: Remove text with ROI (preserve top logos)
+    logger.info("📋 STEP 2: Remove text (FLUX with ROI)")
+    mask_start = int(height * 0.65)
+    clean_image = flux_kontext_inpaint_bottom_roi(image, mask_start=mask_start, overlap_px=150)
     
-    logger.info(f"📐 Mask: rows {mask_start}-{height} (bottom 35%)")
-    
-    # ========================================
-    # STEP 3: FLUX removes everything in mask - ENHANCED
-    # ========================================
-    logger.info("📋 STEP 3: Remove content (FLUX Kontext Pro ENHANCED)")
-    clean_image = flux_kontext_inpaint_bottom_roi(image, mask_start=mask_start, overlap_px=60)
-    
-    # Save intermediate result for debugging
-    debug_clean_path = "/tmp/debug_clean.png"
-    cv2.imwrite(debug_clean_path, clean_image)
-    logger.info(f"💾 Saved cleaned image to {debug_clean_path}")
-    
-    # ========================================
-    # STEP 4: Translate
-    # ========================================
-    logger.info("📋 STEP 4: Translate (OpenAI)")
-    
+    # STEP 3: Translate
+    logger.info("📋 STEP 3: Translate")
     if mode == 3:
         lines = ocr_data['lines']
         if len(lines) >= 2:
@@ -662,30 +659,16 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         title_translated = openai_translate(ocr_data['text'])
         subtitle_translated = ""
     
-    # ========================================
-    # STEP 5: Convert to PIL and apply gradient LAYER
-    # ========================================
-    logger.info("📋 STEP 5: Apply gradient LAYER")
-    
+    # STEP 4: Apply gradient
+    logger.info("📋 STEP 4: Apply gradient")
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
     
-    actual_width, actual_height = pil_image.size
-    logger.info(f"📐 Image size: {actual_width}x{actual_height}")
-    
-    # Create gradient as separate layer
-    gradient_layer = create_gradient_layer(actual_width, actual_height, start_percent=55)
-    
-    # Composite gradient ON TOP of image
+    gradient_layer = create_gradient_layer(pil_image.width, pil_image.height, start_percent=55)
     pil_image = Image.alpha_composite(pil_image, gradient_layer)
     
-    logger.info("✅ Gradient layer applied")
-    
-    # ========================================
-    # STEP 6: Render text ON TOP of gradient
-    # ========================================
-    logger.info(f"📋 STEP 6: Render Text (Mode {mode})")
-    
+    # STEP 5: Render text
+    logger.info(f"📋 STEP 5: Render text (Mode {mode})")
     if mode == 1:
         pil_image = render_mode1_logo(pil_image, title_translated)
     elif mode == 2:
@@ -693,19 +676,11 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     elif mode == 3:
         pil_image = render_mode3_content(pil_image, title_translated, subtitle_translated)
     
-    # Convert back to BGR
+    # Convert back
     result_rgb = np.array(pil_image.convert('RGB'))
     result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
     
-    # Save final result for debugging
-    debug_final_path = "/tmp/debug_final.png"
-    cv2.imwrite(debug_final_path, result_bgr)
-    logger.info(f"💾 Saved final result to {debug_final_path}")
-    
-    logger.info("=" * 60)
     logger.info("✅ WORKFLOW COMPLETED!")
-    logger.info("=" * 60)
-    
     return result_bgr, ocr_data
 
 
