@@ -38,11 +38,11 @@ FONT_SIZE_MODE1 = 48
 FONT_SIZE_MODE2 = 46
 FONT_SIZE_MODE3_TITLE = 44
 FONT_SIZE_MODE3_SUBTITLE = 40
-FONT_SIZE_LOGO = 20
+FONT_SIZE_LOGO = 22
 FONT_SIZE_MIN = 36
 
 # Spacing
-SPACING_BOTTOM = 180
+SPACING_BOTTOM = 140
 SPACING_LOGO_TO_TITLE = 4
 SPACING_TITLE_TO_SUBTITLE = 10
 LINE_SPACING = 32
@@ -398,7 +398,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     title_heights = []
     for line in title_lines:
         bbox = title_font.getbbox(line)
-        title_heights.append(bbox[3] - bbox[1])
+        title_heights.append(int((bbox[3] - bbox[1]) * 2.0))  # Учитываем растягивание 100%
     
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
@@ -470,7 +470,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     title_heights = []
     for line in title_lines:
         bbox = title_font.getbbox(line)
-        title_heights.append(bbox[3] - bbox[1])
+        title_heights.append(int((bbox[3] - bbox[1]) * 2.0))  # Учитываем растягивание 100%
     
     total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
@@ -522,12 +522,12 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     title_heights = []
     for line in title_lines:
         bbox = title_font.getbbox(line)
-        title_heights.append(bbox[3] - bbox[1])
+        title_heights.append(int((bbox[3] - bbox[1]) * 2.0))  # Учитываем растягивание 100%
     
     subtitle_heights = []
     for line in subtitle_lines:
         bbox = subtitle_font.getbbox(line)
-        subtitle_heights.append(bbox[3] - bbox[1])
+        subtitle_heights.append(int((bbox[3] - bbox[1]) * 2.0))
     
     total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
