@@ -252,7 +252,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> Image.Image:
+def create_gradient_layer(width: int, height: int, start_percent: int = 65) -> Image.Image:
     """
     Create gradient as a separate RGBA layer
     Transparent at top, black at bottom
@@ -265,7 +265,7 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> I
         if y >= start_row:
             # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            alpha = int(255 * (progress ** 0.9))
+            alpha = int(255 * (progress ** 0.7))
             
             for x in range(width):
                 gradient.putpixel((x, y), (0, 0, 0, alpha))
@@ -350,6 +350,56 @@ def draw_text_with_effects(draw: ImageDraw.Draw, x: int, y: int,
     return bbox[3] - bbox[1]
 
 
+def draw_sharp_stretched_text(image: Image.Image, x: int, y: int, 
+                               text: str, font: ImageFont.FreeTypeFont,
+                               fill_color: tuple, outline_color: tuple,
+                               shadow_offset: int = 2):
+    """
+    Draw super sharp text with 3x rendering + 25% vertical stretch
+    Returns: height of drawn text (stretched)
+    """
+    # Get text size
+    bbox = font.getbbox(text)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    
+    # Create temporary image 3x for sharpness
+    scale = 3
+    temp_width = text_width * scale
+    temp_height = text_height * scale
+    
+    temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
+    temp_draw = ImageDraw.Draw(temp)
+    
+    # Font 3x
+    font_3x = ImageFont.truetype(font.path, font.size * scale)
+    
+    # Draw with 3x resolution
+    # Shadow
+    temp_draw.text((shadow_offset * scale, shadow_offset * scale), text, 
+                   font=font_3x, fill=(0, 0, 0, 128))
+    
+    # Outline (8 directions)
+    for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
+        temp_draw.text((dx * scale, dy * scale), text, 
+                       font=font_3x, fill=outline_color)
+    
+    # Main text
+    temp_draw.text((0, 0), text, font=font_3x, fill=fill_color)
+    
+    # Downscale to original size with high quality (for sharpness)
+    temp = temp.resize((text_width, text_height), Image.LANCZOS)
+    
+    # STRETCH VERTICALLY by 100%
+    stretched_height = int(text_height * 2.0)  # +100% vertical stretch
+    temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
+    
+    # Paste stretched text into image
+    image.paste(temp_stretched, (x, y), temp_stretched)
+    
+    return stretched_height  # Return stretched height
+
+
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     """
     Mode 1: Logo + 2 lines + Title (UPPERCASE)
@@ -412,10 +462,12 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_text_with_effects(draw, line_x, title_y, line, title_font,
-                               COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        title_y += title_heights[i] + LINE_SPACING
+    actual_height = draw_sharp_stretched_text(
+        image, line_x, title_y, line, title_font,
+        COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
+    )
+
+    current_y += actual_height + LINE_SPACING  # ✅ ПРАВИЛЬНО
     
     return image
 
@@ -454,10 +506,12 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_text_with_effects(draw, line_x, current_y, line, title_font,
-                               COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        current_y += title_heights[i] + LINE_SPACING
+        actual_height = draw_sharp_stretched_text(
+            image, line_x, current_y, line, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
+        )
+
+        current_y += actual_height + LINE_SPACING
     
     return image
 
@@ -512,10 +566,12 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_text_with_effects(draw, line_x, current_y, line, title_font,
-                               COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        current_y += title_heights[i] + LINE_SPACING
+        actual_height = draw_sharp_stretched_text(
+            image, line_x, current_y, line, subtitle_font,
+            COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
+        )
+
+        current_y += actual_height + LINE_SPACING  # ✅ ПРАВИЛЬНО
     
     # Draw subtitle
     current_y += SPACING_TITLE_TO_SUBTITLE
@@ -525,10 +581,12 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        draw_text_with_effects(draw, line_x, current_y, line, subtitle_font,
-                               COLOR_WHITE, COLOR_OUTLINE)
-        
-        current_y += subtitle_heights[i] + LINE_SPACING
+        actual_height = draw_sharp_stretched_text(
+            image, line_x, current_y, line, subtitle_font,
+            COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
+        )
+
+        current_y += actual_height + LINE_SPACING  # ✅ ПРАВИЛЬНО
     
     return image
 
