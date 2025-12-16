@@ -34,9 +34,9 @@ COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 
 # Font sizes
-FONT_SIZE_MODE1 = 54
-FONT_SIZE_MODE2 = 48
-FONT_SIZE_MODE3_TITLE = 46
+FONT_SIZE_MODE1 = 62
+FONT_SIZE_MODE2 = 54
+FONT_SIZE_MODE3_TITLE = 48
 FONT_SIZE_MODE3_SUBTITLE = 40
 FONT_SIZE_LOGO = 22
 FONT_SIZE_MIN = 36
@@ -252,7 +252,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int, start_percent: int = 65) -> Image.Image:
+def create_gradient_layer(width: int, height: int, start_percent: int = 70) -> Image.Image:
     """
     Create gradient as a separate RGBA layer
     Transparent at top, black at bottom
@@ -265,7 +265,7 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 65) -> I
         if y >= start_row:
             # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            alpha = int(255 * (progress ** 0.7))
+            alpha = int(255 * (progress ** 0.6))
             
             for x in range(width):
                 gradient.putpixel((x, y), (0, 0, 0, alpha))
