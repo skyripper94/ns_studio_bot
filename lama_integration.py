@@ -265,7 +265,7 @@ def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> I
         if y >= start_row:
             # Smooth gradient from start to bottom
             progress = (y - start_row) / (height - start_row)
-            alpha = int(255 * (progress ** 0.4))
+            alpha = int(255 * (progress ** 0.6))
             
             for x in range(width):
                 gradient.putpixel((x, y), (0, 0, 0, alpha))
