@@ -5,12 +5,6 @@ Complete Workflow (SIMPLIFIED):
 3. Translate & adapt (OpenAI GPT-4)
 4. Apply gradient LAYER on top
 5. Render text on top of gradient
-
-=== ФИНАЛЬНЫЕ ИСПРАВЛЕНИЯ ===
-1. Градиент: ПРОСТОЙ ЛИНЕЙНЫЙ fade снизу вверх (40-45% снизу)
-2. Обрезка букв: увеличен SPACING_BOTTOM до 180px
-3. Расстояния: LINE_SPACING=0, SPACING_LOGO_TO_TITLE=0 (максимально близко)
-4. Padding: ФИКСИРОВАННЫЙ 4px (для outline и shadow, не зависит от размера шрифта)
 """
 
 import os
@@ -40,26 +34,22 @@ COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)  # #3C3C3C
 
 # Font sizes
-FONT_SIZE_MODE1 = 52
+FONT_SIZE_MODE1 = 48
 FONT_SIZE_MODE2 = 46
 FONT_SIZE_MODE3_TITLE = 44
 FONT_SIZE_MODE3_SUBTITLE = 40
-FONT_SIZE_LOGO = 22
+FONT_SIZE_LOGO = 20
 FONT_SIZE_MIN = 36
 
-# Spacing - ЕЩЕ БЛИЖЕ!
-SPACING_BOTTOM = 180          # Увеличен для избежания обрезки (было 140)
-SPACING_LOGO_TO_TITLE = 1     # Максимально близко (было 1)
-SPACING_TITLE_TO_SUBTITLE = 10  # Расстояние между заголовком и подзаголовком
-LINE_SPACING = 1              # Максимально близко (было 2)
-LOGO_LINE_LENGTH = 300        # Длина линий возле лого
+# Spacing
+SPACING_BOTTOM = 140
+SPACING_LOGO_TO_TITLE = 4
+SPACING_TITLE_TO_SUBTITLE = 10
+LINE_SPACING = 32
+LOGO_LINE_LENGTH = 300
 
 # Layout
 TEXT_WIDTH_PERCENT = 0.9
-
-# Text stretch settings
-TEXT_STRETCH_MULTIPLIER = 1.9  # Вертикальное растягивание текста
-FIXED_TEXT_PADDING = 4         # Фиксированный padding для outline (±1px) и shadow (+2px)
 
 # Font path
 FONT_PATH = '/app/fonts/WaffleSoft.otf'
@@ -262,51 +252,26 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         return opencv_fallback(image, mask)
 
 
-def create_gradient_layer(width: int, height: int) -> Image.Image:
+def create_gradient_layer(width: int, height: int, start_percent: int = 55) -> Image.Image:
     """
-    ПРОСТОЙ ЛИНЕЙНЫЙ ГРАДИЕНТ снизу вверх
-    
-    Снизу: сплошной черный (90-100% непрозрачности)
-    → на 10-15% выше: уже заметно слабее
-    → к середине (40-45%): полностью прозрачный
-    
-    Без овалов, без пятен, без полос - простой линейный fade
+    Create gradient as a separate RGBA layer
+    Transparent at top, black at bottom
     """
-    # Градиент занимает нижние 42% (от 58% до 100%)
-    gradient_start_percent = 58  # Где начинается fade (сверху вниз)
+    gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     
-    start_y = int(height * (gradient_start_percent / 100))
+    start_row = int(height * (1 - start_percent / 100))
     
-    # Простой линейный градиент с numpy
-    y = np.arange(height, dtype=np.float32)
+    for y in range(height):
+        if y >= start_row:
+            # Smooth gradient from start to bottom
+            progress = (y - start_row) / (height - start_row)
+            alpha = int(255 * (progress ** 0.9))
+            
+            for x in range(width):
+                gradient.putpixel((x, y), (0, 0, 0, alpha))
     
-    # Нормализация: 0 на start_y, 1 в самом низу
-    t = (y - float(start_y)) / float(height - start_y)
-    t = np.clip(t, 0.0, 1.0)
-    
-    # МЯГКАЯ кривая для плавного перехода
-    # power = 2.0 дает плавное ускорение (сверху медленно, внизу быстро)
-    t_smooth = t ** 2.0
-    
-    # Конвертируем в alpha (0-255)
-    alpha_1d = (255.0 * t_smooth).astype(np.uint8)
-    
-    # Прозрачно сверху
-    alpha_1d[:start_y] = 0
-    
-    # Развернуть в 2D
-    alpha = np.repeat(alpha_1d[:, None], width, axis=1)
-    
-    # Создать RGBA
-    rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    rgba[..., 3] = alpha  # Только alpha канал
-    
-    logger.info(
-        f"✨ Простой линейный градиент: start={start_y} ({gradient_start_percent}%), "
-        f"fade={height-start_y}px (42% снизу)"
-    )
-    
-    return Image.fromarray(rgba, 'RGBA')
+    logger.info(f"✨ Created gradient layer from row {start_row} ({start_percent}%)")
+    return gradient
 
 
 def calculate_adaptive_font_size(text: str, font_path: str, max_width: int, 
@@ -363,104 +328,26 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
     return min_size, font, [text]
 
 
-def get_real_font_line_height(font: ImageFont.FreeTypeFont) -> int:
+def draw_text_with_effects(draw: ImageDraw.Draw, x: int, y: int, 
+                            text: str, font: ImageFont.FreeTypeFont,
+                            fill_color: tuple, outline_color: tuple,
+                            shadow_offset: int = 2) -> int:
     """
-    Получить РЕАЛЬНУЮ высоту строки шрифта (не bbox, а line height!)
+    Draw text with shadow and outline
+    Returns: height of drawn text
     """
-    # Тестовая строка с ascenders и descenders
-    test_text = "ÁЙgjpqy"
-    bbox = font.getbbox(test_text)
-    
-    # Реальная высота = font size * ~1.15 (типичный line height)
-    bbox_height = bbox[3] - bbox[1]
-    estimated_line_height = max(bbox_height, int(font.size * 1.15))
-    
-    return estimated_line_height
-
-
-def calculate_stretched_height(font: ImageFont.FreeTypeFont, text: str) -> int:
-    """
-    Calculate final stretched height for a line of text
-    This MUST match the actual rendering in draw_sharp_stretched_text
-    
-    Returns: stretched height in pixels
-    """
-    bbox = font.getbbox(text)
-    base_height = bbox[3] - bbox[1]
-    
-    # Add padding (same as in draw_sharp_stretched_text)
-    padding = FIXED_TEXT_PADDING
-    height_with_padding = base_height + padding * 2
-    
-    # Apply stretch (same as in draw_sharp_stretched_text)
-    stretched_height = int(height_with_padding * TEXT_STRETCH_MULTIPLIER)
-    
-    return stretched_height
-
-
-def effective_line_spacing() -> int:
-    """
-    LINE_SPACING масштабируется с TEXT_STRETCH_MULTIPLIER
-    """
-    return max(0, int(LINE_SPACING * TEXT_STRETCH_MULTIPLIER))
-
-
-def draw_sharp_stretched_text(image: Image.Image, x: int, y: int, 
-                               text: str, font: ImageFont.FreeTypeFont,
-                               fill_color: tuple, outline_color: tuple,
-                               shadow_offset: int = 2) -> int:
-    """
-    Draw super sharp text with 3x rendering + vertical stretch
-    
-    Returns: height of drawn text (stretched)
-    """
-    # Get text size
-    bbox = font.getbbox(text)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-
-    # ADD PADDING для outline (±1px) и shadow (+2px)
-    padding = FIXED_TEXT_PADDING
-    text_height_with_padding = text_height + padding * 2
-    
-    # Create temporary image 3x for sharpness
-    scale = 3
-    temp_width = text_width * scale
-    temp_height = text_height_with_padding * scale
-    
-    temp = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
-    temp_draw = ImageDraw.Draw(temp)
-                                   
-    # Draw with padding offset
-    y_offset = padding * scale
-    
-    # Font 3x
-    font_3x = ImageFont.truetype(font.path, font.size * scale)
-    
-    # Draw with 3x resolution
     # Shadow
-    temp_draw.text((shadow_offset * scale, y_offset + shadow_offset * scale), text, 
-                   font=font_3x, fill=(0, 0, 0, 128))
+    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill=(0, 0, 0, 128))
     
     # Outline (8 directions)
     for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-        temp_draw.text((dx * scale, y_offset + dy * scale), text, 
-                       font=font_3x, fill=outline_color)
+        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
     
     # Main text
-    temp_draw.text((0, y_offset), text, font=font_3x, fill=fill_color)
-        
-    # Downscale to original size WITH PADDING (for sharpness)
-    temp = temp.resize((text_width, text_height_with_padding), Image.LANCZOS)
-
-    # STRETCH VERTICALLY
-    stretched_height = int(text_height_with_padding * TEXT_STRETCH_MULTIPLIER)
-    temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
+    draw.text((x, y), text, font=font, fill=fill_color)
     
-    # Paste stretched text into image
-    image.paste(temp_stretched, (x, y), temp_stretched)
-    
-    return stretched_height
+    bbox = font.getbbox(text)
+    return bbox[3] - bbox[1]
 
 
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
@@ -471,8 +358,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
-    line_gap = effective_line_spacing()
-    
     # Convert to UPPERCASE
     title_translated = title_translated.upper()
     
@@ -481,20 +366,20 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE1
     )
     
-    # Calculate heights WITH proper padding and stretch
+    # Calculate heights
     title_heights = []
     for line in title_lines:
-        stretched = calculate_stretched_height(title_font, line)
-        title_heights.append(stretched)
+        bbox = title_font.getbbox(line)
+        title_heights.append(bbox[3] - bbox[1])
     
-    total_title_height = sum(title_heights) + max(0, len(title_lines) - 1) * line_gap
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
-    # Logo - используем РЕАЛЬНУЮ высоту шрифта!
+    # Logo
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
     logo_bbox = logo_font.getbbox(logo_text)
     logo_width = logo_bbox[2] - logo_bbox[0]
-    logo_height = get_real_font_line_height(logo_font)
+    logo_height = logo_bbox[3] - logo_bbox[1]
     
     # Total height
     total_height = logo_height + SPACING_LOGO_TO_TITLE + total_title_height
@@ -527,14 +412,10 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        actual_height = draw_sharp_stretched_text(
-            image, line_x, title_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, title_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        title_y += actual_height
-        if i < len(title_lines) - 1:
-            title_y += line_gap
+        title_y += title_heights[i] + LINE_SPACING
     
     return image
 
@@ -547,8 +428,6 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
     
-    line_gap = effective_line_spacing()
-    
     # Convert to UPPERCASE
     title_translated = title_translated.upper()
     
@@ -557,13 +436,13 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE2
     )
     
-    # Calculate heights WITH proper padding and stretch
+    # Calculate heights
     title_heights = []
     for line in title_lines:
-        stretched = calculate_stretched_height(title_font, line)
-        title_heights.append(stretched)
+        bbox = title_font.getbbox(line)
+        title_heights.append(bbox[3] - bbox[1])
     
-    total_height = sum(title_heights) + max(0, len(title_lines) - 1) * line_gap
+    total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
     
     # Start position
     start_y = height - SPACING_BOTTOM - total_height
@@ -575,14 +454,10 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        actual_height = draw_sharp_stretched_text(
-            image, line_x, current_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, current_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        current_y += actual_height
-        if i < len(title_lines) - 1:
-            current_y += line_gap
+        current_y += title_heights[i] + LINE_SPACING
     
     return image
 
@@ -595,8 +470,6 @@ def render_mode3_content(image: Image.Image, title_translated: str,
     draw = ImageDraw.Draw(image, 'RGBA')
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
-    
-    line_gap = effective_line_spacing()
     
     # Convert to UPPERCASE
     title_translated = title_translated.upper()
@@ -613,19 +486,19 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         subtitle_translated, FONT_PATH, max_text_width, subtitle_initial_size
     )
     
-    # Calculate heights WITH proper padding and stretch
+    # Calculate heights
     title_heights = []
     for line in title_lines:
-        stretched = calculate_stretched_height(title_font, line)
-        title_heights.append(stretched)
+        bbox = title_font.getbbox(line)
+        title_heights.append(bbox[3] - bbox[1])
     
     subtitle_heights = []
     for line in subtitle_lines:
-        stretched = calculate_stretched_height(subtitle_font, line)
-        subtitle_heights.append(stretched)
+        bbox = subtitle_font.getbbox(line)
+        subtitle_heights.append(bbox[3] - bbox[1])
     
-    total_title_height = sum(title_heights) + max(0, len(title_lines) - 1) * line_gap
-    total_subtitle_height = sum(subtitle_heights) + max(0, len(subtitle_lines) - 1) * line_gap
+    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
+    total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
     
     total_height = total_title_height + SPACING_TITLE_TO_SUBTITLE + total_subtitle_height
     
@@ -639,14 +512,10 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        actual_height = draw_sharp_stretched_text(
-            image, line_x, current_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, current_y, line, title_font,
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        current_y += actual_height
-        if i < len(title_lines) - 1:
-            current_y += line_gap
+        current_y += title_heights[i] + LINE_SPACING
     
     # Draw subtitle
     current_y += SPACING_TITLE_TO_SUBTITLE
@@ -656,14 +525,10 @@ def render_mode3_content(image: Image.Image, title_translated: str,
         line_width = line_bbox[2] - line_bbox[0]
         line_x = (width - line_width) // 2
         
-        actual_height = draw_sharp_stretched_text(
-            image, line_x, current_y, line, subtitle_font,
-            COLOR_WHITE, COLOR_OUTLINE, shadow_offset=2
-        )
+        draw_text_with_effects(draw, line_x, current_y, line, subtitle_font,
+                               COLOR_WHITE, COLOR_OUTLINE)
         
-        current_y += actual_height
-        if i < len(subtitle_lines) - 1:
-            current_y += line_gap
+        current_y += subtitle_heights[i] + LINE_SPACING
     
     return image
 
@@ -672,11 +537,11 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     """
     Full workflow for modes 1, 2, 3
     
-    LOGIC:
+    SIMPLE LOGIC:
     1. OCR → get text for translation
-    2. FLUX removes EVERYTHING in bottom 35% (text, lines, logo, gradient)
+    2. MASK = bottom 35% (ALWAYS) → FLUX removes EVERYTHING (text, lines, logo)
     3. Translate text
-    4. Apply ПРОСТОЙ ЛИНЕЙНЫЙ gradient LAYER on top of clean image
+    4. Apply gradient LAYER on top of clean image
     5. Render text on top of gradient
     
     Returns: (result_image, ocr_data)
@@ -735,9 +600,9 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         subtitle_translated = ""
     
     # ========================================
-    # STEP 5: Convert to PIL and apply ПРОСТОЙ ЛИНЕЙНЫЙ gradient LAYER
+    # STEP 5: Convert to PIL and apply gradient LAYER
     # ========================================
-    logger.info("📋 STEP 5: Apply ПРОСТОЙ ЛИНЕЙНЫЙ gradient LAYER")
+    logger.info("📋 STEP 5: Apply gradient LAYER")
     
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
@@ -745,13 +610,13 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     actual_width, actual_height = pil_image.size
     logger.info(f"📐 Image size: {actual_width}x{actual_height}")
     
-    # Create ПРОСТОЙ ЛИНЕЙНЫЙ градиент
-    gradient_layer = create_gradient_layer(actual_width, actual_height)
+    # Create gradient as separate layer
+    gradient_layer = create_gradient_layer(actual_width, actual_height, start_percent=55)
     
-    # Composite gradient ON TOP of clean image (separate layer)
+    # SIMPLE: composite gradient ON TOP of image
     pil_image = Image.alpha_composite(pil_image, gradient_layer)
     
-    logger.info("✅ Простой линейный gradient applied")
+    logger.info("✅ Gradient layer applied")
     
     # ========================================
     # STEP 6: Render text ON TOP of gradient
