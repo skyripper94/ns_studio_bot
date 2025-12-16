@@ -45,14 +45,14 @@ FONT_SIZE_MIN = 36
 SPACING_BOTTOM = 140          # Отступ снизу
 SPACING_LOGO_TO_TITLE = 2     # Расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = 10  # Расстояние между заголовком и подзаголовком
-LINE_SPACING = 32              # Расстояние между строками текста
+LINE_SPACING = 12              # Расстояние между строками текста
 LOGO_LINE_LENGTH = 300        # Длина линий возле лого
 
 # Layout
 TEXT_WIDTH_PERCENT = 0.9
 
 # Text stretch settings
-TEXT_STRETCH_MULTIPLIER = 2.0  # Вертикальное растягивание текста (2.0 = 100%)
+TEXT_STRETCH_MULTIPLIER = 2.0  # Вертикальное растягивание текста (2.0 = 100% растяжения)
 TEXT_PADDING_PERCENT = 0.3     # Padding для хвостиков букв (30% от размера шрифта)
 
 # Font path
@@ -259,43 +259,45 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 def create_gradient_layer(width: int, height: int, gradient_start_percent: int = 30, 
                           lift_black: int = 40) -> Image.Image:
     """
-    Create SMOOTH OVAL gradient - starts HIGH and GENTLY fades down
+    Create CONVEX OVAL gradient - BULGES UP in center (where text is), flat/absent at edges
     
     Args:
         width: Image width
         height: Image height
-        gradient_start_percent: Where gradient STARTS from TOP (30 = starts at 30% from top)
+        gradient_start_percent: Where gradient STARTS from TOP at CENTER (30 = starts at 30% from top in center)
         lift_black: How many pixels to lift the solid black area from bottom
     """
     gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     
-    # Gradient starts HIGH from top
-    start_row = int(height * (gradient_start_percent / 100))  # 30% = row 300 on 1000px image
+    # Gradient starts HIGH in CENTER
+    center_start_row = int(height * (gradient_start_percent / 100))
     
     # Solid black starts near bottom (lifted up)
     solid_black_start = height - lift_black
     
-    # Total gradient height
-    gradient_height = solid_black_start - start_row
+    # Center gradient height
+    center_gradient_height = solid_black_start - center_start_row
     
-    logger.info(f"✨ Creating SMOOTH OVAL gradient:")
-    logger.info(f"   Gradient starts: row {start_row} ({gradient_start_percent}% from TOP)")
+    logger.info(f"✨ Creating CONVEX OVAL gradient:")
+    logger.info(f"   Center gradient starts: row {center_start_row} ({gradient_start_percent}% from TOP)")
     logger.info(f"   Solid black starts: row {solid_black_start}")
-    logger.info(f"   Gradient height: {gradient_height}px")
+    logger.info(f"   Center gradient height: {center_gradient_height}px")
     
-    # Oval parameters for horizontal variation
+    # Oval parameters
     center_x = width / 2
     
+    # How much to PUSH DOWN gradient at edges (convex = push down at edges)
+    edge_push_amount = int(center_gradient_height * 0.5)  # Push down 50% of gradient height at edges
+    
+    logger.info(f"   Edge push down: {edge_push_amount}px (creates convex bulge)")
+    
     for y in range(height):
-        if y < start_row:
-            # Above gradient start - fully transparent
-            continue
-        elif y >= solid_black_start:
+        if y >= solid_black_start:
             # Solid black area (bottom)
             for x in range(width):
                 gradient.putpixel((x, y), (0, 0, 0, 255))
         else:
-            # SMOOTH gradient area with OVAL shape
+            # Gradient area with CONVEX OVAL shape
             for x in range(width):
                 # Distance from center X
                 dx = abs(x - center_x)
@@ -303,28 +305,38 @@ def create_gradient_layer(width: int, height: int, gradient_start_percent: int =
                 # Normalize x position (0 = center, 1 = edge)
                 x_norm = dx / (width / 2)
                 
-                # Oval effect: push gradient down more at edges
-                # At center: starts earlier, at edges: starts later
-                edge_push = int(gradient_height * 0.15 * (x_norm ** 2))  # Reduced from 0.3 to 0.15 for gentler oval
+                # CONVEX effect: PUSH DOWN gradient at edges
+                # At center (x_norm=0): no push, gradient starts at center_start_row
+                # At edges (x_norm=1): push down by edge_push_amount
+                edge_push = int(edge_push_amount * (x_norm ** 1.5))  # Power controls sharpness of oval
                 
-                # Effective Y for this pixel
-                effective_y = y + edge_push
+                # Effective start row for this X position
+                effective_start_row = center_start_row + edge_push
                 
-                if effective_y >= solid_black_start:
-                    # Reached solid black
-                    gradient.putpixel((x, y), (0, 0, 0, 255))
+                if y < effective_start_row:
+                    # Above gradient start for this X position - transparent
+                    continue
+                elif effective_start_row >= solid_black_start:
+                    # Gradient completely pushed below solid black - no gradient here
+                    continue
                 else:
+                    # In gradient zone
+                    effective_gradient_height = solid_black_start - effective_start_row
+                    
+                    if effective_gradient_height <= 0:
+                        # No gradient space
+                        continue
+                    
                     # Calculate gradient progress (0.0 to 1.0)
-                    progress = (effective_y - start_row) / (solid_black_start - start_row)
+                    progress = (y - effective_start_row) / effective_gradient_height
                     progress = max(0.0, min(1.0, progress))
                     
                     # SOFT SMOOTH curve - starts very transparent, slowly builds up
-                    # Using higher power for GENTLER transition
                     alpha = int(255 * (progress ** 2.5))  # ** 2.5 for smooth gentle fade
                     
                     gradient.putpixel((x, y), (0, 0, 0, alpha))
     
-    logger.info(f"✅ SMOOTH OVAL gradient created")
+    logger.info(f"✅ CONVEX OVAL gradient created (bulges up in center)")
     return gradient
 
 
@@ -407,7 +419,7 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
                                fill_color: tuple, outline_color: tuple,
                                shadow_offset: int = 2) -> int:
     """
-    Draw super sharp text with 3x rendering + vertical stretch
+    Draw super sharp text with 3x rendering + vertical stretch x2
     
     Returns: height of drawn text (stretched)
     """
@@ -450,7 +462,7 @@ def draw_sharp_stretched_text(image: Image.Image, x: int, y: int,
     # Downscale to original size WITH PADDING (for sharpness)
     temp = temp.resize((text_width, text_height_with_padding), Image.LANCZOS)
 
-    # STRETCH VERTICALLY
+    # ⭐ STRETCH VERTICALLY x2
     stretched_height = int(text_height_with_padding * TEXT_STRETCH_MULTIPLIER)
     temp_stretched = temp.resize((text_width, stretched_height), Image.LANCZOS)
     
@@ -655,11 +667,11 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     """
     Full workflow for modes 1, 2, 3
     
-    SIMPLE LOGIC:
+    LOGIC:
     1. OCR → get text for translation
-    2. MASK = bottom 35% (ALWAYS) → FLUX removes EVERYTHING (text, lines, logo)
+    2. FLUX removes EVERYTHING in bottom 35% (text, lines, logo, gradient)
     3. Translate text
-    4. Apply gradient LAYER on top of clean image
+    4. Apply CONVEX gradient LAYER on top of clean image (separate layer)
     5. Render text on top of gradient
     
     Returns: (result_image, ocr_data)
@@ -718,9 +730,9 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
         subtitle_translated = ""
     
     # ========================================
-    # STEP 5: Convert to PIL and apply gradient LAYER
+    # STEP 5: Convert to PIL and apply CONVEX gradient LAYER
     # ========================================
-    logger.info("📋 STEP 5: Apply OVAL gradient LAYER")
+    logger.info("📋 STEP 5: Apply CONVEX OVAL gradient LAYER")
     
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(clean_rgb).convert('RGBA')
@@ -728,14 +740,19 @@ def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
     actual_width, actual_height = pil_image.size
     logger.info(f"📐 Image size: {actual_width}x{actual_height}")
     
-    # Create OVAL gradient as separate layer (with lifted black base)
-    gradient_layer = create_gradient_layer(actual_width, actual_height, 
-                                          start_percent=55, lift_black=40)
+    # Create CONVEX OVAL gradient as separate layer
+    # gradient_start_percent: где начинается градиент в ЦЕНТРЕ (выше = раньше)
+    # lift_black: насколько поднять черное дно снизу
+    gradient_layer = create_gradient_layer(
+        actual_width, actual_height, 
+        gradient_start_percent=55,  # В центре градиент начинается на 55% от верха
+        lift_black=40  # Черное дно поднято на 40px
+    )
     
-    # Composite gradient ON TOP of image
+    # Composite gradient ON TOP of clean image (separate layer)
     pil_image = Image.alpha_composite(pil_image, gradient_layer)
     
-    logger.info("✅ OVAL gradient layer applied")
+    logger.info("✅ CONVEX OVAL gradient layer applied")
     
     # ========================================
     # STEP 6: Render text ON TOP of gradient
