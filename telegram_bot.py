@@ -1,7 +1,9 @@
+# telegram_bot.py
+
 """
-# Telegram Bot with 2 main modes:
-1. REMOVE - Only remove text (existing)
-2. FULL - Full workflow with 3 submodes (1/2/3)
+Telegram бот с 2 основными режимами:
+1. УДАЛИТЬ - только удаление текста (существующий функционал)
+2. FULL - полный workflow с 3 подрежимами (1/2/3)
 """
 
 import os
@@ -14,7 +16,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from dotenv import load_dotenv
 
-from lama_integration import flux_kontext_inpaint, process_full_workflow
+from lama_integration import flux_kontext_inpaint, process_full_workflow, MASK_BOTTOM_PERCENT
 
 load_dotenv()
 
@@ -24,16 +26,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Токен бота
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+
+# Временная директория для изображений
 TEMP_DIR = '/tmp/bot_images'
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# User state storage
+# Хранилище состояний пользователей
 user_states = {}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command"""
+    """
+    Команда /start - показывает меню выбора режима
+    """
     user_id = update.effective_user.id
     user_states[user_id] = {'mode': None, 'submode': None}
     
@@ -53,29 +60,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "OCR → Удаление → Перевод → Нанесение текста\n"
         "3 режима: Лого / Текст / Контент\n\n"
         "Выберите режим:",
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
     )
 
 
 async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle mode selection"""
+    """
+    Обработка выбора режима через inline кнопки
+    """
     query = update.callback_query
     await query.answer()
     
     user_id = update.effective_user.id
     
+    # Инициализация состояния если нужно
     if user_id not in user_states:
         user_states[user_id] = {'mode': None, 'submode': None}
     
     if query.data == "mode_remove":
+        # Режим "только удаление"
         user_states[user_id]['mode'] = 'remove'
         await query.edit_message_text(
             "✅ **Режим: УДАЛИТЬ ТЕКСТ**\n\n"
             "Просто отправьте изображение.\n"
-            "Бот удалит текст и градиент (35% снизу)."
+            f"Бот удалит текст и градиент ({MASK_BOTTOM_PERCENT}% снизу).",
+            parse_mode='Markdown'
         )
     
     elif query.data == "mode_full":
+        # Режим "полный workflow" - показываем подрежимы
         user_states[user_id]['mode'] = 'full'
         
         keyboard = [
@@ -90,14 +104,16 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "✅ **Режим: FULL WORKFLOW**\n\n"
             "Выберите подрежим:\n\n"
-            "**1️⃣ ЛОГО** - Лого + полоски + заголовок\n"
+            "**1️⃣ ЛОГО** - Лого + линии + заголовок\n"
             "**2️⃣ ТЕКСТ** - Только заголовок\n"
             "**3️⃣ КОНТЕНТ** - Заголовок + подзаголовок\n\n"
             "После выбора отправьте изображение.",
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
     
     elif query.data.startswith("submode_"):
+        # Выбор подрежима (1, 2 или 3)
         submode = int(query.data.split("_")[1])
         user_states[user_id]['submode'] = submode
         
@@ -114,15 +130,18 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"1. OCR (Google Vision)\n"
             f"2. Удаление текста (FLUX)\n"
             f"3. Перевод (OpenAI)\n"
-            f"4. Нанесение русского текста"
+            f"4. Нанесение русского текста",
+            parse_mode='Markdown'
         )
 
 
 async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process received image"""
+    """
+    Обработка полученного изображения
+    """
     user_id = update.effective_user.id
     
-    # Check state
+    # Проверка что выбран режим
     if user_id not in user_states or user_states[user_id]['mode'] is None:
         await update.message.reply_text(
             "⚠️ Сначала выберите режим командой /start"
@@ -132,6 +151,7 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = user_states[user_id]['mode']
     submode = user_states[user_id].get('submode')
     
+    # Для full режима нужен подрежим
     if mode == 'full' and submode is None:
         await update.message.reply_text(
             "⚠️ Сначала выберите подрежим (1/2/3)"
@@ -139,52 +159,54 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        # Download image
+        # Скачивание изображения
         photo = await update.message.photo[-1].get_file()
         image_bytes = await photo.download_as_bytearray()
         
-        logger.info(f"✅ Image from user {user_id}, mode: {mode}, submode: {submode}")
+        logger.info(f"✅ Изображение от пользователя {user_id}, режим: {mode}, подрежим: {submode}")
         
-        # Convert to OpenCV
+        # Конвертация в OpenCV формат
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if mode == 'remove':
-            # REMOVE MODE: Just remove text
+            # РЕЖИМ УДАЛЕНИЯ: только убираем текст
             status_msg = await update.message.reply_text("⏳ Удаление текста...")
             
-            # Create mask for bottom 35%
+            # Создаем маску для нижних 35%
             height, width = image.shape[:2]
             mask = np.zeros((height, width), dtype=np.uint8)
-            mask_start = int(height * 0.65)
+            mask_start = int(height * (1 - MASK_BOTTOM_PERCENT / 100))
             mask[mask_start:, :] = 255
             
-            # Remove text
+            # Удаляем текст через FLUX
             result = flux_kontext_inpaint(image, mask)
             
-            # Send result
+            # Отправка результата
             success, buffer = cv2.imencode('.png', result)
             if success:
                 await update.message.reply_photo(
                     photo=BytesIO(buffer.tobytes()),
-                    caption="✅ **Текст удалён!**\n🎨 FLUX Kontext Pro"
+                    caption="✅ **Текст удалён!**\n🎨 FLUX Kontext Pro",
+                    parse_mode='Markdown'
                 )
                 await status_msg.delete()
         
         elif mode == 'full':
-            # FULL MODE: Complete workflow
+            # ПОЛНЫЙ РЕЖИМ: весь workflow
             status_msg = await update.message.reply_text(
                 f"⏳ **Обработка (режим {submode})...**\n\n"
                 f"1. OCR...\n"
                 f"2. Удаление...\n"
                 f"3. Перевод...\n"
-                f"4. Нанесение текста..."
+                f"4. Нанесение текста...",
+                parse_mode='Markdown'
             )
             
-            # Process with full workflow
+            # Обработка через полный workflow
             result, ocr_data = process_full_workflow(image, submode)
             
-            # Send result
+            # Отправка результата
             success, buffer = cv2.imencode('.png', result)
             if success:
                 mode_names = {
@@ -200,30 +222,37 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"📝 Распознано текста: {len(ocr_data.get('lines', []))} строк\n"
                         f"🌐 Переведено и адаптировано\n"
                         f"🎨 FLUX Kontext Pro + OpenAI GPT-4"
-                    )
+                    ),
+                    parse_mode='Markdown'
                 )
                 await status_msg.delete()
     
     except Exception as e:
-        logger.error(f"❌ Error: {e}", exc_info=True)
+        logger.error(f"❌ Ошибка: {e}", exc_info=True)
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 
 def main():
-    """Start bot"""
+    """
+    Запуск бота
+    """
     if not TELEGRAM_TOKEN:
-        logger.error("❌ TELEGRAM_TOKEN not set!")
+        logger.error("❌ TELEGRAM_TOKEN не установлен!")
         return
     
-    logger.info("🚀 Starting bot...")
+    logger.info("🚀 Запуск бота...")
     
+    # Создание приложения
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
+    # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(mode_callback))
     application.add_handler(MessageHandler(filters.PHOTO, process_image))
     
-    logger.info("✅ Bot started!")
+    logger.info("✅ Бот запущен!")
+    
+    # Запуск polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
