@@ -62,15 +62,16 @@ FONT_SIZE_MODE1 = 54             # Заголовок в режиме 1 (лог�
 FONT_SIZE_MODE2 = 52             # Заголовок в режиме 2 (только текст)
 FONT_SIZE_MODE3_TITLE = 52       # Заголовок в режиме 3
 FONT_SIZE_MODE3_SUBTITLE = 50    # Подзаголовок в режиме 3
-FONT_SIZE_LOGO = 22              # Размер @neurostep.media
-FONT_SIZE_MIN = 34               # Минимальный размер при автоподборе (уменьшить = мельче)
+FONT_SIZE_LOGO = 24              # Размер @neurostep.media
+FONT_SIZE_MIN = 44               # Минимальный размер при автоподборе (уменьшить = мельче)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = 140             # Отступ снизу до композиции
-SPACING_LOGO_TO_TITLE = 4        # Между логотипом и заголовком
+SPACING_BOTTOM = 120             # Отступ снизу до композиции
+SPACING_LOGO_TO_TITLE = 6        # Между логотипом и заголовком
 SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
-LINE_SPACING = 18                # Между строками
+LINE_SPACING = 12                # Между строками
 LOGO_LINE_LENGTH = 300           # Длина линий возле лого
+LOGO_LINE_THICKNESS_PX = 2   # толщина полос возле логотипа (@neurostep.media)
 
 # ============== МАСКА / OCR ==============
 MASK_BOTTOM_PERCENT = 35         # Сколько % снизу чистим (маска)
@@ -81,11 +82,11 @@ OCR_BOTTOM_PERCENT = 35          # OCR зона снизу (держать ра�
 GRADIENT_COVER_PERCENT = 35      # если хотите отдельно — меняйте; по умолчанию = 35%
 GRADIENT_SOLID_FRACTION = 0.50   # какая часть градиента снизу 100% непрозрачная (0.5 = нижняя половина)
 GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "120"))  # ↑ границу "чёрной основы" на N px (скрыть артефакты)
-GRADIENT_INTENSITY_CURVE = 1.2   # плавность в верхней половине (больше = резче переход)
+GRADIENT_INTENSITY_CURVE = 1.0   # плавность в верхней половине (больше = резче переход)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.5       # +25% по высоте
-TEXT_STRETCH_WIDTH = 1.15        # +10% по ширине
+TEXT_STRETCH_HEIGHT = 1.6       # +25% по высоте
+TEXT_STRETCH_WIDTH = 1.2        # +10% по ширине
 
 # ============== ТЕНИ / ОБВОДКИ ==============
 TEXT_SHADOW_OFFSET = 2           # Смещение тени (больше = дальше тень)
@@ -191,6 +192,16 @@ def openai_translate(text: str) -> str:
             "3) Короткие слова вместо длинных\n"
             "4) billion→млрд., million→млн.\n"
             "5) Верни только перевод, без пояснений\n"
+            "6) Делай текст живым и понятным для СНГ\n"
+            "Пример:\n"
+            "The Most Expensive Things Humans Have Ever Created" → "Самые дорогие творения человечества\n"
+            "SpaceX Starlink Satellite Constellation" → "Спутниковая сеть SpaceX Starlink\n"
+            "$10 billion" → "$10 млрд.\n"
+            "We Share Insights That Expand Your View" → "Делимся знаниями, расширяющими кругозор\n"
+            "Aircraft" → "Истребитель\n"
+            "Northrop B-2 Spirit" → "Стелс-бомбардировщик Northrop B-2 Spirit\n"
+
+            
         )
 
         # Оставляю gpt-4 как в вашем коде, чтобы не ломать окружение.
@@ -546,8 +557,8 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     line_left_start = logo_x - LOGO_LINE_LENGTH - 10
     line_right_start = logo_x + logo_w + 10
 
-    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=1)
-    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=1)
+    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
+    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
 
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
