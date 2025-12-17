@@ -44,7 +44,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 # flux-kontext-pro — это “edit”, без маски; для маски нужно flux-fill-pro.
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()  # поменять если надо
 FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 15..50 (больше = детальнее, медленнее; у модели max=50)
-FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "60"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "25"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
 FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")  # png = без потерь
 FLUX_PROMPT_UPSAMPLING = False  # True = творчески “додумает” промпт, обычно не надо для чистки
 REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))  # таймаут скачивания результата
