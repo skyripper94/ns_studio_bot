@@ -1,7 +1,9 @@
-# Use Python 3.10 slim
+# Dockerfile
+
+# Базовый образ Python 3.10
 FROM python:3.10-slim
 
-# Install system dependencies including font support
+# Установка системных зависимостей + шрифты
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libsm6 \
@@ -13,32 +15,30 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Рабочая директория
 WORKDIR /app
 
-# Create fonts directory
+# Создание директории для шрифтов
 RUN mkdir -p /app/fonts
 
-# Copy requirements
+# Копирование requirements
 COPY requirements.txt .
 
-# Install Python dependencies
+# Установка Python зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy bot code
+# Копирование кода бота
 COPY telegram_bot.py .
 COPY lama_integration.py .
 
-# Copy font file (place fonts/WaffleSoft.otf in repository)
+# Копирование шрифта (поместите fonts/WaffleSoft.otf в репозиторий)
 COPY fonts/ /app/fonts/
 
-# Update font cache
+# Обновление кэша шрифтов
 RUN fc-cache -f -v
 
-# Create temp directory
+# Создание временной директории
 RUN mkdir -p /tmp/bot_images
 
-# Run bot
+# Запуск бота
 CMD ["python", "telegram_bot.py"]
-
-#
