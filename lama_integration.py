@@ -212,7 +212,7 @@ def openai_translate(text: str) -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Переведи и адаптируй: {text}"},
             ],
-            temperature=0.4,
+            temperature=0.6,
             max_tokens=200,
         )
 
