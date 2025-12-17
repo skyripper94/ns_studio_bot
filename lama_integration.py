@@ -1,76 +1,105 @@
 # lama_integration.py
-
 """
-Полный workflow для обработки изображений с удалением текста и наложением русского текста
+Полный workflow для обработки изображений:
+1) OCR (Google Vision) по нижней части
+2) Inpaint (Replicate FLUX Fill) ТОЛЬКО по маске (нижние N%)
+3) Перевод (OpenAI)
+4) Наложение градиента (точно на нижние N%)
+5) Отрисовка текста/линий/лого по режимам
+
+ВАЖНО:
+- Ваше "мыло" в логе появилось потому что Replicate вернул 401 Invalid token → сработал OpenCV fallback (он всегда мажет на большой маске).
+- Модель flux-kontext-pro НЕ поддерживает mask, поэтому могла “лезть” за пределы области. Для масочного инпейнта нужно flux-fill-pro.
 """
 
 # ============== ИМПОРТЫ ==============
 import os
 import logging
+import base64
+from io import BytesIO
+
 import numpy as np
 import cv2
-import base64
 import requests
-from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+
 import openai
 
 logger = logging.getLogger(__name__)
 
 """
 ==============================================
-НАСТРОЙКИ ДЛЯ БЫСТРОЙ ПРАВКИ
+НАСТРОЙКИ ДЛЯ БЫСТРОЙ РУЧНОЙ ПРАВКИ
+(все ключевые коэффициенты вынесены сюда)
 ==============================================
 """
 
 # ============== API КЛЮЧИ ==============
-REPLICATE_API_TOKEN = os.getenv('REPLICATE_API_TOKEN', '')
-GOOGLE_VISION_API_KEY = os.getenv('GOOGLE_VISION_API_KEY', '')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
+GOOGLE_VISION_API_KEY = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+
+# ============== REPLICATE / FLUX (INPAINT) ==============
+# МОДЕЛЬ ДЛЯ МАСКОВОГО INPAINT:
+# flux-kontext-pro — это “edit”, без маски; для маски нужно flux-fill-pro.
+REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()  # поменять если надо
+FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 1..50 (больше = детальнее, медленнее)
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "3"))  # 2..5 (больше = сильнее следует промпту)
+FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")  # png = без потерь
+FLUX_PROMPT_UPSAMPLING = False  # True = творчески “додумает” промпт, обычно не надо для чистки
+REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))  # таймаут скачивания результата
+
+# Жёсткая гарантия: “всё вне маски НЕ меняем”, даже если модель попыталась
+FORCE_PRESERVE_OUTSIDE_MASK = True
 
 # ============== ЦВЕТА ==============
-COLOR_TURQUOISE = (0, 206, 209)      # Бирюзовый для заголовков
-COLOR_WHITE = (255, 255, 255)        # Белый для подзаголовков/лого
-COLOR_OUTLINE = (60, 60, 60)         # Обводка текста (#3C3C3C)
+COLOR_TURQUOISE = (0, 206, 209)  # Бирюзовый для заголовков
+COLOR_WHITE = (255, 255, 255)    # Белый для подзаголовков/лого
+COLOR_OUTLINE = (60, 60, 60)     # Обводка текста (#3C3C3C)
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 48          # Заголовок в режиме "Лого"
-FONT_SIZE_MODE2 = 46          # Заголовок в режиме "Текст"
-FONT_SIZE_MODE3_TITLE = 44    # Заголовок в режиме "Контент"
-FONT_SIZE_MODE3_SUBTITLE = 40 # Подзаголовок в режиме "Контент"
-FONT_SIZE_LOGO = 20           # Размер @neurostep.media
-FONT_SIZE_MIN = 36            # Минимальный размер при автоподборе
+FONT_SIZE_MODE1 = 48             # Заголовок в режиме 1 (лого)
+FONT_SIZE_MODE2 = 46             # Заголовок в режиме 2 (только текст)
+FONT_SIZE_MODE3_TITLE = 44       # Заголовок в режиме 3
+FONT_SIZE_MODE3_SUBTITLE = 40    # Подзаголовок в режиме 3
+FONT_SIZE_LOGO = 20              # Размер @neurostep.media
+FONT_SIZE_MIN = 34               # Минимальный размер при автоподборе (уменьшить = мельче)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = 140              # Отступ снизу до текста
-SPACING_LOGO_TO_TITLE = 4         # Между логотипом и заголовком
-SPACING_TITLE_TO_SUBTITLE = 10    # Между заголовком и подзаголовком
-LINE_SPACING = 32                 # Между строками текста
-LOGO_LINE_LENGTH = 300            # Длина линий возле лого
+SPACING_BOTTOM = 140             # Отступ снизу до композиции
+SPACING_LOGO_TO_TITLE = 4        # Между логотипом и заголовком
+SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
+LINE_SPACING = 32                # Между строками
+LOGO_LINE_LENGTH = 300           # Длина линий возле лого
 
-# ============== МАСКА И ГРАДИЕНТ ==============
-MASK_BOTTOM_PERCENT = 35          # Сколько % снизу удаляет FLUX (35% = нижняя треть)
-GRADIENT_START_PERCENT = 55       # Откуда начинается градиент (55% = чуть выше середины)
-GRADIENT_INTENSITY_CURVE = 1.2    # Кривая интенсивности (больше = резче переход, меньше = плавнее)
+# ============== МАСКА / OCR ==============
+MASK_BOTTOM_PERCENT = 35         # Сколько % снизу чистим (маска)
+OCR_BOTTOM_PERCENT = 35          # OCR зона снизу (держать равной маске)
+
+# ============== ГРАДИЕНТ ==============
+# Градиент покрывает ТОЛЬКО нижние MASK_BOTTOM_PERCENT, как вы описали
+GRADIENT_COVER_PERCENT = 35      # если хотите отдельно — меняйте; по умолчанию = 35%
+GRADIENT_SOLID_FRACTION = 0.50   # какая часть градиента снизу 100% непрозрачная (0.5 = нижняя половина)
+GRADIENT_INTENSITY_CURVE = 1.2   # плавность в верхней половине (больше = резче переход)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.25        # Растяжение текста по высоте (1.25 = +25%)
-TEXT_STRETCH_WIDTH = 1.10         # Растяжение текста по ширине (1.10 = +10%)
+TEXT_STRETCH_HEIGHT = 1.25       # +25% по высоте
+TEXT_STRETCH_WIDTH = 1.10        # +10% по ширине
 
-# ============== ТЕНИ И ОБВОДКИ ==============
-TEXT_SHADOW_OFFSET = 2            # Смещение тени (больше = дальше тень)
-TEXT_OUTLINE_THICKNESS = 1        # Толщина обводки (увеличить для жирнее)
+# ============== ТЕНИ / ОБВОДКИ ==============
+TEXT_SHADOW_OFFSET = 2           # Смещение тени (больше = дальше тень)
+TEXT_OUTLINE_THICKNESS = 1       # Толщина обводки (увеличить = жирнее)
 
-# ============== РАЗМЕРЫ И КАЧЕСТВО ==============
-TEXT_WIDTH_PERCENT = 0.9          # Ширина текстового блока от ширины картинки (0.9 = 90%)
-OCR_BOTTOM_PERCENT = 35           # Область OCR снизу (должна совпадать с MASK_BOTTOM_PERCENT)
+# ============== БЛОК ТЕКСТА ==============
+TEXT_WIDTH_PERCENT = 0.90        # Ширина блока текста от ширины картинки
 
-# ============== FLUX ПАРАМЕТРЫ ==============
-FLUX_NUM_STEPS = 50               # Количество шагов FLUX (больше = качественнее, но медленнее)
-FLUX_GO_FAST = False              # Быстрый режим FLUX (True = быстрее но хуже качество)
+# ============== OPENCV FALLBACK ==============
+# Если Replicate недоступен/упал, включается fallback. На большой маске идеала не будет.
+OPENCV_BLUR_SIGMA = 5            # Блюр внутри маски (больше = сильнее “съест” артефакты)
+OPENCV_INPAINT_RADIUS = 3        # Радиус инпейнта (больше = сильнее “мажет”)
 
 # ============== ПУТЬ К ШРИФТУ ==============
-FONT_PATH = '/app/fonts/WaffleSoft.otf'
+FONT_PATH = os.getenv("FONT_PATH", "/app/fonts/WaffleSoft.otf").strip()
 
 """
 ==============================================
@@ -78,35 +107,31 @@ FONT_PATH = '/app/fonts/WaffleSoft.otf'
 ==============================================
 """
 
-REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 openai.api_key = OPENAI_API_KEY
 
 
-def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = OCR_BOTTOM_PERCENT) -> dict:
-    """
-    OCR через Google Vision API на нижней части изображения
-    Возвращает: {'text': полный текст, 'lines': список строк}
-    """
+# ---------------------------------------------------------------------
+# OCR (Google Vision)
+# ---------------------------------------------------------------------
+def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTTOM_PERCENT) -> dict:
+    """OCR через Google Vision API по нижней части изображения (чтобы не ловить весь кадр)."""
     if not GOOGLE_VISION_API_KEY:
         logger.warning("⚠️ GOOGLE_VISION_API_KEY не установлен")
-        return {'text': '', 'lines': []}
-    
+        return {"text": "", "lines": []}
+
     try:
-        # Обрезаем нижнюю часть для OCR
-        height, width = image.shape[:2]
-        crop_start = int(height * (1 - crop_bottom_percent / 100))
-        cropped = image[crop_start:, :]
-        
-        logger.info(f"🔍 OCR на {crop_bottom_percent}% снизу (строки {crop_start}-{height})")
-        
-        # Конвертируем в RGB и кодируем в base64
-        image_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(image_rgb)
-        buffer = BytesIO()
-        pil_image.save(buffer, format='PNG')
-        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        # Запрос к Google Vision API
+        h, w = image_bgr.shape[:2]
+        crop_start = int(h * (1 - crop_bottom_percent / 100))
+        cropped = image_bgr[crop_start:, :]
+
+        logger.info(f"🔍 OCR на {crop_bottom_percent}% снизу (строки {crop_start}-{h})")
+
+        rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb)
+        buf = BytesIO()
+        pil_img.save(buf, format="PNG")
+        image_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
         url = f"https://vision.googleapis.com/v1/images:annotate?key={GOOGLE_VISION_API_KEY}"
         payload = {
             "requests": [{
@@ -114,640 +139,595 @@ def google_vision_ocr(image: np.ndarray, crop_bottom_percent: int = OCR_BOTTOM_P
                 "features": [{"type": "TEXT_DETECTION"}]
             }]
         }
-        
-        response = requests.post(url, json=payload, timeout=30)
-        result = response.json()
-        
-        if 'responses' not in result or not result['responses']:
+
+        resp = requests.post(url, json=payload, timeout=30)
+        data = resp.json()
+
+        if not data.get("responses"):
             logger.warning("⚠️ Нет результатов OCR")
-            return {'text': '', 'lines': []}
-        
-        response_data = result['responses'][0]
-        
-        if 'textAnnotations' not in response_data:
+            return {"text": "", "lines": []}
+
+        r0 = data["responses"][0]
+        ann = r0.get("textAnnotations")
+        if not ann:
             logger.warning("⚠️ Текст не обнаружен")
-            return {'text': '', 'lines': []}
-        
-        annotations = response_data['textAnnotations']
-        full_text = annotations[0]['description']
-        logger.info(f"📝 Распознан текст: {full_text}")
-        
-        lines = [line.strip() for line in full_text.split('\n') if line.strip()]
-        
-        return {'text': full_text, 'lines': lines}
-        
+            return {"text": "", "lines": []}
+
+        full_text = ann[0].get("description", "")
+        # Логи не любят \n внутри одной строки — поэтому lines отдельным списком
+        lines = [ln.strip() for ln in full_text.split("\n") if ln.strip()]
+
+        # Небольшая фильтрация типовых “служебных” строк, если они попали в OCR
+        if lines and lines[0].strip().lower() in {"wealth", "@neurostep.media"}:
+            lines = lines[1:]
+            full_text = "\n".join(lines)
+
+        logger.info(f"📝 OCR строки: {len(lines)}")
+        return {"text": full_text.strip(), "lines": lines}
+
     except Exception as e:
         logger.error(f"❌ Ошибка Google Vision OCR: {e}")
-        return {'text': '', 'lines': []}
+        return {"text": "", "lines": []}
 
 
-def openai_translate(text: str, context: str = "") -> str:
-    """
-    Перевод и адаптация текста через OpenAI GPT-4
-    Адаптирует для русскоязычной аудитории (не дословный перевод!)
-    """
+# ---------------------------------------------------------------------
+# Перевод (OpenAI)
+# ---------------------------------------------------------------------
+def openai_translate(text: str) -> str:
+    """Перевод и адаптация под СНГ (коротко, по смыслу, без лишнего)."""
     if not OPENAI_API_KEY or not text:
         logger.warning("⚠️ OPENAI_API_KEY не установлен или нет текста")
         return text
-    
+
     try:
         logger.info(f"🌐 Перевод: {text}")
-        
-        system_prompt = """Ты профессиональный переводчик для русскоязычной (СНГ) аудитории.
 
-Правила перевода:
-1. Названия брендов оставляй на английском (SpaceX, Tesla, Apple и т.д.)
-2. Адаптируй под естественный русский язык, не переводи дословно
-3. Используй короткие синонимы вместо длинных слов
-4. Сокращай валюту: "billion" → "млрд.", "million" → "млн."
-5. Делай текст живым и понятным для СНГ
-6. Возвращай ТОЛЬКО переведённый текст, без пояснений
+        system_prompt = (
+            "Ты профессиональный переводчик для русскоязычной (СНГ) аудитории.\n"
+            "Правила:\n"
+            "1) Бренды оставляй на английском (SpaceX, Tesla, Apple)\n"
+            "2) Не дословно — естественный русский\n"
+            "3) Короткие слова вместо длинных\n"
+            "4) billion→млрд., million→млн.\n"
+            "5) Верни только перевод, без пояснений\n"
+        )
 
-Примеры:
-"The Most Expensive Things Humans Have Ever Created" → "Самые дорогие творения человечества"
-"SpaceX Starlink Satellite Constellation" → "Спутниковая сеть SpaceX Starlink"
-"$10 billion" → "$10 млрд."
-"We Share Insights That Expand Your View" → "Делимся знаниями, расширяющими кругозор"
-"""
-        
-        response = openai.ChatCompletion.create(
+        # Оставляю gpt-4 как в вашем коде, чтобы не ломать окружение.
+        resp = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Переведи и адаптируй: {text}"}
+                {"role": "user", "content": f"Переведи и адаптируй: {text}"},
             ],
             temperature=0.7,
-            max_tokens=200
+            max_tokens=200,
         )
-        
-        translated = response.choices[0].message.content.strip()
+
+        translated = resp.choices[0].message.content.strip()
         logger.info(f"✅ Переведено: {translated}")
-        
         return translated
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка OpenAI перевода: {e}")
         return text
 
 
-def opencv_fallback(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+# ---------------------------------------------------------------------
+# OpenCV fallback (когда Replicate не работает)
+# ---------------------------------------------------------------------
+def opencv_fallback(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
     """
-    Запасной вариант через OpenCV (если FLUX не работает)
-    Использует 2 алгоритма: NS и TELEA
+    Запасной вариант без Replicate.
+    Логика: внутри маски размываем + лёгкий inpaint, чтобы не было “грязи”.
     """
-    if mask.dtype != np.uint8:
-        mask = mask.astype(np.uint8)
-    
-    result = cv2.inpaint(image, mask, inpaintRadius=7, flags=cv2.INPAINT_NS)
-    result = cv2.inpaint(result, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-    
-    logger.info("✅ OpenCV fallback inpainting")
+    if mask_u8.dtype != np.uint8:
+        mask_u8 = mask_u8.astype(np.uint8)
+
+    result = image_bgr.copy()
+
+    # Размываем только область маски (так меньше “мыла”, чем у полного inpaint на огромной маске)
+    blurred = cv2.GaussianBlur(image_bgr, (0, 0), sigmaX=OPENCV_BLUR_SIGMA, sigmaY=OPENCV_BLUR_SIGMA)
+    result[mask_u8 == 255] = blurred[mask_u8 == 255]
+
+    # Лёгкий inpaint поверх (радиус маленький, чтобы не “плыла” текстура)
+    try:
+        result = cv2.inpaint(result, mask_u8, inpaintRadius=OPENCV_INPAINT_RADIUS, flags=cv2.INPAINT_TELEA)
+    except Exception:
+        pass
+
+    logger.info("✅ OpenCV fallback (blur + light inpaint)")
     return result
 
 
-def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+# ---------------------------------------------------------------------
+# Replicate FLUX Fill (масочный inpaint)
+# ---------------------------------------------------------------------
+def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
     """
-    FLUX Kontext Pro - удаление содержимого ТОЛЬКО в области маски
-    ВАЖНО: FLUX работает ТОЛЬКО внутри маски, не трогает области вне маски!
-    
-    Параметры:
-    - num_inference_steps: увеличить для лучшего качества (FLUX_NUM_STEPS)
-    - go_fast: True = быстрее но хуже качество (FLUX_GO_FAST)
+    Inpaint через Replicate на модели FLUX Fill.
+    Гарантия: если FORCE_PRESERVE_OUTSIDE_MASK=True — вне маски возвращаем оригинал пиксель-в-пиксель.
     """
+    if mask_u8.dtype != np.uint8:
+        mask_u8 = mask_u8.astype(np.uint8)
+
     if not REPLICATE_API_TOKEN:
-        logger.warning("⚠️ REPLICATE_API_TOKEN не установлен, используем OpenCV")
-        return opencv_fallback(image, mask)
-    
+        logger.warning("⚠️ REPLICATE_API_TOKEN не установлен → fallback OpenCV")
+        return opencv_fallback(image_bgr, mask_u8)
+
     try:
-        import replicate
-        
-        logger.info("🚀 FLUX - удаление в области маски")
-        
-        # Конвертируем полное изображение в RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(image_rgb)
-        img_buffer = BytesIO()
-        pil_image.save(img_buffer, format='PNG')
-        img_buffer.seek(0)
-        
-        # Подготовка маски
-        pil_mask = Image.fromarray(mask)
-        mask_buffer = BytesIO()
-        pil_mask.save(mask_buffer, format='PNG')
-        mask_buffer.seek(0)
-        
-        # СТРОГИЙ промпт: работать ТОЛЬКО в маске
-        prompt = "Seamlessly remove all text, decorative lines and logos ONLY in the masked region. Restore natural background without blur. Keep everything outside the mask completely unchanged and untouched."
-        
-        logger.info("📤 Отправка в FLUX...")
-        
-        output = replicate.run(
+        import replicate  # локальный импорт, чтобы проект стартовал даже без replicate в окружении
+
+        # Диагностика: не логируем токен, только длину (помогает поймать пустую env)
+        if not REPLICATE_API_TOKEN or len(REPLICATE_API_TOKEN.strip()) < 10:
+            logger.warning(f"⚠️ REPLICATE_API_TOKEN выглядит пустым/коротким (len={len(REPLICATE_API_TOKEN.strip())}). Проверь Railway Variables именно этого сервиса.")
+
+        # Клиент с явным токеном (на Railway так надёжнее)
+        client = replicate.Client(api_token=REPLICATE_API_TOKEN)
+
+        logger.info(f"🚀 Replicate inpaint: {REPLICATE_MODEL}")
+
+        # Важный момент: модель сама не “понимает” вашу бизнес-логику.
+        # Мы просим удалить текст/линии/логотипы (внутри маски), восстановить фон, без размытия.
+        prompt = (
+            "Remove all text, decorative lines and logos in the masked region. "
+            "Reconstruct the natural background with sharp details (no blur, no smearing). "
+            "Do not change anything outside the mask."
+        )
+
+        # Изображение в PNG без потерь
+        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb)
+        img_buf = BytesIO()
+        pil_img.save(img_buf, format="PNG", compress_level=0)
+        img_buf.seek(0)
+
+        # Маска (белое = инпейнт, чёрное = сохранить)
+        pil_mask = Image.fromarray(mask_u8, mode="L")
+        mask_buf = BytesIO()
+        pil_mask.save(mask_buf, format="PNG", compress_level=0)
+        mask_buf.seek(0)
+
+        # ВАЖНО: у flux-fill-pro поля называются image/mask/steps/guidance (не input_image/num_inference_steps).
+        output = client.run(
             REPLICATE_MODEL,
             input={
                 "prompt": prompt,
-                "input_image": img_buffer,
-                "mask": mask_buffer,
-                "output_format": "png",
-                "go_fast": FLUX_GO_FAST,
-                "num_inference_steps": FLUX_NUM_STEPS
-            }
+                "image": img_buf,
+                "mask": mask_buf,
+                "steps": int(np.clip(FLUX_STEPS, 1, 50)),
+                "guidance": float(np.clip(FLUX_GUIDANCE, 2, 5)),
+                "prompt_upsampling": bool(FLUX_PROMPT_UPSAMPLING),
+                "output_format": FLUX_OUTPUT_FORMAT,
+            },
         )
-        
-        # Получение результата
-        if hasattr(output, 'read'):
+
+        # output обычно = URL (string)
+        if isinstance(output, str):
+            r = requests.get(output, timeout=REPLICATE_HTTP_TIMEOUT)
+            r.raise_for_status()
+            result_bytes = r.content
+        elif isinstance(output, list) and output:
+            r = requests.get(output[0], timeout=REPLICATE_HTTP_TIMEOUT)
+            r.raise_for_status()
+            result_bytes = r.content
+        elif hasattr(output, "read"):
             result_bytes = output.read()
-        elif isinstance(output, str):
-            response = requests.get(output, timeout=60)
-            result_bytes = response.content
-        elif isinstance(output, list) and len(output) > 0:
-            response = requests.get(output[0], timeout=60)
-            result_bytes = response.content
         else:
-            logger.error(f"❌ Неизвестный формат вывода: {type(output)}")
-            return opencv_fallback(image, mask)
-        
-        result_pil = Image.open(BytesIO(result_bytes))
-        result_rgb = np.array(result_pil.convert('RGB'))
-        result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-        
-        # Проверка и коррекция размера (если FLUX изменил размер)
-        if result_bgr.shape[:2] != image.shape[:2]:
-            logger.warning(f"⚠️ FLUX изменил размер, возвращаем обратно")
-            result_bgr = cv2.resize(result_bgr, (image.shape[1], image.shape[0]), 
-                                   interpolation=cv2.INTER_LANCZOS4)
-        
-        logger.info("✅ FLUX завершил работу!")
-        return result_bgr
-        
+            logger.error(f"❌ Неизвестный формат output от Replicate: {type(output)}")
+            return opencv_fallback(image_bgr, mask_u8)
+
+        out_pil = Image.open(BytesIO(result_bytes)).convert("RGB")
+        out_rgb = np.array(out_pil)
+        out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+
+        # Если модель вдруг изменила размер — возвращаем в исходный (иначе будет мыло/скейл)
+        if out_bgr.shape[:2] != image_bgr.shape[:2]:
+            logger.warning("⚠️ Replicate изменил размер → ресайз обратно (LANCZOS)")
+            out_bgr = cv2.resize(out_bgr, (image_bgr.shape[1], image_bgr.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+
+        # Жёстко сохраняем всё вне маски (решает вашу проблему с “логотипами выше маски”)
+        if FORCE_PRESERVE_OUTSIDE_MASK:
+            out_bgr = _composite_by_mask(image_bgr, out_bgr, mask_u8)
+
+        logger.info("✅ Replicate inpaint OK")
+        return out_bgr
+
     except Exception as e:
-        logger.error(f"❌ Ошибка FLUX: {e}")
-        return opencv_fallback(image, mask)
+        # Типовая причина у вас: 401 Invalid token → проверяйте переменную окружения REPLICATE_API_TOKEN в Railway.
+        logger.error(f"❌ Ошибка Replicate inpaint: {e}")
+        return opencv_fallback(image_bgr, mask_u8)
 
 
-def create_gradient_layer(width: int, height: int, start_percent: int = GRADIENT_START_PERCENT) -> Image.Image:
-    """
-    Создание градиентного слоя (RGBA)
-    
-    Градиент: 
-    - Низ (100%): непрозрачный черный (alpha=255)
-    - Середина (~50%): начинает интенсивно светлеть
-    - Верх (0%): полностью прозрачный (alpha=0)
-    
-    Настройка интенсивности: GRADIENT_INTENSITY_CURVE (больше = резче переход)
-    """
-    gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    
-    start_row = int(height * (1 - start_percent / 100))
-    gradient_height = height - start_row
-    
-    for y in range(height):
-        if y >= start_row:
-            # Инвертированный прогресс: 1.0 снизу → 0.0 сверху
-            progress = 1.0 - (y - start_row) / gradient_height
-            
-            # Применяем кривую для интенсивности (больше GRADIENT_INTENSITY_CURVE = резче)
-            alpha = int(255 * (progress ** GRADIENT_INTENSITY_CURVE))
-            
-            for x in range(width):
-                gradient.putpixel((x, y), (0, 0, 0, alpha))
-    
-    logger.info(f"✨ Градиент создан от строки {start_row} ({start_percent}%)")
-    return gradient
+def _composite_by_mask(original_bgr: np.ndarray, edited_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
+    """Смешивание по маске: берём edited только там, где mask=255; снаружи — оригинал."""
+    m = (mask_u8.astype(np.float32) / 255.0)[:, :, None]
+    out = (original_bgr.astype(np.float32) * (1.0 - m) + edited_bgr.astype(np.float32) * m)
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def calculate_adaptive_font_size(text: str, font_path: str, max_width: int, 
-                                  initial_size: int, min_size: int = FONT_SIZE_MIN) -> tuple:
+# Совместимость со старым именем (чтобы не менять остальной проект)
+def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """ALIАS: раньше было flux-kontext-pro, теперь правильный масочный inpaint = flux-fill-pro."""
+    return flux_inpaint(image, mask)
+
+
+# ---------------------------------------------------------------------
+# Градиент (быстро, без покадрового putpixel)
+# ---------------------------------------------------------------------
+def create_gradient_layer(width: int, height: int,
+                          cover_percent: int = GRADIENT_COVER_PERCENT) -> Image.Image:
     """
-    Автоподбор размера шрифта под ширину
-    Возвращает: (размер_шрифта, объект_шрифта, список_строк)
-    
-    Уменьшение min_size даст меньший минимальный шрифт
+    Создаёт RGBA-слой градиента для нижних cover_percent%.
+    Низ: alpha=255, нижняя половина градиента — 100% непрозрачная,
+    верхняя половина — плавный уход в 0.
     """
-    font_size = initial_size
-    
-    while font_size >= min_size:
+    cover_percent = int(np.clip(cover_percent, 1, 100))
+    start_row = int(height * (1 - cover_percent / 100))
+    grad_h = max(1, height - start_row)
+
+    y = np.arange(height, dtype=np.float32)
+    t = (y - start_row) / float(grad_h)   # 0 вверху градиента → 1 внизу
+    t = np.clip(t, 0.0, 1.0)
+
+    # Нижняя часть — 100% непрозрачная
+    solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
+    # Преобразуем к шкале “верхняя половина”
+    top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
+
+    alpha = np.where(
+        t >= solid_from,
+        255.0,
+        255.0 * (top_part ** float(GRADIENT_INTENSITY_CURVE)),
+    ).astype(np.uint8)
+
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+    rgba[:, :, 3] = alpha[:, None]  # только альфа, цвет = чёрный
+
+    logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.2f}")
+    return Image.fromarray(rgba, mode="RGBA")
+
+
+# ---------------------------------------------------------------------
+# Текст: подбор размера и отрисовка со “stretch”
+# ---------------------------------------------------------------------
+def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
+                                 initial_size: int, min_size: int = FONT_SIZE_MIN,
+                                 stretch_width: float = TEXT_STRETCH_WIDTH) -> tuple:
+    """
+    Автоподбор размера шрифта под ширину с учётом будущего растяжения по ширине.
+    Возвращает: (size, font, lines)
+    """
+    size = int(initial_size)
+
+    while size >= min_size:
         try:
-            font = ImageFont.truetype(font_path, font_size)
-            
-            # Разбиваем текст на строки с учетом ширины
+            font = ImageFont.truetype(font_path, size)
             words = text.split()
             lines = []
-            current_line = []
-            
-            for word in words:
-                test_line = ' '.join(current_line + [word])
-                bbox = font.getbbox(test_line)
-                width = bbox[2] - bbox[0]
-                
-                if width <= max_width:
-                    current_line.append(word)
+            cur = []
+
+            for w in words:
+                test = " ".join(cur + [w])
+                bbox = font.getbbox(test)
+                w0 = bbox[2] - bbox[0]
+                # ВАЖНО: учитываем будущий stretch по ширине
+                if int(w0 * stretch_width) <= max_width:
+                    cur.append(w)
                 else:
-                    if current_line:
-                        lines.append(' '.join(current_line))
-                        current_line = [word]
+                    if cur:
+                        lines.append(" ".join(cur))
+                        cur = [w]
                     else:
-                        lines.append(word)
-                        current_line = []
-            
-            if current_line:
-                lines.append(' '.join(current_line))
-            
-            # Проверяем что все строки влезают
-            fits = all(
-                font.getbbox(line)[2] - font.getbbox(line)[0] <= max_width
-                for line in lines
-            )
-            
+                        lines.append(w)
+                        cur = []
+
+            if cur:
+                lines.append(" ".join(cur))
+
+            # Проверяем, что каждая строка влезет после stretch
+            fits = True
+            for ln in lines:
+                bbox = font.getbbox(ln)
+                w0 = bbox[2] - bbox[0]
+                if int(w0 * stretch_width) > max_width:
+                    fits = False
+                    break
+
             if fits:
-                return font_size, font, lines
-            
+                return size, font, lines
+
         except Exception as e:
-            logger.error(f"Ошибка шрифта размера {font_size}: {e}")
-        
-        font_size -= 2
-    
-    # Крайний случай
+            logger.error(f"Ошибка шрифта {size}: {e}")
+
+        size -= 2
+
     font = ImageFont.truetype(font_path, min_size)
     return min_size, font, [text]
 
 
-def draw_text_with_stretch(draw: ImageDraw.Draw, x: int, y: int, 
-                           text: str, font: ImageFont.FreeTypeFont,
-                           fill_color: tuple, outline_color: tuple,
+def draw_text_with_stretch(base_image: Image.Image,
+                           x: int, y: int,
+                           text: str,
+                           font: ImageFont.FreeTypeFont,
+                           fill_color: tuple,
+                           outline_color: tuple,
                            stretch_width: float = TEXT_STRETCH_WIDTH,
                            stretch_height: float = TEXT_STRETCH_HEIGHT,
                            shadow_offset: int = TEXT_SHADOW_OFFSET) -> int:
     """
-    Отрисовка текста с растяжением, тенью и обводкой
-    
-    Растяжение:
-    - stretch_width: коэффициент ширины (1.10 = +10%)
-    - stretch_height: коэффициент высоты (1.25 = +25%)
-    
-    Возвращает: высоту нарисованного текста
+    Рисует текст с тенью+обводкой, затем растягивает общий “слой текста”.
+    Возвращает итоговую высоту нарисованного (после stretch).
     """
-    # Получаем размеры оригинального текста
     bbox = font.getbbox(text)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    
-    # Создаем временное изображение для текста
-    temp_width = int(text_width * 1.5)
-    temp_height = int(text_height * 2)
-    temp_image = Image.new('RGBA', (temp_width, temp_height), (0, 0, 0, 0))
-    temp_draw = ImageDraw.Draw(temp_image)
-    
-    # Рисуем текст в центре временного изображения
-    temp_x = (temp_width - text_width) // 2
-    temp_y = (temp_height - text_height) // 2
-    
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+
+    # Запас по размеру, чтобы не обрезать тень/обводку
+    pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
+    temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
+    temp_h = int(th * (stretch_height + 1.0)) + pad * 2
+
+    temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(temp)
+
+    # Рисуем ближе к левому/верхнему с паддингом
+    tx, ty = pad, pad
+
     # Тень
-    temp_draw.text((temp_x + shadow_offset, temp_y + shadow_offset), 
-                   text, font=font, fill=(0, 0, 0, 128))
-    
-    # Обводка (8 направлений, толщина контролируется TEXT_OUTLINE_THICKNESS)
-    for thickness in range(TEXT_OUTLINE_THICKNESS):
-        for dx, dy in [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]:
-            temp_draw.text((temp_x + dx*(thickness+1), temp_y + dy*(thickness+1)), 
-                          text, font=font, fill=outline_color)
-    
-    # Основной текст
-    temp_draw.text((temp_x, temp_y), text, font=font, fill=fill_color)
-    
-    # Вырезаем только область с текстом
-    text_bbox = temp_image.getbbox()
-    if text_bbox:
-        text_crop = temp_image.crop(text_bbox)
-        
-        # Применяем растяжение
-        stretched_width = int(text_crop.width * stretch_width)
-        stretched_height = int(text_crop.height * stretch_height)
-        stretched_text = text_crop.resize((stretched_width, stretched_height), 
-                                         Image.LANCZOS)
-        
-        # Вставляем растянутый текст
-        final_x = x - (stretched_width - text_width) // 2
-        final_y = y - (stretched_height - text_height) // 2
-        
-        # Получаем базовое изображение из draw
-        base_image = draw._image
-        base_image.paste(stretched_text, (final_x, final_y), stretched_text)
-        
-        return stretched_height
-    
-    return text_height
+    d.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=(0, 0, 0, 128))
+
+    # Обводка
+    for t in range(int(TEXT_OUTLINE_THICKNESS)):
+        r = t + 1
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+            d.text((tx + dx * r, ty + dy * r), text, font=font, fill=outline_color)
+
+    # Основной
+    d.text((tx, ty), text, font=font, fill=fill_color)
+
+    # Обрезаем по контенту
+    bb = temp.getbbox()
+    if not bb:
+        return th
+
+    crop = temp.crop(bb)
+
+    # Растягиваем
+    sw = max(1, int(crop.width * stretch_width))
+    sh = max(1, int(crop.height * stretch_height))
+    crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
+
+    # Позиция: x,y считаются как “верхний левый” примерно под центрирование строк
+    base_image.paste(crop, (x, y), crop)
+    return sh
 
 
+# ---------------------------------------------------------------------
+# РЕНДЕРЫ РЕЖИМОВ
+# ---------------------------------------------------------------------
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
-    """
-    Режим 1: Лого + 2 линии + Заголовок (UPPERCASE)
-    
-    Элементы:
-    - Логотип @neurostep.media по центру
-    - Две горизонтальные линии слева и справа от лого
-    - Заголовок снизу (бирюзовый, с растяжением)
-    """
-    draw = ImageDraw.Draw(image, 'RGBA')
+    """Режим 1: Лого + линии + заголовок (UPPERCASE)."""
+    image = image.convert("RGBA")
+    draw = ImageDraw.Draw(image, "RGBA")
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
-    
-    title_translated = title_translated.upper()
-    
-    # Подбор размера заголовка
-    title_size, title_font, title_lines = calculate_adaptive_font_size(
-        title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE1
+
+    title = (title_translated or "").upper()
+
+    _, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
-    
-    # Расчет высот заголовка
+
+    # высота заголовка (после stretch)
     title_heights = []
-    for line in title_lines:
-        bbox = title_font.getbbox(line)
-        title_heights.append(int((bbox[3] - bbox[1]) * TEXT_STRETCH_HEIGHT))
-    
-    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
-    
+    for ln in title_lines:
+        bb = title_font.getbbox(ln)
+        title_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
+    total_title_h = sum(title_heights) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+
     # Лого
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
-    logo_bbox = logo_font.getbbox(logo_text)
-    logo_width = logo_bbox[2] - logo_bbox[0]
-    logo_height = logo_bbox[3] - logo_bbox[1]
-    
-    # Общая высота композиции
-    total_height = logo_height + SPACING_LOGO_TO_TITLE + total_title_height
-    start_y = height - SPACING_BOTTOM - total_height
-    
-    # Отрисовка лого
-    logo_x = (width - logo_width) // 2
+    bb = logo_font.getbbox(logo_text)
+    logo_w = bb[2] - bb[0]
+    logo_h = bb[3] - bb[1]
+
+    total_h = logo_h + SPACING_LOGO_TO_TITLE + total_title_h
+    start_y = height - SPACING_BOTTOM - total_h
+
+    # Лого позиция
+    logo_x = (width - logo_w) // 2
     logo_y = start_y
-    
-    # Линии возле лого (горизонтальные, на уровне центра лого)
-    line_y = logo_y + logo_height // 2
+
+    # Линии по центру лого
+    line_y = logo_y + logo_h // 2
     line_left_start = logo_x - LOGO_LINE_LENGTH - 10
-    line_right_start = logo_x + logo_width + 10
-    
-    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)],
-              fill=COLOR_TURQUOISE, width=1)
-    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)],
-              fill=COLOR_TURQUOISE, width=1)
-    
-    # Текст лого (белый, без растяжения)
+    line_right_start = logo_x + logo_w + 10
+
+    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=1)
+    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=1)
+
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
-    
-    # Отрисовка заголовка (с растяжением)
-    title_y = start_y + logo_height + SPACING_LOGO_TO_TITLE
-    
-    for i, line in enumerate(title_lines):
-        line_bbox = title_font.getbbox(line)
-        line_width = line_bbox[2] - line_bbox[0]
-        line_x = (width - int(line_width * TEXT_STRETCH_WIDTH)) // 2
-        
-        drawn_height = draw_text_with_stretch(
-            draw, line_x, title_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE
-        )
-        
-        title_y += drawn_height + LINE_SPACING
-    
+
+    # Заголовок
+    cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
+    for ln in title_lines:
+        bb = title_font.getbbox(ln)
+        ln_w = bb[2] - bb[0]
+        x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
+        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += h_drawn + LINE_SPACING
+
     return image
 
 
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
-    """
-    Режим 2: Только заголовок (UPPERCASE)
-    
-    Элементы:
-    - Заголовок по центру (бирюзовый, с растяжением)
-    """
-    draw = ImageDraw.Draw(image, 'RGBA')
+    """Режим 2: только заголовок (UPPERCASE)."""
+    image = image.convert("RGBA")
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
-    
-    title_translated = title_translated.upper()
-    
-    # Подбор размера
-    title_size, title_font, title_lines = calculate_adaptive_font_size(
-        title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE2
+
+    title = (title_translated or "").upper()
+
+    _, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
-    
-    # Расчет высот
+
     title_heights = []
-    for line in title_lines:
-        bbox = title_font.getbbox(line)
-        title_heights.append(int((bbox[3] - bbox[1]) * TEXT_STRETCH_HEIGHT))
-    
-    total_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
-    start_y = height - SPACING_BOTTOM - total_height
-    
-    # Отрисовка заголовка
-    current_y = start_y
-    for i, line in enumerate(title_lines):
-        line_bbox = title_font.getbbox(line)
-        line_width = line_bbox[2] - line_bbox[0]
-        line_x = (width - int(line_width * TEXT_STRETCH_WIDTH)) // 2
-        
-        drawn_height = draw_text_with_stretch(
-            draw, line_x, current_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE
-        )
-        
-        current_y += drawn_height + LINE_SPACING
-    
+    for ln in title_lines:
+        bb = title_font.getbbox(ln)
+        title_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
+    total_h = sum(title_heights) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+
+    start_y = height - SPACING_BOTTOM - total_h
+
+    cur_y = start_y
+    for ln in title_lines:
+        bb = title_font.getbbox(ln)
+        ln_w = bb[2] - bb[0]
+        x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
+        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += h_drawn + LINE_SPACING
+
     return image
 
 
-def render_mode3_content(image: Image.Image, title_translated: str, 
-                         subtitle_translated: str) -> Image.Image:
-    """
-    Режим 3: Заголовок + Подзаголовок (ОБА UPPERCASE)
-    
-    Элементы:
-    - Заголовок (бирюзовый, с растяжением)
-    - Подзаголовок (белый, с растяжением, меньше размером)
-    """
-    draw = ImageDraw.Draw(image, 'RGBA')
+def render_mode3_content(image: Image.Image, title_translated: str, subtitle_translated: str) -> Image.Image:
+    """Режим 3: заголовок + подзаголовок (оба UPPERCASE)."""
+    image = image.convert("RGBA")
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
-    
-    title_translated = title_translated.upper()
-    subtitle_translated = subtitle_translated.upper()
-    
-    # Подбор размера заголовка
+
+    title = (title_translated or "").upper()
+    subtitle = (subtitle_translated or "").upper()
+
     title_size, title_font, title_lines = calculate_adaptive_font_size(
-        title_translated, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
     )
-    
-    # Подбор размера подзаголовка (пропорционально меньше)
-    subtitle_initial_size = int(title_size * 0.8)
-    subtitle_size, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
-        subtitle_translated, FONT_PATH, max_text_width, subtitle_initial_size
+
+    subtitle_initial = int(title_size * 0.80)
+    _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
+        subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
-    
-    # Расчет высот
+
     title_heights = []
-    for line in title_lines:
-        bbox = title_font.getbbox(line)
-        title_heights.append(int((bbox[3] - bbox[1]) * TEXT_STRETCH_HEIGHT))
-    
-    subtitle_heights = []
-    for line in subtitle_lines:
-        bbox = subtitle_font.getbbox(line)
-        subtitle_heights.append(int((bbox[3] - bbox[1]) * TEXT_STRETCH_HEIGHT))
-    
-    total_title_height = sum(title_heights) + (len(title_lines) - 1) * LINE_SPACING
-    total_subtitle_height = sum(subtitle_heights) + (len(subtitle_lines) - 1) * LINE_SPACING
-    
-    total_height = total_title_height + SPACING_TITLE_TO_SUBTITLE + total_subtitle_height
-    start_y = height - SPACING_BOTTOM - total_height
-    
-    # Отрисовка заголовка (бирюзовый)
-    current_y = start_y
-    for i, line in enumerate(title_lines):
-        line_bbox = title_font.getbbox(line)
-        line_width = line_bbox[2] - line_bbox[0]
-        line_x = (width - int(line_width * TEXT_STRETCH_WIDTH)) // 2
-        
-        drawn_height = draw_text_with_stretch(
-            draw, line_x, current_y, line, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE
-        )
-        
-        current_y += drawn_height + LINE_SPACING
-    
-    # Отрисовка подзаголовка (белый)
-    current_y += SPACING_TITLE_TO_SUBTITLE
-    
-    for i, line in enumerate(subtitle_lines):
-        line_bbox = subtitle_font.getbbox(line)
-        line_width = line_bbox[2] - line_bbox[0]
-        line_x = (width - int(line_width * TEXT_STRETCH_WIDTH)) // 2
-        
-        drawn_height = draw_text_with_stretch(
-            draw, line_x, current_y, line, subtitle_font,
-            COLOR_WHITE, COLOR_OUTLINE
-        )
-        
-        current_y += drawn_height + LINE_SPACING
-    
+    for ln in title_lines:
+        bb = title_font.getbbox(ln)
+        title_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
+    sub_heights = []
+    for ln in subtitle_lines:
+        bb = subtitle_font.getbbox(ln)
+        sub_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
+
+    total_title_h = sum(title_heights) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_sub_h = sum(sub_heights) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
+
+    total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
+    start_y = height - SPACING_BOTTOM - total_h
+
+    cur_y = start_y
+    for ln in title_lines:
+        bb = title_font.getbbox(ln)
+        ln_w = bb[2] - bb[0]
+        x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
+        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += h_drawn + LINE_SPACING
+
+    cur_y += SPACING_TITLE_TO_SUBTITLE
+
+    for ln in subtitle_lines:
+        bb = subtitle_font.getbbox(ln)
+        ln_w = bb[2] - bb[0]
+        x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
+        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        cur_y += h_drawn + LINE_SPACING
+
     return image
 
 
-def process_full_workflow(image: np.ndarray, mode: int) -> tuple:
+# ---------------------------------------------------------------------
+# ОСНОВНОЙ WORKFLOW
+# ---------------------------------------------------------------------
+def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     """
-    Полный workflow для режимов 1, 2, 3
-    
-    ЛОГИКА:
-    1. OCR (Google Vision) → извлекаем текст для перевода
-    2. МАСКА = нижние 35% (ВСЕГДА) → FLUX удаляет ВСЁ (текст, линии, лого)
-    3. Перевод текста (OpenAI GPT-4)
-    4. Наложение градиентного слоя поверх чистого изображения
-    5. Отрисовка текста поверх градиента
-    
+    Полный workflow для режимов 1,2,3.
+
     Режимы:
-    - mode=1: Лого + заголовок
-    - mode=2: Только заголовок
-    - mode=3: Заголовок + подзаголовок
-    
-    Возвращает: (результат_изображение, ocr_данные)
+    1 — лого + заголовок
+    2 — только заголовок
+    3 — заголовок + подзаголовок
     """
     logger.info("=" * 60)
     logger.info(f"🚀 ПОЛНЫЙ WORKFLOW - РЕЖИМ {mode}")
     logger.info("=" * 60)
-    
-    height, width = image.shape[:2]
-    
-    # ========================================
-    # ШАГ 1: OCR (для извлечения текста)
-    # ========================================
+
+    h, w = image_bgr.shape[:2]
+
+    # ШАГ 1: OCR
     logger.info("📋 ШАГ 1: OCR (Google Vision)")
-    ocr_data = google_vision_ocr(image, crop_bottom_percent=OCR_BOTTOM_PERCENT)
-    
-    if not ocr_data['text']:
+    ocr = google_vision_ocr(image_bgr, crop_bottom_percent=OCR_BOTTOM_PERCENT)
+    if not ocr["text"]:
         logger.warning("⚠️ Текст не обнаружен")
-        return image, ocr_data
-    
-    # ========================================
-    # ШАГ 2: Создание маски = нижние 35%
-    # Удаляет ВСЁ: текст, линии, лого, градиент
-    # ========================================
-    logger.info("📋 ШАГ 2: Создание маски (нижние 35%)")
-    mask = np.zeros((height, width), dtype=np.uint8)
-    mask_start = int(height * (1 - MASK_BOTTOM_PERCENT / 100))
+        return image_bgr, ocr
+
+    # ШАГ 2: Маска нижних N%
+    logger.info("📋 ШАГ 2: Маска (нижние %)")
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask_start = int(h * (1 - MASK_BOTTOM_PERCENT / 100))
     mask[mask_start:, :] = 255
-    
-    logger.info(f"📐 Маска: строки {mask_start}-{height} (нижние {MASK_BOTTOM_PERCENT}%)")
-    
-    # ========================================
-    # ШАГ 3: FLUX удаляет всё в маске
-    # ========================================
-    logger.info("📋 ШАГ 3: Удаление содержимого (FLUX Kontext Pro)")
-    clean_image = flux_kontext_inpaint(image, mask)
-    
-    # ========================================
-    # ШАГ 4: Перевод текста
-    # ========================================
-    logger.info("📋 ШАГ 4: Перевод (OpenAI GPT-4)")
-    
+    logger.info(f"📐 Маска: строки {mask_start}-{h} (нижние {MASK_BOTTOM_PERCENT}%)")
+
+    # ШАГ 3: Inpaint (Replicate → FLUX Fill)
+    logger.info("📋 ШАГ 3: Inpaint (Replicate FLUX Fill)")
+    clean_bgr = flux_inpaint(image_bgr, mask)
+
+    # ШАГ 4: Перевод
+    logger.info("📋 ШАГ 4: Перевод (OpenAI)")
+    title_translated, subtitle_translated = "", ""
+
     if mode == 3:
-        # Режим 3: заголовок + подзаголовок
-        lines = ocr_data['lines']
+        lines = ocr["lines"]
         if len(lines) >= 2:
-            title = ' '.join(lines[:-1])  # Все строки кроме последней
-            subtitle = lines[-1]          # Последняя строка
+            title = " ".join(lines[:-1])
+            subtitle = lines[-1]
         else:
-            title = ocr_data['text']
-            subtitle = ""
-        
+            title, subtitle = ocr["text"], ""
+
         title_translated = openai_translate(title)
         subtitle_translated = openai_translate(subtitle) if subtitle else ""
     else:
-        # Режимы 1 и 2: только заголовок
-        title_translated = openai_translate(ocr_data['text'])
-        subtitle_translated = ""
-    
-    # ========================================
-    # ШАГ 5: Конвертация в PIL и наложение градиента
-    # ========================================
-    logger.info("📋 ШАГ 5: Наложение градиентного слоя")
-    
-    clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
-    pil_image = Image.fromarray(clean_rgb).convert('RGBA')
-    
-    actual_width, actual_height = pil_image.size
-    logger.info(f"📐 Размер изображения: {actual_width}x{actual_height}")
-    
-    # Создание градиента как отдельного слоя
-    gradient_layer = create_gradient_layer(actual_width, actual_height, 
-                                          start_percent=GRADIENT_START_PERCENT)
-    
-    # Наложение градиента ПОВЕРХ изображения
-    pil_image = Image.alpha_composite(pil_image, gradient_layer)
-    
+        title_translated = openai_translate(ocr["text"])
+
+    # ШАГ 5: Градиент (точно на нижние N%)
+    logger.info("📋 ШАГ 5: Градиент")
+    clean_rgb = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2RGB)
+    pil = Image.fromarray(clean_rgb).convert("RGBA")
+
+    grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=GRADIENT_COVER_PERCENT)
+    pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
-    
-    # ========================================
-    # ШАГ 6: Отрисовка текста ПОВЕРХ градиента
-    # ========================================
-    logger.info(f"📋 ШАГ 6: Отрисовка текста (Режим {mode})")
-    
+
+    # ШАГ 6: Текст/лого по режимам
+    logger.info("📋 ШАГ 6: Рендер текста")
     if mode == 1:
-        pil_image = render_mode1_logo(pil_image, title_translated)
+        pil = render_mode1_logo(pil, title_translated)
     elif mode == 2:
-        pil_image = render_mode2_text(pil_image, title_translated)
+        pil = render_mode2_text(pil, title_translated)
     elif mode == 3:
-        pil_image = render_mode3_content(pil_image, title_translated, subtitle_translated)
-    
-    # Конвертация обратно в BGR для OpenCV
-    result_rgb = np.array(pil_image.convert('RGB'))
-    result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
-    
+        pil = render_mode3_content(pil, title_translated, subtitle_translated)
+    else:
+        logger.warning(f"⚠️ Неизвестный режим {mode} → пропускаю рендер")
+
+    out_rgb = np.array(pil.convert("RGB"))
+    out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+
     logger.info("=" * 60)
     logger.info("✅ WORKFLOW ЗАВЕРШЁН!")
     logger.info("=" * 60)
-    
-    return result_bgr, ocr_data
+    return out_bgr, ocr
 
 
+# Совместимость (в проекте может где-то вызываться старое имя)
 def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Функция совместимости (алиас для flux_kontext_inpaint)"""
-    return flux_kontext_inpaint(image, mask)
+    """Алиас для inpaint."""
+    return flux_inpaint(image, mask)
