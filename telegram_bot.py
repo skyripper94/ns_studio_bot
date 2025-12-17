@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 from dotenv import load_dotenv
 
 from lama_integration import flux_kontext_inpaint, process_full_workflow, MASK_BOTTOM_PERCENT
@@ -37,6 +38,11 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 user_states = {}
 
 
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Глобальный обработчик ошибок, чтобы polling не падал молча."""
+    logger.error("❌ Ошибка в обработчике", exc_info=context.error)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Команда /start - показывает меню выбора режима
@@ -55,7 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 **Бот для работы с изображениями**\n\n"
         "**🗑️ УДАЛИТЬ ТЕКСТ:**\n"
-        "Только удаление текста и градиента (FLUX Kontext Pro)\n\n"
+        "Только удаление текста и градиента (FLUX Fill Pro)\n\n"
         "**🔄 FULL WORKFLOW:**\n"
         "OCR → Удаление → Перевод → Нанесение текста\n"
         "3 режима: Лого / Текст / Контент\n\n"
@@ -187,7 +193,7 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if success:
                 await update.message.reply_photo(
                     photo=BytesIO(buffer.tobytes()),
-                    caption="✅ **Текст удалён!**\n🎨 FLUX Kontext Pro",
+                    caption="✅ **Текст удалён!**\n🎨 FLUX Fill Pro",
                     parse_mode='Markdown'
                 )
                 await status_msg.delete()
@@ -221,7 +227,7 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"✅ **Готово! (Режим {submode}: {mode_names[submode]})**\n\n"
                         f"📝 Распознано текста: {len(ocr_data.get('lines', []))} строк\n"
                         f"🌐 Переведено и адаптировано\n"
-                        f"🎨 FLUX Kontext Pro + OpenAI GPT-4"
+                        f"🎨 FLUX Fill Pro + OpenAI GPT-4"
                     ),
                     parse_mode='Markdown'
                 )
@@ -243,17 +249,19 @@ def main():
     logger.info("🚀 Запуск бота...")
     
     # Создание приложения
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    request = HTTPXRequest(connect_timeout=10.0, read_timeout=40.0, write_timeout=40.0, pool_timeout=40.0)
+    application = Application.builder().token(TELEGRAM_TOKEN).request(request).build()
     
     # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(mode_callback))
     application.add_handler(MessageHandler(filters.PHOTO, process_image))
+    application.add_error_handler(on_error)
     
     logger.info("✅ Бот запущен!")
     
     # Запуск polling
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, poll_interval=1.0, timeout=30)
 
 
 if __name__ == '__main__':
