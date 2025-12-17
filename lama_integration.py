@@ -44,7 +44,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 # flux-kontext-pro — это “edit”, без маски; для маски нужно flux-fill-pro.
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()  # поменять если надо
 FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 15..50 (больше = детальнее, медленнее; у модели max=50)
-FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "60"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "20"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
 FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")  # png = без потерь
 FLUX_PROMPT_UPSAMPLING = False  # True = творчески “додумает” промпт, обычно не надо для чистки
 REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))  # таймаут скачивания результата
@@ -74,19 +74,19 @@ LOGO_LINE_LENGTH = 300           # Длина линий возле лого
 LOGO_LINE_THICKNESS_PX = 2   # толщина полос возле логотипа (@neurostep.media)
 
 # ============== МАСКА / OCR ==============
-MASK_BOTTOM_PERCENT = 35         # Сколько % снизу чистим (маска)
-OCR_BOTTOM_PERCENT = 35          # OCR зона снизу (держать равной маске)
+MASK_BOTTOM_PERCENT = 30         # Сколько % снизу чистим (маска)
+OCR_BOTTOM_PERCENT = 30          # OCR зона снизу (держать равной маске)
 
 # ============== ГРАДИЕНТ ==============
 # Градиент покрывает ТОЛЬКО нижние MASK_BOTTOM_PERCENT, как вы описали
 GRADIENT_COVER_PERCENT = 35      # если хотите отдельно — меняйте; по умолчанию = 35%
 GRADIENT_SOLID_FRACTION = 0.50   # какая часть градиента снизу 100% непрозрачная (0.5 = нижняя половина)
 GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "130"))  # ↑ границу "чёрной основы" на N px (скрыть артефакты)
-GRADIENT_INTENSITY_CURVE = 1.4   # плавность в верхней половине (больше = резче переход)
+GRADIENT_INTENSITY_CURVE = 1.6   # плавность в верхней половине (больше = резче переход)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 1.6       # +25% по высоте
-TEXT_STRETCH_WIDTH = 1.2        # +10% по ширине
+TEXT_STRETCH_WIDTH = 1.25        # +10% по ширине
 
 # ============== ТЕНИ / ОБВОДКИ ==============
 TEXT_SHADOW_OFFSET = 2           # Смещение тени (больше = дальше тень)
