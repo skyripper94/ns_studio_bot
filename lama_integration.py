@@ -1,6 +1,23 @@
 # lama_integration.py
 
 """
+Полный workflow для обработки изображений с удалением текста и наложением русского текста
+"""
+
+# ============== ИМПОРТЫ ==============
+import os
+import logging
+import numpy as np
+import cv2
+import base64
+import requests
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+import openai
+
+logger = logging.getLogger(__name__)
+
+"""
 ==============================================
 НАСТРОЙКИ ДЛЯ БЫСТРОЙ ПРАВКИ
 ==============================================
@@ -57,19 +74,9 @@ FONT_PATH = '/app/fonts/WaffleSoft.otf'
 
 """
 ==============================================
+КОНЕЦ НАСТРОЕК
+==============================================
 """
-
-import os
-import logging
-import numpy as np
-import cv2
-import base64
-import requests
-from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
-import openai
-
-logger = logging.getLogger(__name__)
 
 REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro'
 openai.api_key = OPENAI_API_KEY
