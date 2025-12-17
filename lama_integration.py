@@ -205,12 +205,12 @@ def openai_translate(text: str) -> str:
 
         # Оставляю gpt-4 как в вашем коде, чтобы не ломать окружение.
         resp = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Переведи и адаптируй: {text}"},
             ],
-            temperature=0.7,
+            temperature=0.4,
             max_tokens=200,
         )
 
