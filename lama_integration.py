@@ -282,6 +282,8 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
             "Reconstruct the original background naturally with clean, sharp detail. "
             "Match lighting, texture, and perspective. No blur, no smears, no artifacts, no repeating patterns. "
             "Do not change anything outside the mask."
+            "Preserve the exact composition and realism. No new elements, no new text, no new logos, no invented details."
+            "Seamless blend at mask borders, sharp and artifact-free."
         )
 
         # Изображение в PNG без потерь
