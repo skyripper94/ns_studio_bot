@@ -53,7 +53,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("🗑️ УДАЛИТЬ ТЕКСТ", callback_data="mode_remove"),
-            InlineKeyboardButton("🔄 FULL WORKFLOW", callback_data="mode_full")
+            InlineKeyboardButton("🔄 ПОЛНЫЙ ЦИКЛ", callback_data="mode_full")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -133,10 +133,10 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ **Выбран режим {submode}: {mode_names[submode]}**\n\n"
             f"Теперь отправьте изображение для обработки.\n\n"
             f"Бот выполнит:\n"
-            f"1. OCR (Google Vision)\n"
-            f"2. Удаление текста (FLUX)\n"
-            f"3. Перевод (OpenAI)\n"
-            f"4. Нанесение русского текста",
+            f"1. OCR\n"
+            f"2. Удаление текста\n"
+            f"3. Перевод\n"
+            f"4. Нанесение текста",
             parse_mode='Markdown'
         )
 
@@ -227,7 +227,7 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"✅ **Готово! (Режим {submode}: {mode_names[submode]})**\n\n"
                         f"📝 Распознано текста: {len(ocr_data.get('lines', []))} строк\n"
                         f"🌐 Переведено и адаптировано\n"
-                        f"🎨 FLUX Fill Pro + OpenAI GPT-4"
+                        f"🎨 FLUX FILL PRO RDY"
                     ),
                     parse_mode='Markdown'
                 )
