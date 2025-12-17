@@ -44,7 +44,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 # flux-kontext-pro — это “edit”, без маски; для маски нужно flux-fill-pro.
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()  # поменять если надо
 FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 15..50 (больше = детальнее, медленнее; у модели max=50)
-FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "20"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "20"))  # 10..35 для inpaint (выше = больше артефактов)
 FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")  # png = без потерь
 FLUX_PROMPT_UPSAMPLING = False  # True = творчески “додумает” промпт, обычно не надо для чистки
 REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))  # таймаут скачивания результата
@@ -58,7 +58,7 @@ COLOR_WHITE = (255, 255, 255)    # Белый для подзаголовков/
 COLOR_OUTLINE = (60, 60, 60)     # Обводка текста (#3C3C3C)
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 56             # Заголовок в режиме 1 (лого)
+FONT_SIZE_MODE1 = 54             # Заголовок в режиме 1 (лого)
 FONT_SIZE_MODE2 = 52             # Заголовок в режиме 2 (только текст)
 FONT_SIZE_MODE3_TITLE = 52       # Заголовок в режиме 3
 FONT_SIZE_MODE3_SUBTITLE = 50    # Подзаголовок в режиме 3
@@ -66,26 +66,26 @@ FONT_SIZE_LOGO = 24              # Размер @neurostep.media
 FONT_SIZE_MIN = 44               # Минимальный размер при автоподборе (уменьшить = мельче)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = 105             # Отступ снизу до композиции
+SPACING_BOTTOM = 120             # Отступ снизу до композиции
 SPACING_LOGO_TO_TITLE = 6        # Между логотипом и заголовком
 SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
-LINE_SPACING = 8                # Между строками
+LINE_SPACING = 12                # Между строками
 LOGO_LINE_LENGTH = 300           # Длина линий возле лого
 LOGO_LINE_THICKNESS_PX = 2   # толщина полос возле логотипа (@neurostep.media)
 
 # ============== МАСКА / OCR ==============
-MASK_BOTTOM_PERCENT = 32         # Сколько % снизу чистим (маска)
-OCR_BOTTOM_PERCENT = 32          # OCR зона снизу (держать равной маске)
+MASK_BOTTOM_PERCENT = int(os.getenv("MASK_BOTTOM_PERCENT", "32"))  # % снизу чистим (маска)
+OCR_BOTTOM_PERCENT = int(os.getenv("OCR_BOTTOM_PERCENT", str(MASK_BOTTOM_PERCENT)))  # OCR-зона снизу (по умолчанию = маске)
 
 # ============== ГРАДИЕНТ ==============
 # Градиент покрывает ТОЛЬКО нижние MASK_BOTTOM_PERCENT, как вы описали
-GRADIENT_COVER_PERCENT = 40      # если хотите отдельно — меняйте; по умолчанию = 40%
+GRADIENT_COVER_PERCENT = int(os.getenv("GRADIENT_COVER_PERCENT", str(MASK_BOTTOM_PERCENT)))  # по умолчанию = маске
 GRADIENT_SOLID_FRACTION = 0.50   # какая часть градиента снизу 100% непрозрачная (0.5 = нижняя половина)
-GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "130"))  # ↑ границу "чёрной основы" на N px (скрыть артефакты)
+GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "120"))  # ↑ границу "чёрной основы" на N px (скрыть артефакты)
 GRADIENT_INTENSITY_CURVE = 1.6   # плавность в верхней половине (больше = резче переход)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.6       # +25% по высоте
+TEXT_STRETCH_HEIGHT = 1.25       # +25% по высоте
 TEXT_STRETCH_WIDTH = 1.15        # +10% по ширине
 
 # ============== ТЕНИ / ОБВОДКИ ==============
@@ -176,60 +176,53 @@ def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTT
 # Перевод (OpenAI)
 # ---------------------------------------------------------------------
 def openai_translate(text: str) -> str:
-    """Перевод и адаптация под СНГ (коротко, по смыслу, без лишнего)."""
+    """Редактор заголовков для обложек (СНГ), формат: 3 строки."""
     if not OPENAI_API_KEY or not text:
         logger.warning("⚠️ OPENAI_API_KEY не установлен или нет текста")
         return text
 
     try:
-        logger.info(f"🌐 Перевод: {text}")
+        logger.info(f"🌐 Заголовок (LLM): {text}")
 
-        system_prompt = (
-            system_prompt = """Ты редактор заголовков для обложек (СНГ) в стиле Wealth: спокойно, уверенно, без кликбейта.
-            "Задача: не перевод, а короткая сильная формулировка, которая хорошо смотрится крупным КАПСОМ в 3 строки."
-            
-            "Правила:"
-            "1) Верни РОВНО 3 строки, разделяй только символом \\n."
-            "2) Длина каждой строки: 10–18 символов (без пробелов) — если длиннее, перефразируй."
-            "3) Избегай длинных слов (желательно до 12–13 букв). Заменяй на короткие синонимы."
-            "4) billion→МЛРД., million→МЛН. (в капсе)."
-            "5) Никаких “ВАС/ТЕБЯ”, никаких “заставит/шок/рот/не поверите”."
-            "6) Если вход уже на русском — улучши и сократи, не “переводи”."
-            "7) Верни только заголовок, без кавычек и пояснений."
-            
-            "Пример:"
-            "The Most Expensive Things Humans Have Ever Created" → "Самые дорогие творения человечества"
-            "SpaceX Starlink Satellite Constellation" → "Спутниковая сеть SpaceX Starlink"
-            "$10 billion" → "$10 млрд."
-            "We Share Insights That Expand Your View" → "Делимся знаниями, расширяющими кругозор"
-            "Aircraft" → "Истребитель"
-            "Northrop B-2 Spirit" → "Стелс-бомбардировщик Northrop B-2 Spirit"
-            """    
-        )
+        system_prompt = """Ты редактор заголовков для обложек (СНГ) в стиле Wealth: спокойно, уверенно, без кликбейта.
+Задача: сделать короткий заголовок, который хорошо выглядит крупным КАПСОМ в 3 строки.
 
-        # Оставляю gpt-4 как в вашем коде, чтобы не ломать окружение.
+Правила:
+1) Верни РОВНО 3 строки. Разделитель строк: \n.
+2) Каждая строка короткая. Если не влезает — перефразируй.
+3) Избегай длинных слов (желательно до 12–13 букв). Заменяй на короткие синонимы.
+4) billion→МЛРД., million→МЛН. (в капсе).
+5) Никаких обращений к зрителю: никаких "ВАС/ТЕБЯ", никаких "заставит", "шок", "рот", "не поверите".
+6) Если вход уже на русском — улучши и сократи, не перевод.
+7) Верни только заголовок, без кавычек, без пояснений, без точки в конце.
+"""
+
         resp = openai.ChatCompletion.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Переведи и сделай короткий заголовок для обложки: {text}"},
+                {"role": "user", "content": f"Заголовок для обложки: {text}"},
             ],
-            temperature=0.4,
-            max_tokens=200,
+            temperature=0.2,
+            max_tokens=80,
         )
 
-        translated = resp.choices[0].message.content.strip()
-        logger.info(f"✅ Переведено: {translated}")
-        return translated
+        out = (resp.choices[0].message.content or "").strip()
+
+        # Нормализация: убрать пустые строки/пробелы, сохранить переносы
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        if len(lines) >= 3:
+            out = "\n".join(lines[:3])
+        else:
+            out = "\n".join(lines) if lines else text
+
+        logger.info(f"✅ Заголовок: {out}")
+        return out
 
     except Exception as e:
-        logger.error(f"❌ Ошибка OpenAI перевода: {e}")
+        logger.error(f"❌ Ошибка OpenAI translate: {e}")
         return text
 
-
-# ---------------------------------------------------------------------
-# OpenCV fallback (когда Replicate не работает)
-# ---------------------------------------------------------------------
 def opencv_fallback(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
     """
     Запасной вариант без Replicate.
@@ -284,8 +277,6 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
             "Reconstruct the original background naturally with clean, sharp detail. "
             "Match lighting, texture, and perspective. No blur, no smears, no artifacts, no repeating patterns. "
             "Do not change anything outside the mask."
-            "Preserve the exact composition and realism. No new elements, no new text, no new logos, no invented details."
-            "Seamless blend at mask borders, sharp and artifact-free."
         )
 
         # Изображение в PNG без потерь
@@ -309,7 +300,7 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
                 "image": img_buf,
                 "mask": mask_buf,
                 "steps": int(np.clip(FLUX_STEPS, 15, 50)),
-                "guidance": float(np.clip(FLUX_GUIDANCE, 1.5, 100)),
+                "guidance": float(np.clip(FLUX_GUIDANCE, 1.5, 35)),
                 "prompt_upsampling": bool(FLUX_PROMPT_UPSAMPLING),
                 "output_format": FLUX_OUTPUT_FORMAT,
             },
@@ -408,51 +399,82 @@ def create_gradient_layer(width: int, height: int,
 # ---------------------------------------------------------------------
 # Текст: подбор размера и отрисовка со “stretch”
 # ---------------------------------------------------------------------
-def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
-                                 initial_size: int, min_size: int = FONT_SIZE_MIN,
+def split_manual_lines(text: str) -> list[str]:
+    """Сохраняет ручные переносы строк. Пустые строки убирает."""
+    if not text:
+        return []
+    return [ln.strip() for ln in str(text).splitlines() if ln.strip()]
+
+
+def compute_fixed_line_height(font: ImageFont.FreeTypeFont,
+                              stretch_height: float = TEXT_STRETCH_HEIGHT,
+                              extra_pad: int = 0) -> int:
+    """Фиксированная высота строки по метрикам шрифта (стабильный межстрочник)."""
+    ascent, descent = font.getmetrics()
+    base = int((ascent + descent) * float(stretch_height))
+    return max(1, base + int(extra_pad))
+
+
+
+def calculate_adaptive_font_size(text: str,
+                                 font_path: str,
+                                 max_width: int,
+                                 initial_size: int,
+                                 min_size: int = FONT_SIZE_MIN,
                                  stretch_width: float = TEXT_STRETCH_WIDTH) -> tuple:
     """
     Автоподбор размера шрифта под ширину с учётом будущего растяжения по ширине.
+    ВАЖНО: если в тексте есть \n — считаем строки ручными и не делаем автоперенос по словам.
     Возвращает: (size, font, lines)
     """
     size = int(initial_size)
+    text = text or ""
+
+    manual_lines = split_manual_lines(text)
+    has_manual = ("\n" in text) and (len(manual_lines) >= 2)
 
     while size >= min_size:
         try:
             font = ImageFont.truetype(font_path, size)
-            words = text.split()
-            lines = []
-            cur = []
 
-            for w in words:
-                test = " ".join(cur + [w])
-                bbox = font.getbbox(test)
-                w0 = bbox[2] - bbox[0]
-                # ВАЖНО: учитываем будущий stretch по ширине
-                if int(w0 * stretch_width) <= max_width:
-                    cur.append(w)
-                else:
-                    if cur:
+            # 1) Ручные строки: единый размер шрифта под самую длинную строку
+            if has_manual:
+                max_line_w = 0
+                for ln in manual_lines:
+                    bb = font.getbbox(ln)
+                    ln_w = max(0, bb[2] - bb[0])
+                    max_line_w = max(max_line_w, int(ln_w * stretch_width))
+                if max_line_w <= max_width:
+                    return size, font, manual_lines
+
+            # 2) Автоперенос: только если нет ручных переносов
+            else:
+                words = text.split()
+                lines = []
+                cur = []
+
+                for w in words:
+                    cand = " ".join(cur + [w])
+                    bb = font.getbbox(cand)
+                    cand_w = int((bb[2] - bb[0]) * stretch_width)
+                    if cand_w <= max_width or not cur:
+                        cur.append(w)
+                    else:
                         lines.append(" ".join(cur))
                         cur = [w]
-                    else:
-                        lines.append(w)
-                        cur = []
+                if cur:
+                    lines.append(" ".join(cur))
 
-            if cur:
-                lines.append(" ".join(cur))
-
-            # Проверяем, что каждая строка влезет после stretch
-            fits = True
-            for ln in lines:
-                bbox = font.getbbox(ln)
-                w0 = bbox[2] - bbox[0]
-                if int(w0 * stretch_width) > max_width:
-                    fits = False
-                    break
-
-            if fits:
-                return size, font, lines
+                # Каждая строка должна влезать
+                ok = True
+                for ln in lines:
+                    bb = font.getbbox(ln)
+                    ln_w = int((bb[2] - bb[0]) * stretch_width)
+                    if ln_w > max_width:
+                        ok = False
+                        break
+                if ok:
+                    return size, font, lines
 
         except Exception as e:
             logger.error(f"Ошибка шрифта {size}: {e}")
@@ -460,8 +482,8 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
         size -= 2
 
     font = ImageFont.truetype(font_path, min_size)
-    return min_size, font, [text]
-
+    fallback_lines = split_manual_lines(text) or [text]
+    return min_size, font, fallback_lines
 
 def draw_text_with_stretch(base_image: Image.Image,
                            x: int, y: int,
@@ -524,7 +546,7 @@ def draw_text_with_stretch(base_image: Image.Image,
 # РЕНДЕРЫ РЕЖИМОВ
 # ---------------------------------------------------------------------
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
-    """Режим 1: Лого + линии + заголовок (UPPERCASE)."""
+    """Режим 1: Лого + линии + заголовок (UPPERCASE). Уважает ручные переносы (\n)."""
     image = image.convert("RGBA")
     draw = ImageDraw.Draw(image, "RGBA")
     width, height = image.size
@@ -536,12 +558,11 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # высота заголовка (после stretch)
-    title_heights = []
-    for ln in title_lines:
-        bb = title_font.getbbox(ln)
-        title_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
-    total_title_h = sum(title_heights) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    # Фиксированный межстрочный (не пляшет от букв/кропа)
+    title_line_h = compute_fixed_line_height(
+        title_font, TEXT_STRETCH_HEIGHT, extra_pad=(TEXT_SHADOW_OFFSET * 2 + 6)
+    )
+    total_title_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     # Лого
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
@@ -557,13 +578,15 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_x = (width - logo_w) // 2
     logo_y = start_y
 
-    # Линии по центру лого
+    # Линии возле лого
     line_y = logo_y + logo_h // 2
-    line_left_start = logo_x - LOGO_LINE_LENGTH - 10
-    line_right_start = logo_x + logo_w + 10
-
-    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
-    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
+    half_line = LOGO_LINE_LENGTH // 2
+    left_x1 = logo_x - 20 - half_line
+    left_x2 = logo_x - 20
+    right_x1 = logo_x + logo_w + 20
+    right_x2 = right_x1 + half_line
+    draw.line((left_x1, line_y, left_x2, line_y), fill=COLOR_WHITE, width=LOGO_LINE_THICKNESS_PX)
+    draw.line((right_x1, line_y, right_x2, line_y), fill=COLOR_WHITE, width=LOGO_LINE_THICKNESS_PX)
 
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
@@ -573,14 +596,13 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         bb = title_font.getbbox(ln)
         ln_w = bb[2] - bb[0]
         x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
-        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += h_drawn + LINE_SPACING
+        _ = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += title_line_h + LINE_SPACING
 
     return image
 
-
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
-    """Режим 2: только заголовок (UPPERCASE)."""
+    """Режим 2: только заголовок (UPPERCASE). Уважает ручные переносы (\n)."""
     image = image.convert("RGBA")
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
@@ -591,11 +613,8 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    title_heights = []
-    for ln in title_lines:
-        bb = title_font.getbbox(ln)
-        title_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
-    total_h = sum(title_heights) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    line_h = compute_fixed_line_height(title_font, TEXT_STRETCH_HEIGHT, extra_pad=(TEXT_SHADOW_OFFSET * 2 + 6))
+    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     start_y = height - SPACING_BOTTOM - total_h
 
@@ -604,14 +623,13 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         bb = title_font.getbbox(ln)
         ln_w = bb[2] - bb[0]
         x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
-        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += h_drawn + LINE_SPACING
+        _ = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += line_h + LINE_SPACING
 
     return image
 
-
 def render_mode3_content(image: Image.Image, title_translated: str, subtitle_translated: str) -> Image.Image:
-    """Режим 3: заголовок + подзаголовок (оба UPPERCASE)."""
+    """Режим 3: заголовок + подзаголовок (оба UPPERCASE). Уважает ручные переносы (\n)."""
     image = image.convert("RGBA")
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
@@ -628,19 +646,13 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    title_heights = []
-    for ln in title_lines:
-        bb = title_font.getbbox(ln)
-        title_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
-    sub_heights = []
-    for ln in subtitle_lines:
-        bb = subtitle_font.getbbox(ln)
-        sub_heights.append(int((bb[3] - bb[1]) * TEXT_STRETCH_HEIGHT))
+    title_line_h = compute_fixed_line_height(title_font, TEXT_STRETCH_HEIGHT, extra_pad=(TEXT_SHADOW_OFFSET * 2 + 6))
+    subtitle_line_h = compute_fixed_line_height(subtitle_font, TEXT_STRETCH_HEIGHT, extra_pad=(TEXT_SHADOW_OFFSET * 2 + 6))
 
-    total_title_h = sum(title_heights) + max(0, (len(title_lines) - 1) * LINE_SPACING)
-    total_sub_h = sum(sub_heights) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
+    title_block_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    subtitle_block_h = subtitle_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
 
-    total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
+    total_h = title_block_h + SPACING_TITLE_TO_SUBTITLE + subtitle_block_h
     start_y = height - SPACING_BOTTOM - total_h
 
     cur_y = start_y
@@ -648,8 +660,8 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         bb = title_font.getbbox(ln)
         ln_w = bb[2] - bb[0]
         x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
-        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += h_drawn + LINE_SPACING
+        _ = draw_text_with_stretch(image, x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += title_line_h + LINE_SPACING
 
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
@@ -657,15 +669,11 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         bb = subtitle_font.getbbox(ln)
         ln_w = bb[2] - bb[0]
         x = (width - int(ln_w * TEXT_STRETCH_WIDTH)) // 2
-        h_drawn = draw_text_with_stretch(image, x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
-        cur_y += h_drawn + LINE_SPACING
+        _ = draw_text_with_stretch(image, x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        cur_y += subtitle_line_h + LINE_SPACING
 
     return image
 
-
-# ---------------------------------------------------------------------
-# ОСНОВНОЙ WORKFLOW
-# ---------------------------------------------------------------------
 def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     """
     Полный workflow для режимов 1,2,3.
