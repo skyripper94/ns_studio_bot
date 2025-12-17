@@ -43,8 +43,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 # МОДЕЛЬ ДЛЯ МАСКОВОГО INPAINT:
 # flux-kontext-pro — это “edit”, без маски; для маски нужно flux-fill-pro.
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()  # поменять если надо
-FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 1..50 (больше = детальнее, медленнее)
-FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "3"))  # 2..5 (больше = сильнее следует промпту)
+FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 15..50 (больше = детальнее, медленнее; у модели max=50)
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "60"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
 FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")  # png = без потерь
 FLUX_PROMPT_UPSAMPLING = False  # True = творчески “додумает” промпт, обычно не надо для чистки
 REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))  # таймаут скачивания результата
@@ -66,10 +66,10 @@ FONT_SIZE_LOGO = 22              # Размер @neurostep.media
 FONT_SIZE_MIN = 34               # Минимальный размер при автоподборе (уменьшить = мельче)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = 120             # Отступ снизу до композиции
+SPACING_BOTTOM = 140             # Отступ снизу до композиции
 SPACING_LOGO_TO_TITLE = 4        # Между логотипом и заголовком
 SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
-LINE_SPACING = 24                # Между строками
+LINE_SPACING = 18                # Между строками
 LOGO_LINE_LENGTH = 300           # Длина линий возле лого
 
 # ============== МАСКА / OCR ==============
@@ -80,6 +80,7 @@ OCR_BOTTOM_PERCENT = 35          # OCR зона снизу (держать ра�
 # Градиент покрывает ТОЛЬКО нижние MASK_BOTTOM_PERCENT, как вы описали
 GRADIENT_COVER_PERCENT = 35      # если хотите отдельно — меняйте; по умолчанию = 35%
 GRADIENT_SOLID_FRACTION = 0.50   # какая часть градиента снизу 100% непрозрачная (0.5 = нижняя половина)
+GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "120"))  # ↑ границу "чёрной основы" на N px (скрыть артефакты)
 GRADIENT_INTENSITY_CURVE = 1.2   # плавность в верхней половине (больше = резче переход)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
@@ -257,10 +258,6 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
     try:
         import replicate  # локальный импорт, чтобы проект стартовал даже без replicate в окружении
 
-        # Диагностика: не логируем токен, только длину (помогает поймать пустую env)
-        if not REPLICATE_API_TOKEN or len(REPLICATE_API_TOKEN.strip()) < 10:
-            logger.warning(f"⚠️ REPLICATE_API_TOKEN выглядит пустым/коротким (len={len(REPLICATE_API_TOKEN.strip())}). Проверь Railway Variables именно этого сервиса.")
-
         # Клиент с явным токеном (на Railway так надёжнее)
         client = replicate.Client(api_token=REPLICATE_API_TOKEN)
 
@@ -270,7 +267,8 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         # Мы просим удалить текст/линии/логотипы (внутри маски), восстановить фон, без размытия.
         prompt = (
             "Remove all text, decorative lines and logos in the masked region. "
-            "Reconstruct the natural background with sharp details (no blur, no smearing). "
+            "Reconstruct the original background naturally with clean, sharp detail. "
+            "Match lighting, texture, and perspective. No blur, no smears, no artifacts, no repeating patterns. "
             "Do not change anything outside the mask."
         )
 
@@ -294,8 +292,8 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
                 "prompt": prompt,
                 "image": img_buf,
                 "mask": mask_buf,
-                "steps": int(np.clip(FLUX_STEPS, 1, 50)),
-                "guidance": float(np.clip(FLUX_GUIDANCE, 2, 5)),
+                "steps": int(np.clip(FLUX_STEPS, 15, 50)),
+                "guidance": float(np.clip(FLUX_GUIDANCE, 1.5, 100)),
                 "prompt_upsampling": bool(FLUX_PROMPT_UPSAMPLING),
                 "output_format": FLUX_OUTPUT_FORMAT,
             },
@@ -370,10 +368,14 @@ def create_gradient_layer(width: int, height: int,
     t = np.clip(t, 0.0, 1.0)
 
     # Нижняя часть — 100% непрозрачная
-    solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
-    # Преобразуем к шкале “верхняя половина”
-    top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
+    # Базовая граница (по доле): на какой высоте начинается 100% чёрный слой.
+    base_solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
+    # Поднимаем границу вверх на фиксированное кол-во пикселей (чтобы скрыть артефакты под градиентом).
+    raise_t = float(np.clip(GRADIENT_SOLID_RAISE_PX, 0, height)) / float(grad_h)
+    solid_from = float(np.clip(base_solid_from - raise_t, 0.0, 1.0))
 
+    # Преобразуем к шкале “верхняя часть до границы”
+    top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
     alpha = np.where(
         t >= solid_from,
         255.0,
@@ -383,7 +385,7 @@ def create_gradient_layer(width: int, height: int,
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha[:, None]  # только альфа, цвет = чёрный
 
-    logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.2f}")
+    logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.3f}, raise_px={GRADIENT_SOLID_RAISE_PX}")
     return Image.fromarray(rgba, mode="RGBA")
 
 
