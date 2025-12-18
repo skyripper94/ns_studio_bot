@@ -77,7 +77,7 @@ TEXT_SHADOW_OFFSET = 1
 TEXT_OUTLINE_THICKNESS = 1
 
 # ============== БЛОК ТЕКСТА ==============
-TEXT_WIDTH_PERCENT = 0.50
+TEXT_WIDTH_PERCENT = 0.90
 
 # ============== OPENCV FALLBACK ==============
 OPENCV_BLUR_SIGMA = 5
