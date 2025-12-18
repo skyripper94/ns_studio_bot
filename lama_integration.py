@@ -69,8 +69,8 @@ FONT_SIZE_MIN = 44               # Минимальный размер при а
 SPACING_BOTTOM = 40             # Отступ снизу до композиции
 SPACING_LOGO_TO_TITLE = 6        # Между логотипом и заголовком
 SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
-LINE_SPACING = 0                # Между строками
-LOGO_LINE_LENGTH = 300           # Длина линий возле лого
+LINE_SPACING = -16                # Между строками
+LOGO_LINE_LENGTH = 320           # Длина линий возле лого
 LOGO_LINE_THICKNESS_PX = 3   # толщина полос возле логотипа (@neurostep.media)
 
 # ============== МАСКА / OCR ==============
