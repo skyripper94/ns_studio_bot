@@ -52,9 +52,9 @@ FONT_SIZE_MIN = 44
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
 SPACING_BOTTOM = 40
-SPACING_LOGO_TO_TITLE = 6
+SPACING_LOGO_TO_TITLE = 8
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = -20
+LINE_SPACING = -36
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -69,12 +69,12 @@ GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "125"))
 GRADIENT_INTENSITY_CURVE = 2.6
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.5
+TEXT_STRETCH_HEIGHT = 1.6
 TEXT_STRETCH_WIDTH = 1.15
 
 # ============== ТЕНИ / ОБВОДКИ ==============
-TEXT_SHADOW_OFFSET = 1
-TEXT_OUTLINE_THICKNESS = 1
+TEXT_SHADOW_OFFSET = 3
+TEXT_OUTLINE_THICKNESS = 2
 
 # ============== БЛОК ТЕКСТА ==============
 TEXT_WIDTH_PERCENT = 0.90
