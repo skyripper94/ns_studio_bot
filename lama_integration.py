@@ -157,34 +157,29 @@ def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTT
 # Чистка перевода (перед OpenAI)
 # ---------------------------------------------------------------------
 def _preclean_ocr_for_cover(text: str) -> str:
-    """Лёгкая нормализация OCR-текста под обложку."""
     if not text:
         return text
-
     t = str(text)
-
+    
+    # Технический мусор
     t = re.sub(r"@\S+", "", t)
     t = re.sub(r"(https?://\S+|www\.\S+)", "", t)
     t = re.sub(r"\b\d{1,2}:\d{2}\b", "", t)
     t = re.sub(r"[""«»\"']", "", t)
     t = re.sub(r"[|•·]+", " ", t)
     t = re.sub(r"\s*[-–—]{2,}\s*", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-
-    t = re.sub(r"(?i)\bwill\s+leave\s+you\s+speechless\b", "БЕЗ СЛОВ", t)
-    t = re.sub(r"(?i)\bspeechless\b", "БЕЗ СЛОВ", t)
-
-    t = re.sub(r"(?i)\bmulti[-\s]?billion\b", "МУЛЬТИ-МЛРД.", t)
-    t = re.sub(r"(?i)\bmulti[-\s]?million\b", "МУЛЬТИ-МЛН.", t)
-
-    t = re.sub(r"(?i)\bbillion\b", "млрд.", t)
-    t = re.sub(r"(?i)\bmillion\b", "млн.", t)
-
-    t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*billion\b", r"$\1 млрд.", t)
-    t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*million\b", r"$\1 млн.", t)
-
-    t = re.sub(r"(?i)\b([A-Z]{2,})S\b", r"\1", t)
-
+    
+    # Нормализация валюты/чисел (ПОРЯДОК ВАЖЕН)
+    t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*billion", r"$\1 млрд.", t)
+    t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*million", r"$\1 млн.", t)
+    t = re.sub(r"(?i)\bmulti[-\s]?billion", "мульти-млрд.", t)
+    t = re.sub(r"(?i)\bmulti[-\s]?million", "мульти-млн.", t)
+    t = re.sub(r"(?i)\bbillion", "млрд.", t)
+    t = re.sub(r"(?i)\bmillion", "млн.", t)
+    
+    # Убрать лишние 'S'
+    t = re.sub(r"\b([A-Z]{2,})S\b", r"\1", t)
+    
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
