@@ -30,7 +30,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 # ============== REPLICATE / FLUX (INPAINT) ==============
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()
 FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))
-FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "25"))
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "3.5"))
 FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")
 FLUX_PROMPT_UPSAMPLING = False
 REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))
@@ -297,10 +297,11 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         logger.info(f"🚀 Replicate inpaint: {REPLICATE_MODEL}")
 
         prompt = (
-            "Remove all text, decorative lines and logos in the masked region. "
-            "Reconstruct the original background naturally with clean, sharp detail. "
-            "Match lighting, texture, and perspective. No blur, no smears, no artifacts, no repeating patterns. "
-            "Do not change anything outside the mask. "
+            "Perfectly restore and extend the existing background texture and pattern. "
+            "Match colors, lighting, and perspective exactly. "
+            "Remove only text and decorative elements. "
+            "Keep all original background details unchanged. "
+            "No creativity, only precise restoration."
         )
 
         rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
@@ -402,7 +403,7 @@ def create_gradient_layer(width: int, height: int,
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha[:, None]
 
-    logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.3f}, raise_px={GRADIENT_SOLID_RAISE_PX}")
+    logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.3f}, raise_px={raise_px}")
     return Image.fromarray(rgba, mode="RGBA")
 
 
@@ -495,16 +496,13 @@ def draw_text_with_stretch(base_image: Image.Image,
 
     tx, ty = pad, pad
 
-    # Тень
     d.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=(0, 0, 0, 128))
 
-    # Обводка
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
         for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
             d.text((tx + dx * r, ty + dy * r), text, font=font, fill=outline_color)
 
-    # Основной
     d.text((tx, ty), text, font=font, fill=fill_color)
 
     bb = temp.getbbox()
@@ -674,25 +672,21 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
 
     h, w = image_bgr.shape[:2]
 
-    # ШАГ 1: OCR
     logger.info("📋 ШАГ 1: OCR (Google Vision)")
     ocr = google_vision_ocr(image_bgr, crop_bottom_percent=OCR_BOTTOM_PERCENT)
     if not ocr["text"]:
         logger.warning("⚠️ Текст не обнаружен")
         return image_bgr, ocr
 
-    # ШАГ 2: Маска нижних N%
     logger.info("📋 ШАГ 2: Маска (нижние %)")
     mask = np.zeros((h, w), dtype=np.uint8)
     mask_start = int(h * (1 - MASK_BOTTOM_PERCENT / 100))
     mask[mask_start:, :] = 255
     logger.info(f"📐 Маска: строки {mask_start}-{h} (нижние {MASK_BOTTOM_PERCENT}%)")
 
-    # ШАГ 3: Inpaint (Replicate → FLUX Fill)
     logger.info("📋 ШАГ 3: Inpaint (Replicate FLUX Fill)")
     clean_bgr = flux_inpaint(image_bgr, mask)
 
-    # ШАГ 4: Перевод
     logger.info("📋 ШАГ 4: Перевод (OpenAI)")
     title_translated, subtitle_translated = "", ""
 
@@ -709,7 +703,6 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     else:
         title_translated = openai_translate(ocr["text"])
 
-    # ШАГ 5: Градиент (точно на нижние N%)
     logger.info("📋 ШАГ 5: Градиент")
     clean_rgb = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(clean_rgb).convert("RGBA")
@@ -721,7 +714,6 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
-    # ШАГ 6: Текст/лого по режимам
     logger.info("📋 ШАГ 6: Рендер текста")
     if mode == 1:
         pil = render_mode1_logo(pil, title_translated)
@@ -741,7 +733,6 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     return out_bgr, ocr
 
 
-# Совместимость
 def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Алиас для inpaint."""
     return flux_inpaint(image, mask)
