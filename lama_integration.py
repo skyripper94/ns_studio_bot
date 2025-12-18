@@ -28,6 +28,10 @@ GOOGLE_VISION_API_KEY = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
 # ============== REPLICATE / FLUX (INPAINT) ==============
+# РЕКОМЕНДУЕМЫЕ АЛЬТЕРНАТИВЫ (mask-aware, без артефактов):
+# 1. allenhooo/lama - ТОП! Быстро (~3сек), точно, восстанавливает фон БЕЗ додумывания
+# 2. bria/eraser - SOTA удаление объектов, без артефактов
+# 3. stability-ai/stable-diffusion-inpainting - классика, mask-aware
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()
 FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))
 FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "3.5"))
@@ -51,7 +55,8 @@ FONT_SIZE_LOGO = 24
 FONT_SIZE_MIN = 44
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = -70
+SPACING_BOTTOM = 20
+SPACING_BOTTOM_MODE3 = -30
 SPACING_LOGO_TO_TITLE = 8
 SPACING_TITLE_TO_SUBTITLE = 10
 LINE_SPACING = -32
@@ -161,7 +166,6 @@ def _preclean_ocr_for_cover(text: str) -> str:
         return text
     t = str(text)
     
-    # Технический мусор
     t = re.sub(r"@\S+", "", t)
     t = re.sub(r"(https?://\S+|www\.\S+)", "", t)
     t = re.sub(r"\b\d{1,2}:\d{2}\b", "", t)
@@ -169,7 +173,6 @@ def _preclean_ocr_for_cover(text: str) -> str:
     t = re.sub(r"[|•·]+", " ", t)
     t = re.sub(r"\s*[-–—]{2,}\s*", " ", t)
     
-    # Нормализация валюты/чисел (ПОРЯДОК ВАЖЕН)
     t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*billion", r"$\1 млрд.", t)
     t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*million", r"$\1 млн.", t)
     t = re.sub(r"(?i)\bmulti[-\s]?billion", "мульти-млрд.", t)
@@ -177,7 +180,6 @@ def _preclean_ocr_for_cover(text: str) -> str:
     t = re.sub(r"(?i)\bbillion", "млрд.", t)
     t = re.sub(r"(?i)\bmillion", "млн.", t)
     
-    # Убрать лишние 'S'
     t = re.sub(r"\b([A-Z]{2,})S\b", r"\1", t)
     
     t = re.sub(r"\s+", " ", t).strip()
@@ -281,7 +283,6 @@ def opencv_fallback(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
 # Replicate FLUX Fill
 # ---------------------------------------------------------------------
 def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
-    """Inpaint через Replicate на модели FLUX Fill."""
     if mask_u8.dtype != np.uint8:
         mask_u8 = mask_u8.astype(np.uint8)
 
@@ -291,18 +292,9 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
 
     try:
         import replicate
-
         client = replicate.Client(api_token=REPLICATE_API_TOKEN)
 
-        logger.info(f"🚀 Replicate inpaint: {REPLICATE_MODEL}")
-
-        prompt = (
-            "Perfectly restore and extend the existing background texture and pattern. "
-            "Match colors, lighting, and perspective exactly. "
-            "Remove only text and decorative elements. "
-            "Keep all original background details unchanged. "
-            "No creativity, only precise restoration."
-        )
+        logger.info(f"🚀 Replicate inpaint: LaMa")
 
         rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
@@ -315,19 +307,17 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         pil_mask.save(mask_buf, format="PNG", compress_level=0)
         mask_buf.seek(0)
 
+        # 👇 ЗАМЕНИТЬ ЗДЕСЬ
         output = client.run(
-            REPLICATE_MODEL,
+            "allenhooo/lama:cdac78a1bec5b23c07fd29692fb70baa513ea403a39e643c48ec5edadb15fe72",
             input={
-                "prompt": prompt,
                 "image": img_buf,
-                "mask": mask_buf,
-                "steps": int(np.clip(FLUX_STEPS, 15, 50)),
-                "guidance": float(np.clip(FLUX_GUIDANCE, 1.5, 100)),
-                "prompt_upsampling": bool(FLUX_PROMPT_UPSAMPLING),
-                "output_format": FLUX_OUTPUT_FORMAT,
-            },
+                "mask": mask_buf
+            }
         )
+        # 👆 ДО СЮДА
 
+        # Дальше код остаётся без изменений
         if isinstance(output, str):
             r = requests.get(output, timeout=REPLICATE_HTTP_TIMEOUT)
             r.raise_for_status()
@@ -339,7 +329,7 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         elif hasattr(output, "read"):
             result_bytes = output.read()
         else:
-            logger.error(f"❌ Неизвестный формат output от Replicate: {type(output)}")
+            logger.error(f"❌ Неизвестный формат output")
             return opencv_fallback(image_bgr, mask_u8)
 
         out_pil = Image.open(BytesIO(result_bytes)).convert("RGB")
@@ -347,30 +337,18 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
 
         if out_bgr.shape[:2] != image_bgr.shape[:2]:
-            logger.warning("⚠️ Replicate изменил размер → ресайз обратно (LANCZOS)")
+            logger.warning("⚠️ Replicate изменил размер → ресайз обратно")
             out_bgr = cv2.resize(out_bgr, (image_bgr.shape[1], image_bgr.shape[0]), interpolation=cv2.INTER_LANCZOS4)
 
         if FORCE_PRESERVE_OUTSIDE_MASK:
             out_bgr = _composite_by_mask(image_bgr, out_bgr, mask_u8)
 
-        logger.info("✅ Replicate inpaint OK")
+        logger.info("✅ LaMa inpaint OK")
         return out_bgr
 
     except Exception as e:
         logger.error(f"❌ Ошибка Replicate inpaint: {e}")
         return opencv_fallback(image_bgr, mask_u8)
-
-
-def _composite_by_mask(original_bgr: np.ndarray, edited_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
-    """Смешивание по маске."""
-    m = (mask_u8.astype(np.float32) / 255.0)[:, :, None]
-    out = (original_bgr.astype(np.float32) * (1.0 - m) + edited_bgr.astype(np.float32) * m)
-    return np.clip(out, 0, 255).astype(np.uint8)
-
-
-def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """ALIAS для совместимости."""
-    return flux_inpaint(image, mask)
 
 
 # ---------------------------------------------------------------------
@@ -635,7 +613,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     total_sub_h = sub_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
 
     total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
-    start_y = height - SPACING_BOTTOM - total_h
+    start_y = height - SPACING_BOTTOM_MODE3 - total_h
 
     cur_y = start_y
     block_left = (width - max_text_width) // 2
