@@ -350,6 +350,16 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         logger.error(f"❌ Ошибка Replicate inpaint: {e}")
         return opencv_fallback(image_bgr, mask_u8)
 
+def _composite_by_mask(original_bgr: np.ndarray, edited_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
+    """Смешивание по маске."""
+    m = (mask_u8.astype(np.float32) / 255.0)[:, :, None]
+    out = (original_bgr.astype(np.float32) * (1.0 - m) + edited_bgr.astype(np.float32) * m)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """ALIAS для совместимости (старое название)."""
+    return flux_inpaint(image, mask)
+
 
 # ---------------------------------------------------------------------
 # Градиент
