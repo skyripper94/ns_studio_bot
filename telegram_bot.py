@@ -54,7 +54,11 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start - показывает меню выбора режима."""
     user_id = update.effective_user.id
-    user_states[user_id] = {'mode': None, 'submode': None, 'step': None}
+    
+    if user_id not in user_states:
+        user_states[user_id] = {}
+    
+    user_states[user_id].update({'mode': None, 'submode': None, 'step': None})
     
     keyboard = [
         [
@@ -85,7 +89,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if user_id not in user_states:
-        user_states[user_id] = {'mode': None, 'submode': None, 'step': None}
+        user_states[user_id] = {}
     
     if query.data == "mode_remove":
         user_states[user_id]['mode'] = 'remove'
@@ -157,7 +161,7 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка полученного изображения."""
     user_id = update.effective_user.id
     
-    if user_id not in user_states or user_states[user_id]['mode'] is None:
+    if user_id not in user_states or user_states[user_id].get('mode') is None:
         await update.message.reply_text("⚠️ Сначала выберите режим командой /start")
         return
     
@@ -500,14 +504,13 @@ async def process_full_mode_step3(update, user_id: int):
         )
         await status_msg.delete()
     
-    import os
     try:
         os.remove(state['image_path'])
         os.remove(clean_path)
     except:
         pass
     
-    user_states[user_id] = {'mode': 'full', 'submode': submode, 'step': None}
+    user_states[user_id]['step'] = None
 
 
 def main():
