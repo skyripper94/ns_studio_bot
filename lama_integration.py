@@ -1,16 +1,4 @@
 # lama_integration.py
-"""
-Полный workflow для обработки изображений:
-1) OCR (Google Vision) по нижней части
-2) Inpaint (Replicate FLUX Fill) ТОЛЬКО по маске (нижние N%)
-3) Перевод (OpenAI)
-4) Наложение градиента (точно на нижние N%)
-5) Отрисовка текста/линий/лого по режимам
-
-ВАЖНО:
-- Ваше "мыло" в логе появилось потому что Replicate вернул 401 Invalid token → сработал OpenCV fallback (он всегда мажет на большой маске).
-- Модель flux-kontext-pro НЕ поддерживает mask, поэтому могла “лезть” за пределы области. Для масочного инпейнта нужно flux-fill-pro.
-"""
 
 # ============== ИМПОРТЫ ==============
 import os
@@ -31,7 +19,6 @@ logger = logging.getLogger(__name__)
 """
 ==============================================
 НАСТРОЙКИ ДЛЯ БЫСТРОЙ РУЧНОЙ ПРАВКИ
-(все ключевые коэффициенты вынесены сюда)
 ==============================================
 """
 
@@ -41,65 +28,60 @@ GOOGLE_VISION_API_KEY = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
 # ============== REPLICATE / FLUX (INPAINT) ==============
-# МОДЕЛЬ ДЛЯ МАСКОВОГО INPAINT:
-# flux-kontext-pro — это “edit”, без маски; для маски нужно flux-fill-pro.
-REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()  # поменять если надо
-FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))      # 15..50 (больше = детальнее, медленнее; у модели max=50)
-FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "25"))  # 1.5..100 (по умолчанию у модели 60; выше = сильнее следует промпту, но может портить качество)
-FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")  # png = без потерь
-FLUX_PROMPT_UPSAMPLING = False  # True = творчески “додумает” промпт, обычно не надо для чистки
-REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))  # таймаут скачивания результата
+REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()
+FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))
+FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "25"))
+FLUX_OUTPUT_FORMAT = os.getenv("FLUX_OUTPUT_FORMAT", "png")
+FLUX_PROMPT_UPSAMPLING = False
+REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))
 
-# Жёсткая гарантия: “всё вне маски НЕ меняем”, даже если модель попыталась
 FORCE_PRESERVE_OUTSIDE_MASK = True
 
 # ============== ЦВЕТА ==============
-COLOR_TURQUOISE = (0, 206, 209)  # Бирюзовый для заголовков
-COLOR_WHITE = (255, 255, 255)    # Белый для подзаголовков/лого
-COLOR_OUTLINE = (60, 60, 60)     # Обводка текста (#3C3C3C)
+COLOR_TURQUOISE = (0, 206, 209)
+COLOR_WHITE = (255, 255, 255)
+COLOR_OUTLINE = (60, 60, 60)
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 56             # Заголовок в режиме 1 (лого)
-FONT_SIZE_MODE2 = 52             # Заголовок в режиме 2 (только текст)
-FONT_SIZE_MODE3_TITLE = 54       # Заголовок в режиме 3
-FONT_SIZE_MODE3_SUBTITLE = 52    # Подзаголовок в режиме 3
-FONT_SIZE_LOGO = 24              # Размер @neurostep.media
-FONT_SIZE_MIN = 44               # Минимальный размер при автоподборе (уменьшить = мельче)
+FONT_SIZE_MODE1 = 56
+FONT_SIZE_MODE2 = 52
+FONT_SIZE_MODE3_TITLE = 54
+FONT_SIZE_MODE3_SUBTITLE = 52
+FONT_SIZE_LOGO = 24
+FONT_SIZE_MIN = 44
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = 40             # Отступ снизу до композиции
-SPACING_LOGO_TO_TITLE = 6        # Между логотипом и заголовком
-SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
-LINE_SPACING = -16                # Между строками
-LOGO_LINE_LENGTH = 310           # Длина линий возле лого
-LOGO_LINE_THICKNESS_PX = 3   # толщина полос возле логотипа (@neurostep.media)
+SPACING_BOTTOM = 40
+SPACING_LOGO_TO_TITLE = 6
+SPACING_TITLE_TO_SUBTITLE = 10
+LINE_SPACING = -16
+LOGO_LINE_LENGTH = 310
+LOGO_LINE_THICKNESS_PX = 3
 
 # ============== МАСКА / OCR ==============
-MASK_BOTTOM_PERCENT = 32         # Сколько % снизу чистим (маска)
-OCR_BOTTOM_PERCENT = 32          # OCR зона снизу (держать равной маске)
+MASK_BOTTOM_PERCENT = 32
+OCR_BOTTOM_PERCENT = 32
 
 # ============== ГРАДИЕНТ ==============
-# Градиент покрывает ТОЛЬКО нижние MASK_BOTTOM_PERCENT, как вы описали
-GRADIENT_COVER_PERCENT = 50      # если хотите отдельно — меняйте; по умолчанию = 35%
-GRADIENT_SOLID_FRACTION = 0.35   # какая часть градиента снизу 100% непрозрачная (0.5 = нижняя половина)
-GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "125"))  # ↑ границу "чёрной основы" на N px (скрыть артефакты)
-GRADIENT_INTENSITY_CURVE = 2.6   # плавность в верхней половине (больше = резче переход)
+GRADIENT_COVER_PERCENT = 50
+GRADIENT_SOLID_FRACTION = 0.35
+GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "125"))
+GRADIENT_INTENSITY_CURVE = 2.6
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.5       # +25% по высоте
-TEXT_STRETCH_WIDTH = 1.15        # +10% по ширине
+TEXT_STRETCH_HEIGHT = 1.5
+TEXT_STRETCH_WIDTH = 1.15
 
 # ============== ТЕНИ / ОБВОДКИ ==============
-TEXT_SHADOW_OFFSET = 1           # Смещение тени (больше = дальше тень)
-TEXT_OUTLINE_THICKNESS = 1       # Толщина обводки (увеличить = жирнее)
+TEXT_SHADOW_OFFSET = 1
+TEXT_OUTLINE_THICKNESS = 1
 
 # ============== БЛОК ТЕКСТА ==============
-TEXT_WIDTH_PERCENT = 0.50        # Ширина блока текста от ширины картинки
+TEXT_WIDTH_PERCENT = 0.50
 
 # ============== OPENCV FALLBACK ==============
-# Если Replicate недоступен/упал, включается fallback. На большой маске идеала не будет.
-OPENCV_BLUR_SIGMA = 5            # Блюр внутри маски (больше = сильнее “съест” артефакты)
-OPENCV_INPAINT_RADIUS = 3        # Радиус инпейнта (больше = сильнее “мажет”)
+OPENCV_BLUR_SIGMA = 5
+OPENCV_INPAINT_RADIUS = 3
 
 # ============== ПУТЬ К ШРИФТУ ==============
 FONT_PATH = os.getenv("FONT_PATH", "/app/fonts/WaffleSoft.otf").strip()
@@ -117,7 +99,7 @@ openai.api_key = OPENAI_API_KEY
 # OCR (Google Vision)
 # ---------------------------------------------------------------------
 def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTTOM_PERCENT) -> dict:
-    """OCR через Google Vision API по нижней части изображения (чтобы не ловить весь кадр)."""
+    """OCR через Google Vision API по нижней части изображения."""
     if not GOOGLE_VISION_API_KEY:
         logger.warning("⚠️ GOOGLE_VISION_API_KEY не установлен")
         return {"text": "", "lines": []}
@@ -157,10 +139,8 @@ def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTT
             return {"text": "", "lines": []}
 
         full_text = ann[0].get("description", "")
-        # Логи не любят \n внутри одной строки — поэтому lines отдельным списком
         lines = [ln.strip() for ln in full_text.split("\n") if ln.strip()]
 
-        # Небольшая фильтрация типовых “служебных” строк, если они попали в OCR
         if lines and lines[0].strip().lower() in {"wealth", "@neurostep.media"}:
             lines = lines[1:]
             full_text = "\n".join(lines)
@@ -172,53 +152,48 @@ def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTT
         logger.error(f"❌ Ошибка Google Vision OCR: {e}")
         return {"text": "", "lines": []}
 
+
 # ---------------------------------------------------------------------
 # Чистка перевода (перед OpenAI)
 # ---------------------------------------------------------------------
-
 def _preclean_ocr_for_cover(text: str) -> str:
-    """Лёгкая нормализация OCR-текста под обложку (без выдумок, только чистка)."""
+    """Лёгкая нормализация OCR-текста под обложку."""
     if not text:
         return text
 
     t = str(text)
 
-    # 1) Убрать типовой мусор из OCR
-    t = re.sub(r"@\S+", "", t)                                   # @handles типа @neurostep.media
-    t = re.sub(r"(https?://\S+|www\.\S+)", "", t)                # ссылки
-    t = re.sub(r"\b\d{1,2}:\d{2}\b", "", t)                      # таймкоды типа 17:12
-    t = re.sub(r"[“”«»\"']", "", t)                              # кавычки
-    t = re.sub(r"[|•·]+", " ", t)                                # разделители
-    t = re.sub(r"\s*[-–—]{2,}\s*", " ", t)                       # длинные тире/линии
+    t = re.sub(r"@\S+", "", t)
+    t = re.sub(r"(https?://\S+|www\.\S+)", "", t)
+    t = re.sub(r"\b\d{1,2}:\d{2}\b", "", t)
+    t = re.sub(r"[""«»\"']", "", t)
+    t = re.sub(r"[|•·]+", " ", t)
+    t = re.sub(r"\s*[-–—]{2,}\s*", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
 
-    # 2) Клишированные фразы (минимально, только самое частое)
     t = re.sub(r"(?i)\bwill\s+leave\s+you\s+speechless\b", "БЕЗ СЛОВ", t)
     t = re.sub(r"(?i)\bspeechless\b", "БЕЗ СЛОВ", t)
 
-    # 3) Нормализация "multi-billion" / "multi-million" (до общей замены)
     t = re.sub(r"(?i)\bmulti[-\s]?billion\b", "МУЛЬТИ-МЛРД.", t)
     t = re.sub(r"(?i)\bmulti[-\s]?million\b", "МУЛЬТИ-МЛН.", t)
 
-    # 4) Нормализация единиц и денег (осторожно)
     t = re.sub(r"(?i)\bbillion\b", "млрд.", t)
     t = re.sub(r"(?i)\bmillion\b", "млн.", t)
 
-    # $10 billion -> $10 млрд. (если вдруг OCR принёс конструкцию целиком)
     t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*billion\b", r"$\1 млрд.", t)
     t = re.sub(r"(?i)\$\s*(\d+(?:\.\d+)?)\s*million\b", r"$\1 млн.", t)
 
-    t = re.sub(r"(?i)\b([A-Z]{2,})S\b", r"\1", t)  # AMBANI'S -> AMBANI (после удаления ')
+    t = re.sub(r"(?i)\b([A-Z]{2,})S\b", r"\1", t)
 
-    # финальная чистка пробелов
     t = re.sub(r"\s+", " ", t).strip()
     return t
+
 
 # ---------------------------------------------------------------------
 # Перевод (OpenAI)
 # ---------------------------------------------------------------------
 def openai_translate(text: str) -> str:
-    """Перевод и адаптация под СНГ (коротко, по смыслу, без лишнего)."""
+    """Перевод и адаптация под СНГ."""
     if not OPENAI_API_KEY or not text:
         logger.warning("⚠️ OPENAI_API_KEY не установлен или нет текста")
         return text
@@ -227,7 +202,6 @@ def openai_translate(text: str) -> str:
         logger.info(f"🌐 Перевод: {text}")
         clean_text = _preclean_ocr_for_cover(text)
         logger.info(f"🧹 После чистки: {clean_text}")
-
 
         system_prompt = """Ты профессиональный редактор заголовков для русскоязычной (СНГ) аудитории (обложки/превью) в стиле Wealth: спокойно, уверенно, без кликбейта.
 Задача: НЕ дословный перевод, а краткая адаптация смысла под обложку. Не выдумывай фактов.
@@ -272,7 +246,6 @@ def openai_translate(text: str) -> str:
 
         translated = resp.choices[0].message.content.strip()
 
-        # Мини-санитизация: убираем кавычки/точки, режем лишние строки
         translated = translated.strip().strip('"').strip("'").strip()
         translated = translated.rstrip(".")
         lines = [ln.strip() for ln in translated.splitlines() if ln.strip()]
@@ -287,24 +260,20 @@ def openai_translate(text: str) -> str:
         logger.error(f"❌ Ошибка OpenAI перевода: {e}")
         return text
 
+
 # ---------------------------------------------------------------------
-# OpenCV fallback (когда Replicate не работает)
+# OpenCV fallback
 # ---------------------------------------------------------------------
 def opencv_fallback(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
-    """
-    Запасной вариант без Replicate.
-    Логика: внутри маски размываем + лёгкий inpaint, чтобы не было “грязи”.
-    """
+    """Запасной вариант без Replicate."""
     if mask_u8.dtype != np.uint8:
         mask_u8 = mask_u8.astype(np.uint8)
 
     result = image_bgr.copy()
 
-    # Размываем только область маски (так меньше “мыла”, чем у полного inpaint на огромной маске)
     blurred = cv2.GaussianBlur(image_bgr, (0, 0), sigmaX=OPENCV_BLUR_SIGMA, sigmaY=OPENCV_BLUR_SIGMA)
     result[mask_u8 == 255] = blurred[mask_u8 == 255]
 
-    # Лёгкий inpaint поверх (радиус маленький, чтобы не “плыла” текстура)
     try:
         result = cv2.inpaint(result, mask_u8, inpaintRadius=OPENCV_INPAINT_RADIUS, flags=cv2.INPAINT_TELEA)
     except Exception:
@@ -315,13 +284,10 @@ def opencv_fallback(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------
-# Replicate FLUX Fill (масочный inpaint)
+# Replicate FLUX Fill
 # ---------------------------------------------------------------------
 def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
-    """
-    Inpaint через Replicate на модели FLUX Fill.
-    Гарантия: если FORCE_PRESERVE_OUTSIDE_MASK=True — вне маски возвращаем оригинал пиксель-в-пиксель.
-    """
+    """Inpaint через Replicate на модели FLUX Fill."""
     if mask_u8.dtype != np.uint8:
         mask_u8 = mask_u8.astype(np.uint8)
 
@@ -330,15 +296,12 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         return opencv_fallback(image_bgr, mask_u8)
 
     try:
-        import replicate  # локальный импорт, чтобы проект стартовал даже без replicate в окружении
+        import replicate
 
-        # Клиент с явным токеном (на Railway так надёжнее)
         client = replicate.Client(api_token=REPLICATE_API_TOKEN)
 
         logger.info(f"🚀 Replicate inpaint: {REPLICATE_MODEL}")
 
-        # Важный момент: модель сама не “понимает” вашу бизнес-логику.
-        # Мы просим удалить текст/линии/логотипы (внутри маски), восстановить фон, без размытия.
         prompt = (
             "Remove all text, decorative lines and logos in the masked region. "
             "Reconstruct the original background naturally with clean, sharp detail. "
@@ -346,20 +309,17 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
             "Do not change anything outside the mask. "
         )
 
-        # Изображение в PNG без потерь
         rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
         img_buf = BytesIO()
         pil_img.save(img_buf, format="PNG", compress_level=0)
         img_buf.seek(0)
 
-        # Маска (белое = инпейнт, чёрное = сохранить)
         pil_mask = Image.fromarray(mask_u8, mode="L")
         mask_buf = BytesIO()
         pil_mask.save(mask_buf, format="PNG", compress_level=0)
         mask_buf.seek(0)
 
-        # ВАЖНО: у flux-fill-pro поля называются image/mask/steps/guidance (не input_image/num_inference_steps).
         output = client.run(
             REPLICATE_MODEL,
             input={
@@ -373,7 +333,6 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
             },
         )
 
-        # output обычно = URL (string)
         if isinstance(output, str):
             r = requests.get(output, timeout=REPLICATE_HTTP_TIMEOUT)
             r.raise_for_status()
@@ -392,12 +351,10 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         out_rgb = np.array(out_pil)
         out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
 
-        # Если модель вдруг изменила размер — возвращаем в исходный (иначе будет мыло/скейл)
         if out_bgr.shape[:2] != image_bgr.shape[:2]:
             logger.warning("⚠️ Replicate изменил размер → ресайз обратно (LANCZOS)")
             out_bgr = cv2.resize(out_bgr, (image_bgr.shape[1], image_bgr.shape[0]), interpolation=cv2.INTER_LANCZOS4)
 
-        # Жёстко сохраняем всё вне маски (решает вашу проблему с “логотипами выше маски”)
         if FORCE_PRESERVE_OUTSIDE_MASK:
             out_bgr = _composite_by_mask(image_bgr, out_bgr, mask_u8)
 
@@ -405,50 +362,40 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         return out_bgr
 
     except Exception as e:
-        # Типовая причина у вас: 401 Invalid token → проверяйте переменную окружения REPLICATE_API_TOKEN в Railway.
         logger.error(f"❌ Ошибка Replicate inpaint: {e}")
         return opencv_fallback(image_bgr, mask_u8)
 
 
 def _composite_by_mask(original_bgr: np.ndarray, edited_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
-    """Смешивание по маске: берём edited только там, где mask=255; снаружи — оригинал."""
+    """Смешивание по маске."""
     m = (mask_u8.astype(np.float32) / 255.0)[:, :, None]
     out = (original_bgr.astype(np.float32) * (1.0 - m) + edited_bgr.astype(np.float32) * m)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-# Совместимость со старым именем (чтобы не менять остальной проект)
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """ALIАS: раньше было flux-kontext-pro, теперь правильный масочный inpaint = flux-fill-pro."""
+    """ALIAS для совместимости."""
     return flux_inpaint(image, mask)
 
 
 # ---------------------------------------------------------------------
-# Градиент (быстро, без покадрового putpixel)
+# Градиент
 # ---------------------------------------------------------------------
 def create_gradient_layer(width: int, height: int,
                           cover_percent: int = GRADIENT_COVER_PERCENT) -> Image.Image:
-    """
-    Создаёт RGBA-слой градиента для нижних cover_percent%.
-    Низ: alpha=255, нижняя половина градиента — 100% непрозрачная,
-    верхняя половина — плавный уход в 0.
-    """
+    """Создаёт RGBA-слой градиента для нижних cover_percent%."""
     cover_percent = int(np.clip(cover_percent, 1, 100))
     start_row = int(height * (1 - cover_percent / 100))
     grad_h = max(1, height - start_row)
 
     y = np.arange(height, dtype=np.float32)
-    t = (y - start_row) / float(grad_h)   # 0 вверху градиента → 1 внизу
+    t = (y - start_row) / float(grad_h)
     t = np.clip(t, 0.0, 1.0)
 
-    # Нижняя часть — 100% непрозрачная
-    # Базовая граница (по доле): на какой высоте начинается 100% чёрный слой.
     base_solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
-    # Поднимаем границу вверх на фиксированное кол-во пикселей (чтобы скрыть артефакты под градиентом).
     raise_t = float(np.clip(GRADIENT_SOLID_RAISE_PX, 0, height)) / float(grad_h)
     solid_from = float(np.clip(base_solid_from - raise_t, 0.0, 1.0))
 
-    # Преобразуем к шкале “верхняя часть до границы”
     top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
     alpha = np.where(
         t >= solid_from,
@@ -457,148 +404,76 @@ def create_gradient_layer(width: int, height: int,
     ).astype(np.uint8)
 
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    rgba[:, :, 3] = alpha[:, None]  # только альфа, цвет = чёрный
+    rgba[:, :, 3] = alpha[:, None]
 
     logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.3f}, raise_px={GRADIENT_SOLID_RAISE_PX}")
     return Image.fromarray(rgba, mode="RGBA")
 
 
 # ---------------------------------------------------------------------
-# Текст: подбор размера и отрисовка со “stretch”
+# Текст: подбор размера и отрисовка со "stretch"
 # ---------------------------------------------------------------------
 def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
                                  initial_size: int, min_size: int = FONT_SIZE_MIN,
                                  stretch_width: float = TEXT_STRETCH_WIDTH) -> tuple:
-    """
-    Автоподбор размера шрифта под ширину с учётом будущего растяжения по ширине.
-    Возвращает: (size, font, lines)
-    """
+    """Автоподбор размера шрифта. Greedy перенос."""
+    text = (text or "").strip()
+    if not text:
+        font = ImageFont.truetype(font_path, int(min_size))
+        return int(min_size), font, [""]
+
+    words = text.split()
+    if not words:
+        font = ImageFont.truetype(font_path, int(min_size))
+        return int(min_size), font, [text]
+
     size = int(initial_size)
-
-    # ВАЖНО: max_width задаётся в "итоговой" ширине, а текст позже растягивается.
-    # Поэтому все расчёты переноса ведём в "дорисованной" (до растяжения) ширине.
-    target_w = max(1, int(max_width / max(float(stretch_width), 1e-6)))
-
-    while size >= min_size:
+    while size >= int(min_size):
         try:
-            font = ImageFont.truetype(font_path, size)
-            words = [w for w in str(text).split() if w]
-            if not words:
-                return size, font, [""]
-
-            # Ищем перенос не жадным способом (баланс линий), чтобы избежать "слово на строку",
-            # если 2 строки реально влезают.
-            lines = _wrap_words_optimal(words, font, target_w)
-            if not lines:
-                size -= 2
-                continue
-
-            # Финальная проверка (после stretch) — каждая строка обязана влезть.
-            fits = True
-            for ln in lines:
-                bbox = font.getbbox(ln)
-                w0 = bbox[2] - bbox[0]
-                if int(w0 * stretch_width) > max_width:
-                    fits = False
-                    break
-            if fits:
-                return size, font, lines
-
+            font = ImageFont.truetype(font_path, int(size))
+            lines = _wrap_greedy(words, font, max_width, stretch_width)
+            if lines:
+                return int(size), font, lines
         except Exception as e:
             logger.error(f"Ошибка шрифта {size}: {e}")
-
         size -= 2
 
-    font = ImageFont.truetype(font_path, min_size)
-    return min_size, font, [str(text)]
+    font = ImageFont.truetype(font_path, int(min_size))
+    return int(min_size), font, [text]
+
+
+def _wrap_greedy(words: list, font: ImageFont.FreeTypeFont, max_width: int, stretch: float) -> list:
+    """Greedy перенос: добавляем слова пока влезают."""
+    if not words:
+        return []
+    
+    space_w = max(1, _text_width_px(font, " "))
+    lines = []
+    current = []
+    current_w = 0
+    
+    for w in words:
+        w_width = _text_width_px(font, w)
+        test_w = current_w + (space_w if current else 0) + w_width
+        
+        if current and int(test_w * stretch) > max_width:
+            lines.append(" ".join(current))
+            current = [w]
+            current_w = w_width
+        else:
+            current.append(w)
+            current_w = test_w
+    
+    if current:
+        lines.append(" ".join(current))
+    
+    return lines if lines else []
 
 
 def _text_width_px(font: ImageFont.FreeTypeFont, text: str) -> int:
-    """Ширина текста в пикселях для текущего font."""
+    """Ширина текста в пикселях."""
     bb = font.getbbox(text)
     return int(bb[2] - bb[0])
-
-
-def _wrap_words_optimal(words: list, font: ImageFont.FreeTypeFont, max_width_px: int) -> list:
-    """
-    Оптимальный перенос слов в несколько строк (не greedy).
-    Цель: меньше строк + более ровные строки (как на референсе).
-
-    Возвращает список строк или [] если не получается уложить хотя бы по одному слову.
-    """
-    n = len(words)
-    if n == 0:
-        return []
-
-    # Быстрая проверка: если хоть одно слово не влазит само по себе — перенос не спасёт.
-    for w in words:
-        if _text_width_px(font, w) > max_width_px:
-            return []
-
-    # DP по разбиению на строки: dp[j] = (cost, prev_i)
-    INF = 10 ** 18
-    dp = [(INF, -1)] * (n + 1)
-    dp[0] = (0, -1)
-
-    # Ширина обычного пробела
-    space_w = max(1, _text_width_px(font, " "))
-
-    # Штраф за количество строк: стимулируем меньше строк (это лечит "каждое слово отдельно")
-    line_penalty = int((max_width_px * 0.22) ** 2)
-    single_word_penalty = int((max_width_px * 0.50) ** 2)
-
-    # Предподсчёт ширин слов
-    word_w = [_text_width_px(font, w) for w in words]
-
-    # Пробуем все разбиения i->j
-    for i in range(n):
-        base_cost, _ = dp[i]
-        if base_cost >= INF:
-            continue
-
-        cur_w = 0
-        for j in range(i, n):
-            # добавить слово j
-            if j == i:
-                cur_w = word_w[j]
-            else:
-                cur_w += space_w + word_w[j]
-
-            if cur_w > max_width_px:
-                break
-
-            # Slack (сколько осталось до края)
-            slack = max_width_px - cur_w
-
-            # Последняя строка: меньше штрафуем (чтобы не растягивать любой ценой)
-            is_last = (j == n - 1)
-            ragged = 0 if is_last else (slack * slack)
-
-            # Штраф за строку из одного слова (кроме случая, когда слов вообще 1)
-            one_word = 1 if (j == i and n > 1) else 0
-            ow_pen = single_word_penalty if (one_word and not is_last) else 0
-
-            cost = base_cost + ragged + line_penalty + ow_pen
-
-            if cost < dp[j + 1][0]:
-                dp[j + 1] = (cost, i)
-
-    if dp[n][0] >= INF:
-        return []
-
-    # Восстановление разбиения
-    breaks = []
-    idx = n
-    while idx > 0:
-        prev = dp[idx][1]
-        if prev < 0:
-            break
-        breaks.append((prev, idx))
-        idx = prev
-    breaks.reverse()
-
-    lines = [" ".join(words[a:b]) for (a, b) in breaks]
-    return lines
 
 
 def draw_text_with_stretch(base_image: Image.Image,
@@ -610,15 +485,11 @@ def draw_text_with_stretch(base_image: Image.Image,
                            stretch_width: float = TEXT_STRETCH_WIDTH,
                            stretch_height: float = TEXT_STRETCH_HEIGHT,
                            shadow_offset: int = TEXT_SHADOW_OFFSET) -> int:
-    """
-    Рисует текст с тенью+обводкой, затем растягивает общий “слой текста”.
-    Возвращает итоговую высоту нарисованного (после stretch).
-    """
+    """Рисует текст с тенью+обводкой, затем растягивает."""
     bbox = font.getbbox(text)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
 
-    # Запас по размеру, чтобы не обрезать тень/обводку
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
     temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
     temp_h = int(th * (stretch_height + 1.0)) + pad * 2
@@ -626,7 +497,6 @@ def draw_text_with_stretch(base_image: Image.Image,
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
 
-    # Рисуем ближе к левому/верхнему с паддингом
     tx, ty = pad, pad
 
     # Тень
@@ -641,76 +511,21 @@ def draw_text_with_stretch(base_image: Image.Image,
     # Основной
     d.text((tx, ty), text, font=font, fill=fill_color)
 
-    # Обрезаем по контенту
     bb = temp.getbbox()
     if not bb:
         return th
 
     crop = temp.crop(bb)
-
-    # Растягиваем
     sw = max(1, int(crop.width * stretch_width))
     sh = max(1, int(crop.height * stretch_height))
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
 
-    # Позиция: x,y считаются как “верхний левый” примерно под центрирование строк
     base_image.paste(crop, (x, y), crop)
     return sh
 
-def _split_manual_lines(text: str) -> list:
-    """
-    Если текст содержит ручные переносы (\n) — можно сохранить их.
-    НО: OpenAI/перевод/ocr иногда возвращают перенос после КАЖДОГО слова —
-    это ломает обложку ("вырви глаз").
-
-    Поэтому считаем переносы "ручными" только если они похожи на осознанную верстку.
-    """
-    if not text:
-        return []
-    raw_lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
-    if len(raw_lines) < 2:
-        return []
-
-    # Если строк много и большинство — 1 слово, то это почти наверняка авто-перенос, игнорируем.
-    words_per_line = [len(ln.split()) for ln in raw_lines]
-    single_word_lines = sum(1 for k in words_per_line if k <= 1)
-    if len(raw_lines) >= 3 and single_word_lines >= 2:
-        return []
-
-    return raw_lines
-
-
-def _justify_line_by_spaces(line: str, font: ImageFont.FreeTypeFont, target_width_px: int) -> str:
-    """Простейшее "растягивание" строки пробелами до target_width_px (для блочного вида)."""
-    parts = [p for p in line.split() if p]
-    if len(parts) < 3:
-        return line
-
-    # Базовые метрики
-    space_w = max(1, _text_width_px(font, " "))
-    cur_w = _text_width_px(font, " ".join(parts))
-    if cur_w >= target_width_px:
-        return line
-
-    extra_px = target_width_px - cur_w
-    extra_spaces_total = int(round(extra_px / float(space_w)))
-    if extra_spaces_total <= 0:
-        return line
-
-    gaps = len(parts) - 1
-    base_add = extra_spaces_total // gaps
-    rem = extra_spaces_total % gaps
-
-    out = []
-    for i, w in enumerate(parts):
-        out.append(w)
-        if i < gaps:
-            add = base_add + (1 if i < rem else 0)
-            out.append(" " * (1 + add))
-    return "".join(out)
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
-    """Фиксированная высота строки (чтобы межстрочный не 'плясал' от букв/кропа)."""
+    """Фиксированная высота строки."""
     try:
         ascent, descent = font.getmetrics()
         base = int((ascent + descent) * TEXT_STRETCH_HEIGHT)
@@ -718,7 +533,6 @@ def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
         base = int(font.size * TEXT_STRETCH_HEIGHT)
     pad = max(6, TEXT_SHADOW_OFFSET + int(TEXT_OUTLINE_THICKNESS) * 2)
     return base + pad
-
 
 
 # ---------------------------------------------------------------------
@@ -732,30 +546,13 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
 
     title = (title_translated or "").upper()
+    _, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
+    )
 
-    manual_lines = _split_manual_lines(title)
-    if manual_lines:
-        title_lines = manual_lines
-        size = int(FONT_SIZE_MODE1)
-        title_font = ImageFont.truetype(FONT_PATH, size)
-        while size >= FONT_SIZE_MIN:
-            title_font = ImageFont.truetype(FONT_PATH, size)
-            ok = True
-            for ln in title_lines:
-                bb = title_font.getbbox(ln)
-                ln_w = bb[2] - bb[0]
-                if int(ln_w * TEXT_STRETCH_WIDTH) > max_text_width:
-                    ok = False
-                    break
-            if ok:
-                break
-            size -= 2
-    else:
-        _, title_font, title_lines = calculate_adaptive_font_size(
-            title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
-        )    # высота заголовка (фиксированная, чтобы межстрочный не плясал)
     line_h = _estimate_fixed_line_height(title_font)
     total_title_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+
     # Лого
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
@@ -770,26 +567,23 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_x = (width - logo_w) // 2
     logo_y = start_y
 
-    # Линии по центру лого
+    # Линии
     line_y = logo_y + logo_h // 2
     line_left_start = logo_x - LOGO_LINE_LENGTH - 10
     line_right_start = logo_x + logo_w + 10
 
     draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
     draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
-
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
-    # Заголовок (блочным блоком по одной ширине)
+    # Заголовок
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
     block_left = (width - max_text_width) // 2
-    target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
     for i, ln in enumerate(title_lines):
-        # «От края до края»: растягиваем пробелами, кроме последней строки
-        if i < len(title_lines) - 1:
-            ln = _justify_line_by_spaces(ln, title_font, target_w)
         draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h + LINE_SPACING
+        cur_y += line_h
+        if i < len(title_lines) - 1:
+            cur_y += LINE_SPACING
 
     return image
 
@@ -801,29 +595,9 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
 
     title = (title_translated or "").upper()
-
-    manual_lines = _split_manual_lines(title)
-    if manual_lines:
-        title_lines = manual_lines
-        # Единый размер шрифта для всех строк: подбираем под самую широкую строку (чтобы не было разного кегля).
-        size = int(FONT_SIZE_MODE2)
-        title_font = ImageFont.truetype(FONT_PATH, size)
-        while size >= FONT_SIZE_MIN:
-            title_font = ImageFont.truetype(FONT_PATH, size)
-            ok = True
-            for ln in title_lines:
-                bb = title_font.getbbox(ln)
-                ln_w = bb[2] - bb[0]
-                if int(ln_w * TEXT_STRETCH_WIDTH) > max_text_width:
-                    ok = False
-                    break
-            if ok:
-                break
-            size -= 2
-    else:
-        _, title_font, title_lines = calculate_adaptive_font_size(
-            title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
-        )
+    _, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
+    )
 
     line_h = _estimate_fixed_line_height(title_font)
     total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
@@ -831,12 +605,12 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     start_y = height - SPACING_BOTTOM - total_h
     cur_y = start_y
     block_left = (width - max_text_width) // 2
-    target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
+
     for i, ln in enumerate(title_lines):
-        if i < len(title_lines) - 1:
-            ln = _justify_line_by_spaces(ln, title_font, target_w)
         draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h + LINE_SPACING
+        cur_y += line_h
+        if i < len(title_lines) - 1:
+            cur_y += LINE_SPACING
 
     return image
 
@@ -850,51 +624,14 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     title = (title_translated or "").upper()
     subtitle = (subtitle_translated or "").upper()
 
-    manual_title = _split_manual_lines(title)
-    if manual_title:
-        title_lines = manual_title
-        size = int(FONT_SIZE_MODE3_TITLE)
-        title_font = ImageFont.truetype(FONT_PATH, size)
-        while size >= FONT_SIZE_MIN:
-            title_font = ImageFont.truetype(FONT_PATH, size)
-            ok = True
-            for ln in title_lines:
-                bb = title_font.getbbox(ln)
-                ln_w = bb[2] - bb[0]
-                if int(ln_w * TEXT_STRETCH_WIDTH) > max_text_width:
-                    ok = False
-                    break
-            if ok:
-                break
-            size -= 2
-        title_size = size
-    else:
-        title_size, title_font, title_lines = calculate_adaptive_font_size(
-            title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
-        )
+    title_size, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
+    )
 
-        subtitle_initial = int(title_size * 0.80)
-    manual_sub = _split_manual_lines(subtitle)
-    if manual_sub:
-        subtitle_lines = manual_sub
-        size = int(subtitle_initial)
-        subtitle_font = ImageFont.truetype(FONT_PATH, size)
-        while size >= FONT_SIZE_MIN:
-            subtitle_font = ImageFont.truetype(FONT_PATH, size)
-            ok = True
-            for ln in subtitle_lines:
-                bb = subtitle_font.getbbox(ln)
-                ln_w = bb[2] - bb[0]
-                if int(ln_w * TEXT_STRETCH_WIDTH) > max_text_width:
-                    ok = False
-                    break
-            if ok:
-                break
-            size -= 2
-    else:
-        _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
-            subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
-        )
+    subtitle_initial = int(title_size * 0.80)
+    _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
+        subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
+    )
 
     title_line_h = _estimate_fixed_line_height(title_font)
     sub_line_h = _estimate_fixed_line_height(subtitle_font)
@@ -907,21 +644,20 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
 
     cur_y = start_y
     block_left = (width - max_text_width) // 2
-    title_target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
+
     for i, ln in enumerate(title_lines):
-        if i < len(title_lines) - 1:
-            ln = _justify_line_by_spaces(ln, title_font, title_target_w)
         draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += title_line_h + LINE_SPACING
+        cur_y += title_line_h
+        if i < len(title_lines) - 1:
+            cur_y += LINE_SPACING
 
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
-    sub_target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
     for i, ln in enumerate(subtitle_lines):
-        if i < len(subtitle_lines) - 1:
-            ln = _justify_line_by_spaces(ln, subtitle_font, sub_target_w)
         draw_text_with_stretch(image, block_left, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
-        cur_y += sub_line_h + LINE_SPACING
+        cur_y += sub_line_h
+        if i < len(subtitle_lines) - 1:
+            cur_y += LINE_SPACING
 
     return image
 
@@ -930,14 +666,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
 # ОСНОВНОЙ WORKFLOW
 # ---------------------------------------------------------------------
 def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
-    """
-    Полный workflow для режимов 1,2,3.
-
-    Режимы:
-    1 — лого + заголовок
-    2 — только заголовок
-    3 — заголовок + подзаголовок
-    """
+    """Полный workflow для режимов 1,2,3."""
     logger.info("=" * 60)
     logger.info(f"🚀 ПОЛНЫЙ WORKFLOW - РЕЖИМ {mode}")
     logger.info("=" * 60)
@@ -1008,7 +737,7 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     return out_bgr, ocr
 
 
-# Совместимость (в проекте может где-то вызываться старое имя)
+# Совместимость
 def replicate_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Алиас для inpaint."""
     return flux_inpaint(image, mask)
