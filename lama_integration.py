@@ -382,7 +382,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 # Градиент
 # ---------------------------------------------------------------------
 def create_gradient_layer(width: int, height: int,
-                          cover_percent: int = GRADIENT_COVER_PERCENT) -> Image.Image:
+                          cover_percent: int = GRADIENT_COVER_PERCENT,
+                          solid_raise_px: int = None) -> Image.Image::
     """Создаёт RGBA-слой градиента для нижних cover_percent%."""
     cover_percent = int(np.clip(cover_percent, 1, 100))
     start_row = int(height * (1 - cover_percent / 100))
@@ -393,7 +394,8 @@ def create_gradient_layer(width: int, height: int,
     t = np.clip(t, 0.0, 1.0)
 
     base_solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
-    raise_t = float(np.clip(GRADIENT_SOLID_RAISE_PX, 0, height)) / float(grad_h)
+    raise_px = solid_raise_px if solid_raise_px is not None else GRADIENT_SOLID_RAISE_PX
+    raise_t = float(np.clip(raise_px, 0, height)) / float(grad_h)
     solid_from = float(np.clip(base_solid_from - raise_t, 0.0, 1.0))
 
     top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
@@ -718,7 +720,10 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     clean_rgb = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
-    grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=GRADIENT_COVER_PERCENT)
+    if mode == 3:
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=80)
+    else:
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=125)
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
