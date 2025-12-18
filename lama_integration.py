@@ -383,7 +383,7 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------
 def create_gradient_layer(width: int, height: int,
                           cover_percent: int = GRADIENT_COVER_PERCENT,
-                          solid_raise_px: int = None) -> Image.Image::
+                          solid_raise_px: int = None) -> Image.Image:
     """Создаёт RGBA-слой градиента для нижних cover_percent%."""
     cover_percent = int(np.clip(cover_percent, 1, 100))
     start_row = int(height * (1 - cover_percent / 100))
