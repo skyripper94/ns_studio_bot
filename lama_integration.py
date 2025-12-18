@@ -43,7 +43,7 @@ COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 56
+FONT_SIZE_MODE1 = 60
 FONT_SIZE_MODE2 = 52
 FONT_SIZE_MODE3_TITLE = 54
 FONT_SIZE_MODE3_SUBTITLE = 52
@@ -54,7 +54,7 @@ FONT_SIZE_MIN = 44
 SPACING_BOTTOM = 40
 SPACING_LOGO_TO_TITLE = 6
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = -16
+LINE_SPACING = -20
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -211,7 +211,7 @@ def openai_translate(text: str) -> str:
 2) Адаптируй под естественный русский, без дословщины.
 3) Используй короткие синонимы вместо длинных слов.
 4) Сокращай валюту/числа: "billion" → "млрд.", "million" → "млн.", "$10 billion" → "$10 млрд."
-5) Формат вывода: 1–3 строки. Разделитель строк — символ "\\n".
+5) Формат вывода: 1–3 строки.
    - Если фраза короткая — 1 строка.
    - Если длинная — 2–3 строки (предпочтительно 2).
 6) Никаких обращений к зрителю ("ВАС/ТЕБЯ") и никаких обещаний/кликбейта.
@@ -553,7 +553,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     line_h = _estimate_fixed_line_height(title_font)
     total_title_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
-    # Лого
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
     bb = logo_font.getbbox(logo_text)
@@ -563,11 +562,9 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     total_h = logo_h + SPACING_LOGO_TO_TITLE + total_title_h
     start_y = height - SPACING_BOTTOM - total_h
 
-    # Лого позиция
     logo_x = (width - logo_w) // 2
     logo_y = start_y
 
-    # Линии
     line_y = logo_y + logo_h // 2
     line_left_start = logo_x - LOGO_LINE_LENGTH - 10
     line_right_start = logo_x + logo_w + 10
@@ -576,11 +573,13 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
-    # Заголовок
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
     block_left = (width - max_text_width) // 2
+    
     for i, ln in enumerate(title_lines):
-        draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        line_w = int(_text_width_px(title_font, ln) * TEXT_STRETCH_WIDTH)
+        line_x = block_left + (max_text_width - line_w) // 2
+        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         cur_y += line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
@@ -607,7 +606,9 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     block_left = (width - max_text_width) // 2
 
     for i, ln in enumerate(title_lines):
-        draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        line_w = int(_text_width_px(title_font, ln) * TEXT_STRETCH_WIDTH)
+        line_x = block_left + (max_text_width - line_w) // 2
+        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         cur_y += line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
@@ -646,7 +647,9 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     block_left = (width - max_text_width) // 2
 
     for i, ln in enumerate(title_lines):
-        draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        line_w = int(_text_width_px(title_font, ln) * TEXT_STRETCH_WIDTH)
+        line_x = block_left + (max_text_width - line_w) // 2
+        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         cur_y += title_line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
@@ -654,7 +657,9 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
     for i, ln in enumerate(subtitle_lines):
-        draw_text_with_stretch(image, block_left, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        line_w = int(_text_width_px(subtitle_font, ln) * TEXT_STRETCH_WIDTH)
+        line_x = block_left + (max_text_width - line_w) // 2
+        draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
         cur_y += sub_line_h
         if i < len(subtitle_lines) - 1:
             cur_y += LINE_SPACING
