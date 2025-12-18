@@ -58,20 +58,20 @@ COLOR_WHITE = (255, 255, 255)    # Белый для подзаголовков/
 COLOR_OUTLINE = (60, 60, 60)     # Обводка текста (#3C3C3C)
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 54             # Заголовок в режиме 1 (лого)
+FONT_SIZE_MODE1 = 58             # Заголовок в режиме 1 (лого)
 FONT_SIZE_MODE2 = 52             # Заголовок в режиме 2 (только текст)
-FONT_SIZE_MODE3_TITLE = 52       # Заголовок в режиме 3
-FONT_SIZE_MODE3_SUBTITLE = 50    # Подзаголовок в режиме 3
+FONT_SIZE_MODE3_TITLE = 54       # Заголовок в режиме 3
+FONT_SIZE_MODE3_SUBTITLE = 52    # Подзаголовок в режиме 3
 FONT_SIZE_LOGO = 24              # Размер @neurostep.media
 FONT_SIZE_MIN = 44               # Минимальный размер при автоподборе (уменьшить = мельче)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = 105             # Отступ снизу до композиции
+SPACING_BOTTOM = 70             # Отступ снизу до композиции
 SPACING_LOGO_TO_TITLE = 6        # Между логотипом и заголовком
 SPACING_TITLE_TO_SUBTITLE = 10   # Между заголовком и подзаголовком
-LINE_SPACING = 0                # Между строками
+LINE_SPACING = -6                # Между строками
 LOGO_LINE_LENGTH = 300           # Длина линий возле лого
-LOGO_LINE_THICKNESS_PX = 2   # толщина полос возле логотипа (@neurostep.media)
+LOGO_LINE_THICKNESS_PX = 3   # толщина полос возле логотипа (@neurostep.media)
 
 # ============== МАСКА / OCR ==============
 MASK_BOTTOM_PERCENT = 32         # Сколько % снизу чистим (маска)
