@@ -59,10 +59,10 @@ COLOR_WHITE = (255, 255, 255)    # Белый для подзаголовков/
 COLOR_OUTLINE = (60, 60, 60)     # Обводка текста (#3C3C3C)
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 64             # Заголовок в режиме 1 (лого)
-FONT_SIZE_MODE2 = 58             # Заголовок в режиме 2 (только текст)
-FONT_SIZE_MODE3_TITLE = 58       # Заголовок в режиме 3
-FONT_SIZE_MODE3_SUBTITLE = 56    # Подзаголовок в режиме 3
+FONT_SIZE_MODE1 = 56             # Заголовок в режиме 1 (лого)
+FONT_SIZE_MODE2 = 52             # Заголовок в режиме 2 (только текст)
+FONT_SIZE_MODE3_TITLE = 54       # Заголовок в режиме 3
+FONT_SIZE_MODE3_SUBTITLE = 52    # Подзаголовок в режиме 3
 FONT_SIZE_LOGO = 24              # Размер @neurostep.media
 FONT_SIZE_MIN = 44               # Минимальный размер при автоподборе (уменьшить = мельче)
 
@@ -237,8 +237,11 @@ def openai_translate(text: str) -> str:
 2) Адаптируй под естественный русский, без дословщины.
 3) Используй короткие синонимы вместо длинных слов.
 4) Сокращай валюту/числа: "billion" → "млрд.", "million" → "млн.", "$10 billion" → "$10 млрд."
-5) Никаких обращений к зрителю ("ВАС/ТЕБЯ") и никаких обещаний/кликбейта.
-6) Верни ТОЛЬКО итоговый текст, без кавычек и пояснений, без точки в конце.
+5) Формат вывода: 1–3 строки. Разделитель строк — символ "\\n".
+   - Если фраза короткая — 1 строка.
+   - Если длинная — 2–3 строки (предпочтительно 2).
+6) Никаких обращений к зрителю ("ВАС/ТЕБЯ") и никаких обещаний/кликбейта.
+7) Верни ТОЛЬКО итоговый текст, без кавычек и пояснений, без точки в конце.
 
 Плохие примеры (так нельзя):
 - "АМБАНИ ВЛАДЕЕТ ВСЕМ"
@@ -470,254 +473,132 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
     Автоподбор размера шрифта под ширину с учётом будущего растяжения по ширине.
     Возвращает: (size, font, lines)
     """
-    # Важно: старая версия возвращала первый подходящий кегль. Это часто давало
-    # «каждое слово с новой строки» на больших шрифтах (строки уже помещаются,
-    # но композиция выглядит рваной).
-    # Новая логика: перебираем кегли и выбираем лучший вариант по критериям:
-    # 1) минимальное количество строк
-    # 2) минимальная «рваность» (raggedness)
-    # 3) максимальный кегль
-
-    best = None  # (num_lines, raggedness, -size, size, font, lines)
-
-    def _space_width(fnt: ImageFont.FreeTypeFont) -> int:
-        try:
-            bb = fnt.getbbox(" ")
-            return max(1, bb[2] - bb[0])
-        except Exception:
-            return max(1, int(fnt.size * 0.33))
-
-    def _word_widths(words: list, fnt: ImageFont.FreeTypeFont) -> list:
-        out = []
-        for w in words:
-            bb = fnt.getbbox(w)
-            out.append(max(0, bb[2] - bb[0]))
-        return out
-
-    def _wrap_balanced(words: list, ww: list, sp: int) -> tuple:
-        """DP-перенос: минимизируем (число строк, рваность)."""
-        n = len(words)
-        # prefix sums of word widths for O(1) line width
-        pref = [0]
-        for v in ww:
-            pref.append(pref[-1] + v)
-
-        def line_w(i: int, j: int) -> float:
-            # words i..j inclusive
-            words_w = pref[j + 1] - pref[i]
-            gaps = max(0, (j - i))
-            return float(words_w + gaps * sp)
-
-        INF = (10**9, 10**18)
-        dp = [INF] * (n + 1)          # (num_lines, raggedness)
-        nxt = [-1] * (n + 1)
-        dp[n] = (0, 0)
-
-        for i in range(n - 1, -1, -1):
-            best_i = INF
-            best_j = -1
-            for j in range(i, n):
-                lw = line_w(i, j) * float(stretch_width)
-                if lw > float(max_width):
-                    break
-
-                # last line: raggedness=0 (чтобы предпочитать меньше строк)
-                if j == n - 1:
-                    cost = (1, 0)
-                else:
-                    remain = float(max_width) - lw
-                    cost = (1, int(remain * remain))
-
-                cand = (cost[0] + dp[j + 1][0], cost[1] + dp[j + 1][1])
-                if cand < best_i:
-                    best_i = cand
-                    best_j = j
-
-            dp[i] = best_i
-            nxt[i] = best_j
-
-        if nxt[0] == -1:
-            return False, []
-
-        lines = []
-        i = 0
-        while i < n:
-            j = nxt[i]
-            if j < i:
-                return False, []
-            lines.append(" ".join(words[i:j + 1]))
-            i = j + 1
-
-        return True, lines
-
-    text = (text or "").strip()
-    if not text:
-        font = ImageFont.truetype(font_path, int(min_size))
-        return int(min_size), font, [""]
-
-    words = text.split()
-    if not words:
-        font = ImageFont.truetype(font_path, int(min_size))
-        return int(min_size), font, [text]
-
     size = int(initial_size)
-    while size >= int(min_size):
-        try:
-            font = ImageFont.truetype(font_path, int(size))
-            sp = _space_width(font)
-            ww = _word_widths(words, font)
 
-            ok, lines = _wrap_balanced(words, ww, sp)
-            if not ok:
+    # ВАЖНО: max_width задаётся в "итоговой" ширине, а текст позже растягивается.
+    # Поэтому все расчёты переноса ведём в "дорисованной" (до растяжения) ширине.
+    target_w = max(1, int(max_width / max(float(stretch_width), 1e-6)))
+
+    while size >= min_size:
+        try:
+            font = ImageFont.truetype(font_path, size)
+            words = [w for w in str(text).split() if w]
+            if not words:
+                return size, font, [""]
+
+            # Ищем перенос не жадным способом (баланс линий), чтобы избежать "слово на строку",
+            # если 2 строки реально влезают.
+            lines = _wrap_words_optimal(words, font, target_w)
+            if not lines:
                 size -= 2
                 continue
 
-            # финальная проверка: каждая строка точно влезает
+            # Финальная проверка (после stretch) — каждая строка обязана влезть.
             fits = True
             for ln in lines:
-                bb = font.getbbox(ln)
-                ln_w = max(0, bb[2] - bb[0])
-                if int(ln_w * stretch_width) > int(max_width):
+                bbox = font.getbbox(ln)
+                w0 = bbox[2] - bbox[0]
+                if int(w0 * stretch_width) > max_width:
                     fits = False
                     break
-            if not fits:
-                size -= 2
-                continue
-
-            num_lines = len(lines)
-            # raggedness (кроме последней строки)
-            rag = 0
-            for ln in lines[:-1]:
-                bb = font.getbbox(ln)
-                ln_w = max(0, bb[2] - bb[0])
-                remain = float(max_width) - float(ln_w) * float(stretch_width)
-                rag += int(remain * remain)
-
-            cand = (num_lines, rag, -int(size), int(size), font, lines)
-            if (best is None) or (cand[:3] < best[:3]):
-                best = cand
+            if fits:
+                return size, font, lines
 
         except Exception as e:
             logger.error(f"Ошибка шрифта {size}: {e}")
 
         size -= 2
 
-    if best is not None:
-        return best[3], best[4], best[5]
-
-    font = ImageFont.truetype(font_path, int(min_size))
-    return int(min_size), font, [text]
+    font = ImageFont.truetype(font_path, min_size)
+    return min_size, font, [str(text)]
 
 
-def _render_line_rgba(text: str,
-                      font: ImageFont.FreeTypeFont,
-                      raw_width: int,
-                      raw_height: int,
-                      fill_color: tuple,
-                      outline_color: tuple,
-                      align: str = "center",
-                      justify: bool = False) -> Image.Image:
-    """Рендер одной строки в фиксированный raw_width (до stretch).
+def _text_width_px(font: ImageFont.FreeTypeFont, text: str) -> int:
+    """Ширина текста в пикселях для текущего font."""
+    bb = font.getbbox(text)
+    return int(bb[2] - bb[0])
 
-    - justify=True: растягиваем пробелы (только если 3+ слова)
-    - align: center/left (используется если justify=False)
+
+def _wrap_words_optimal(words: list, font: ImageFont.FreeTypeFont, max_width_px: int) -> list:
     """
+    Оптимальный перенос слов в несколько строк (не greedy).
+    Цель: меньше строк + более ровные строки (как на референсе).
 
-    pad = max(6, TEXT_SHADOW_OFFSET + int(TEXT_OUTLINE_THICKNESS) * 2)
-    canvas_w = int(raw_width) + pad * 2
-    canvas_h = int(raw_height) + pad * 2
-    img = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
+    Возвращает список строк или [] если не получается уложить хотя бы по одному слову.
+    """
+    n = len(words)
+    if n == 0:
+        return []
 
-    words = [w for w in str(text).split() if w]
-    if not words:
-        return img
-
-    # Метрики
-    try:
-        bb_space = font.getbbox(" ")
-        space_w = max(1, bb_space[2] - bb_space[0])
-    except Exception:
-        space_w = max(1, int(font.size * 0.33))
-
-    w_widths = []
+    # Быстрая проверка: если хоть одно слово не влазит само по себе — перенос не спасёт.
     for w in words:
-        bb = font.getbbox(w)
-        w_widths.append(max(0, bb[2] - bb[0]))
-    total_words_w = sum(w_widths)
-    gaps = max(0, len(words) - 1)
-    base_line_w = total_words_w
-    if gaps:
-        base_line_w += gaps * space_w
+        if _text_width_px(font, w) > max_width_px:
+            return []
 
-    # Вычисляем старт X и gap
-    if justify and len(words) >= 3 and gaps > 0 and base_line_w < raw_width:
-        gap_w = float(raw_width - total_words_w) / float(gaps)
-        start_x = float(pad)
-    else:
-        gap_w = float(space_w)
-        if align == "left":
-            start_x = float(pad)
-        else:
-            start_x = float(pad) + max(0.0, (float(raw_width) - float(base_line_w)) / 2.0)
+    # DP по разбиению на строки: dp[j] = (cost, prev_i)
+    INF = 10 ** 18
+    dp = [(INF, -1)] * (n + 1)
+    dp[0] = (0, -1)
 
-    x = start_x
-    y = float(pad)
+    # Ширина обычного пробела
+    space_w = max(1, _text_width_px(font, " "))
 
-    def _draw_word(px: float, py: float, w: str):
-        # Тень
-        d.text((px + TEXT_SHADOW_OFFSET, py + TEXT_SHADOW_OFFSET), w, font=font, fill=(0, 0, 0, 128))
-        # Обводка
-        for t in range(int(TEXT_OUTLINE_THICKNESS)):
-            r = t + 1
-            for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
-                d.text((px + dx * r, py + dy * r), w, font=font, fill=outline_color)
-        # Основной
-        d.text((px, py), w, font=font, fill=fill_color)
+    # Штраф за количество строк: стимулируем меньше строк (это лечит "каждое слово отдельно")
+    line_penalty = int((max_width_px * 0.22) ** 2)
+    single_word_penalty = int((max_width_px * 0.50) ** 2)
 
-    for idx, w in enumerate(words):
-        _draw_word(x, y, w)
-        x += float(w_widths[idx])
-        if idx < len(words) - 1:
-            x += float(gap_w)
+    # Предподсчёт ширин слов
+    word_w = [_text_width_px(font, w) for w in words]
 
-    return img
+    # Пробуем все разбиения i->j
+    for i in range(n):
+        base_cost, _ = dp[i]
+        if base_cost >= INF:
+            continue
 
+        cur_w = 0
+        for j in range(i, n):
+            # добавить слово j
+            if j == i:
+                cur_w = word_w[j]
+            else:
+                cur_w += space_w + word_w[j]
 
-def draw_text_block_justified(base_image: Image.Image,
-                              y_start: int,
-                              lines: list,
-                              font: ImageFont.FreeTypeFont,
-                              fill_color: tuple,
-                              outline_color: tuple,
-                              max_text_width: int,
-                              line_spacing: int = LINE_SPACING) -> int:
-    """Рисует блок текста как в референсе: ровный блок с заполнением ширины.
+            if cur_w > max_width_px:
+                break
 
-    Возвращает y после отрисовки (нижняя граница блока).
-    """
-    width, _ = base_image.size
-    # Ширина блока задаётся max_text_width; для внутреннего рендера делим на stretch_width.
-    raw_w = max(1, int(float(max_text_width) / float(TEXT_STRETCH_WIDTH)))
-    line_h = _estimate_fixed_line_height(font)
-    raw_h = max(1, int(float(line_h) / float(TEXT_STRETCH_HEIGHT)))
+            # Slack (сколько осталось до края)
+            slack = max_width_px - cur_w
 
-    block_x = (width - int(max_text_width)) // 2
-    cur_y = int(y_start)
+            # Последняя строка: меньше штрафуем (чтобы не растягивать любой ценой)
+            is_last = (j == n - 1)
+            ragged = 0 if is_last else (slack * slack)
 
-    for i, ln in enumerate(lines):
-        words = [w for w in str(ln).split() if w]
-        # 3+ слов → justification. Иначе центрируем внутри блока (как заголовки в Wealth).
-        justify = True if len(words) >= 3 else False
-        img_line = _render_line_rgba(ln, font, raw_w, raw_h, fill_color, outline_color,
-                                     align="center", justify=justify)
-        img_line = img_line.resize((int(max_text_width), int(line_h)), Image.Resampling.LANCZOS)
-        base_image.paste(img_line, (int(block_x), int(cur_y)), img_line)
-        cur_y += int(line_h)
-        if i < (len(lines) - 1):
-            cur_y += int(line_spacing)
+            # Штраф за строку из одного слова (кроме случая, когда слов вообще 1)
+            one_word = 1 if (j == i and n > 1) else 0
+            ow_pen = single_word_penalty if (one_word and not is_last) else 0
 
-    return cur_y
+            cost = base_cost + ragged + line_penalty + ow_pen
+
+            if cost < dp[j + 1][0]:
+                dp[j + 1] = (cost, i)
+
+    if dp[n][0] >= INF:
+        return []
+
+    # Восстановление разбиения
+    breaks = []
+    idx = n
+    while idx > 0:
+        prev = dp[idx][1]
+        if prev < 0:
+            break
+        breaks.append((prev, idx))
+        idx = prev
+    breaks.reverse()
+
+    lines = [" ".join(words[a:b]) for (a, b) in breaks]
+    return lines
 
 
 def draw_text_with_stretch(base_image: Image.Image,
@@ -777,19 +658,56 @@ def draw_text_with_stretch(base_image: Image.Image,
     return sh
 
 def _split_manual_lines(text: str) -> list:
-    """Если текст уже содержит ручные переносы (\n) — сохраняем их, иначе возвращаем []."""
+    """
+    Если текст содержит ручные переносы (\n) — можно сохранить их.
+    НО: OpenAI/перевод/ocr иногда возвращают перенос после КАЖДОГО слова —
+    это ломает обложку ("вырви глаз").
+
+    Поэтому считаем переносы "ручными" только если они похожи на осознанную верстку.
+    """
     if not text:
         return []
-    lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
-    # Берём ручные переносы только если это реально «разметка заголовка»,
-    # а не случайный перевод по одному слову на строку.
-    if not (2 <= len(lines) <= 3):
+    raw_lines = [ln.strip() for ln in str(text).splitlines() if ln.strip()]
+    if len(raw_lines) < 2:
         return []
-    # Если почти все строки — одиночные слова, лучше дать авто-вёрстке собрать блок.
-    one_word = sum(1 for ln in lines if len(ln.split()) == 1)
-    if one_word >= (len(lines) - 1):
+
+    # Если строк много и большинство — 1 слово, то это почти наверняка авто-перенос, игнорируем.
+    words_per_line = [len(ln.split()) for ln in raw_lines]
+    single_word_lines = sum(1 for k in words_per_line if k <= 1)
+    if len(raw_lines) >= 3 and single_word_lines >= 2:
         return []
-    return lines
+
+    return raw_lines
+
+
+def _justify_line_by_spaces(line: str, font: ImageFont.FreeTypeFont, target_width_px: int) -> str:
+    """Простейшее "растягивание" строки пробелами до target_width_px (для блочного вида)."""
+    parts = [p for p in line.split() if p]
+    if len(parts) < 3:
+        return line
+
+    # Базовые метрики
+    space_w = max(1, _text_width_px(font, " "))
+    cur_w = _text_width_px(font, " ".join(parts))
+    if cur_w >= target_width_px:
+        return line
+
+    extra_px = target_width_px - cur_w
+    extra_spaces_total = int(round(extra_px / float(space_w)))
+    if extra_spaces_total <= 0:
+        return line
+
+    gaps = len(parts) - 1
+    base_add = extra_spaces_total // gaps
+    rem = extra_spaces_total % gaps
+
+    out = []
+    for i, w in enumerate(parts):
+        out.append(w)
+        if i < gaps:
+            add = base_add + (1 if i < rem else 0)
+            out.append(" " * (1 + add))
+    return "".join(out)
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
     """Фиксированная высота строки (чтобы межстрочный не 'плясал' от букв/кропа)."""
@@ -862,18 +780,16 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
 
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
-    # Заголовок (ровный «блок» как в референсе)
+    # Заголовок (блочным блоком по одной ширине)
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
-    draw_text_block_justified(
-        base_image=image,
-        y_start=cur_y,
-        lines=title_lines,
-        font=title_font,
-        fill_color=COLOR_TURQUOISE,
-        outline_color=COLOR_OUTLINE,
-        max_text_width=max_text_width,
-        line_spacing=LINE_SPACING,
-    )
+    block_left = (width - max_text_width) // 2
+    target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
+    for i, ln in enumerate(title_lines):
+        # «От края до края»: растягиваем пробелами, кроме последней строки
+        if i < len(title_lines) - 1:
+            ln = _justify_line_by_spaces(ln, title_font, target_w)
+        draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += line_h + LINE_SPACING
 
     return image
 
@@ -913,16 +829,14 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     start_y = height - SPACING_BOTTOM - total_h
-    draw_text_block_justified(
-        base_image=image,
-        y_start=start_y,
-        lines=title_lines,
-        font=title_font,
-        fill_color=COLOR_TURQUOISE,
-        outline_color=COLOR_OUTLINE,
-        max_text_width=max_text_width,
-        line_spacing=LINE_SPACING,
-    )
+    cur_y = start_y
+    block_left = (width - max_text_width) // 2
+    target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
+    for i, ln in enumerate(title_lines):
+        if i < len(title_lines) - 1:
+            ln = _justify_line_by_spaces(ln, title_font, target_w)
+        draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += line_h + LINE_SPACING
 
     return image
 
@@ -992,29 +906,22 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     start_y = height - SPACING_BOTTOM - total_h
 
     cur_y = start_y
-    cur_y = draw_text_block_justified(
-        base_image=image,
-        y_start=cur_y,
-        lines=title_lines,
-        font=title_font,
-        fill_color=COLOR_TURQUOISE,
-        outline_color=COLOR_OUTLINE,
-        max_text_width=max_text_width,
-        line_spacing=LINE_SPACING,
-    )
+    block_left = (width - max_text_width) // 2
+    title_target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
+    for i, ln in enumerate(title_lines):
+        if i < len(title_lines) - 1:
+            ln = _justify_line_by_spaces(ln, title_font, title_target_w)
+        draw_text_with_stretch(image, block_left, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += title_line_h + LINE_SPACING
 
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
-    draw_text_block_justified(
-        base_image=image,
-        y_start=cur_y,
-        lines=subtitle_lines,
-        font=subtitle_font,
-        fill_color=COLOR_WHITE,
-        outline_color=COLOR_OUTLINE,
-        max_text_width=max_text_width,
-        line_spacing=LINE_SPACING,
-    )
+    sub_target_w = max(1, int(max_text_width / max(float(TEXT_STRETCH_WIDTH), 1e-6)))
+    for i, ln in enumerate(subtitle_lines):
+        if i < len(subtitle_lines) - 1:
+            ln = _justify_line_by_spaces(ln, subtitle_font, sub_target_w)
+        draw_text_with_stretch(image, block_left, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        cur_y += sub_line_h + LINE_SPACING
 
     return image
 
