@@ -59,7 +59,7 @@ SPACING_BOTTOM = -40
 SPACING_BOTTOM_MODE3 = -30
 SPACING_LOGO_TO_TITLE = 8
 SPACING_TITLE_TO_SUBTITLE = 10
-LINE_SPACING = -32
+LINE_SPACING = -36
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -68,10 +68,10 @@ MASK_BOTTOM_PERCENT = 32
 OCR_BOTTOM_PERCENT = 32
 
 # ============== ГРАДИЕНТ ==============
-GRADIENT_COVER_PERCENT = 40
-GRADIENT_SOLID_FRACTION = 0.35
-GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "100"))
-GRADIENT_INTENSITY_CURVE = 1.6
+GRADIENT_COVER_PERCENT = 50
+GRADIENT_SOLID_FRACTION = 0.45
+GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "40"))
+GRADIENT_INTENSITY_CURVE = 2.2
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 1.9
@@ -722,9 +722,9 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=80)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=60)
     else:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=125)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=90)
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
