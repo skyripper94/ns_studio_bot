@@ -422,7 +422,6 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
 
 
 async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь нажал ✏️ Править для LLM."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -443,14 +442,14 @@ async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         hint = "Пришлите текст для заголовка"
     
-    await query.edit_message_text(
+    # ИЗМЕНЕНО: было query.edit_message_text
+    await query.message.reply_text(
         f"✏️ **Отправьте исправленный перевод**\n\n{hint}",
         parse_mode='Markdown'
     )
 
 
 async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь нажал ➡️ Далее для LLM."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -461,13 +460,14 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
     
-    await query.edit_message_text(
+    # ИЗМЕНЕНО: было query.edit_message_text
+    await query.message.reply_text(
         f"✅ **Перевод принят**\n\n{preview[:200]}...",
         parse_mode='Markdown'
     )
     
     await process_full_mode_step3(query, user_id)
-
+    
 
 async def process_full_mode_step3(update, user_id: int):
     """ШАГ 3: Градиент + Рендер → готово."""
