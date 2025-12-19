@@ -71,7 +71,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 **Бот для работы с изображениями**\n\n"
         "**🗑️ УДАЛИТЬ ТЕКСТ:**\n"
-        "Только удаление текста и градиента (FLUX Fill Pro)\n\n"
+        "Только удаление текста и градиента (LaMa)\n\n"
         "**🔄 ПОЛНЫЙ ЦИКЛ:**\n"
         "OCR → Контроль → Удаление → Перевод → Контроль → Рендер\n"
         "3 режима: Лого / Текст / Контент\n\n"
@@ -133,6 +133,20 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             3: "КОНТЕНТ (заголовок + подзаголовок)"
         }
         
+        # Подсказка для режима 3
+        mode3_hint = ""
+        if submode == 3:
+            mode3_hint = (
+                "\n\n"
+                "📝 **Как писать для режима КОНТЕНТ:**\n"
+                "Все строки КРОМЕ последней = ЗАГОЛОВОК (бирюзовый)\n"
+                "Последняя строка = ПОДЗАГОЛОВОК (белый)\n\n"
+                "Пример:\n"
+                "`Самые дорогие`\n"
+                "`творения человечества`\n"
+                "`Стоимость $100 млрд.`"
+            )
+        
         await query.edit_message_text(
             f"✅ **Выбран режим {submode}: {mode_names[submode]}**\n\n"
             f"Теперь отправьте изображение для обработки.\n\n"
@@ -140,7 +154,8 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"1. OCR → контроль\n"
             f"2. Удаление текста\n"
             f"3. Перевод → контроль\n"
-            f"4. Нанесение текста",
+            f"4. Нанесение текста"
+            f"{mode3_hint}",
             parse_mode='Markdown'
         )
     
@@ -207,7 +222,7 @@ async def process_remove_mode(update: Update, image: np.ndarray):
     if success:
         await update.message.reply_photo(
             photo=BytesIO(buffer.tobytes()),
-            caption="✅ **Текст удалён!**\n🎨 FLUX Fill Pro",
+            caption="✅ **Текст удалён!**\n🎨 LaMa",
             parse_mode='Markdown'
         )
         await status_msg.delete()
@@ -403,7 +418,7 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
-    await status_msg.delete()
+    # НЕ УДАЛЯЕМ сообщение "Шаг 3/4: Перевод (LLM)..." - оставляем как с OCR
 
 
 async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -417,7 +432,14 @@ async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     submode = user_states[user_id]['submode']
     
     if submode == 3:
-        hint = "Формат: строка 1-N = заголовок, последняя строка = подзаголовок"
+        hint = (
+            "**Как писать:**\n"
+            "Все строки КРОМЕ последней → ЗАГОЛОВОК (бирюзовый)\n"
+            "Последняя строка → ПОДЗАГОЛОВОК (белый)\n\n"
+            "Пример:\n"
+            "`Портфель Ambani`\n"
+            "`Недвижимость на $50 млрд.`"
+        )
     else:
         hint = "Пришлите текст для заголовка"
     
@@ -498,7 +520,7 @@ async def process_full_mode_step3(update, user_id: int):
             photo=BytesIO(buffer.tobytes()),
             caption=(
                 f"✅ **Готово! (Режим {submode}: {mode_names[submode]})**\n\n"
-                f"🎨 FLUX FILL PRO → Градиент → Рендер"
+                f"🎨 LaMa → Градиент → Рендер"
             ),
             parse_mode='Markdown'
         )
