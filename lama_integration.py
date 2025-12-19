@@ -74,7 +74,7 @@ GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "120"))
 GRADIENT_INTENSITY_CURVE = 1.8
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.8
+TEXT_STRETCH_HEIGHT = 2.8
 TEXT_STRETCH_WIDTH = 1.15
 
 # ============== ТЕНИ / ОБВОДКИ ==============
