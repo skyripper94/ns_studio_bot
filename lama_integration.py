@@ -722,9 +722,9 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=35, solid_raise_px=50)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=65, solid_raise_px=20)
     else:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=90)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=55, solid_raise_px=60)
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
