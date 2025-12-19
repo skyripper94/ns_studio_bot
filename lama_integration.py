@@ -68,10 +68,10 @@ MASK_BOTTOM_PERCENT = 32
 OCR_BOTTOM_PERCENT = 32
 
 # ============== ГРАДИЕНТ ==============
-GRADIENT_COVER_PERCENT = 50
-GRADIENT_SOLID_FRACTION = 0.45
+GRADIENT_COVER_PERCENT = 40
+GRADIENT_SOLID_FRACTION = 0.35
 GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "40"))
-GRADIENT_INTENSITY_CURVE = 2.2
+GRADIENT_INTENSITY_CURVE = 2.8
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 1.9
@@ -79,7 +79,7 @@ TEXT_STRETCH_WIDTH = 1.05
 
 # ============== ТЕНИ / ОБВОДКИ ==============
 TEXT_SHADOW_OFFSET = 2
-TEXT_OUTLINE_THICKNESS = 2
+TEXT_OUTLINE_THICKNESS = 1
 
 # ============== БЛОК ТЕКСТА ==============
 TEXT_WIDTH_PERCENT = 0.90
