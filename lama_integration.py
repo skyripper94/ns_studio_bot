@@ -56,9 +56,9 @@ FONT_SIZE_MIN = 44
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
 SPACING_BOTTOM = -40
-SPACING_BOTTOM_MODE3 = 40
+SPACING_BOTTOM_MODE3 = 70
 SPACING_LOGO_TO_TITLE = 8
-SPACING_TITLE_TO_SUBTITLE = -24
+SPACING_TITLE_TO_SUBTITLE = -32
 LINE_SPACING = -36
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
@@ -722,7 +722,7 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=60)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=35, solid_raise_px=50)
     else:
         grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=90)
     pil = Image.alpha_composite(pil, grad)
