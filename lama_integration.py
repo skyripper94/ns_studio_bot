@@ -403,7 +403,7 @@ def create_gradient_layer(width: int, height: int,
 
     base_solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
     raise_px = solid_raise_px if solid_raise_px is not None else GRADIENT_SOLID_RAISE_PX
-    raise_t = float(np.clip(raise_px, 0, height)) / float(grad_h)
+    raise_t = float(raise_px) / float(grad_h)  # ⬅️ УБРАЛ np.clip!
     solid_from = float(np.clip(base_solid_from - raise_t, 0.0, 1.0))
 
     top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
@@ -420,9 +420,8 @@ def create_gradient_layer(width: int, height: int,
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha_blurred
 
-    logger.info(f"✨ Градиент: cover={cover_percent}%, blur={GRADIENT_BLUR_SIGMA}, ksize={ksize_y}")
+    logger.info(f"✨ Градиент: cover={cover_percent}%, blur={GRADIENT_BLUR_SIGMA}, solid_from={solid_from:.3f}")
     return Image.fromarray(rgba, mode="RGBA")
-
 
 # ---------------------------------------------------------------------
 # Текст: подбор размера и отрисовка со "stretch"
@@ -725,7 +724,7 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=-20)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=-60)
     else:
         grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=80)
     pil = Image.alpha_composite(pil, grad)
