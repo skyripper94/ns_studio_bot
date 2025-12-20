@@ -71,7 +71,7 @@ OCR_BOTTOM_PERCENT = 32
 GRADIENT_COVER_PERCENT = 40
 GRADIENT_SOLID_FRACTION = 0.5
 GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "125"))
-GRADIENT_INTENSITY_CURVE = 2.8
+GRADIENT_INTENSITY_CURVE = 2.1
 GRADIENT_BLUR_SIGMA = 80  # 👈 ДОБАВЬ ЭТУ СТРОКУ (больше = плавнее)
 GRADIENT_MAX_OPACITY = 0.9  # ⬅️ ДОБАВЬ! 0.0-1.0 (0.85 = 85% непрозрачности)
 
@@ -730,9 +730,9 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=40, max_opacity=0.8)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=60, max_opacity=0.8)
     else:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=120, max_opacity=0.9)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=125, max_opacity=0.9)
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
