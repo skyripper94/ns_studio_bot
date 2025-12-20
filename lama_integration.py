@@ -72,6 +72,7 @@ GRADIENT_COVER_PERCENT = 65
 GRADIENT_SOLID_FRACTION = 0.35
 GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "40"))
 GRADIENT_INTENSITY_CURVE = 2.8
+GRADIENT_BLUR_SIGMA = 80  # 👈 ДОБАВЬ ЭТУ СТРОКУ (больше = плавнее)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 2.1
@@ -413,10 +414,14 @@ def create_gradient_layer(width: int, height: int,
         255.0 * (top_part ** float(GRADIENT_INTENSITY_CURVE)),
     ).astype(np.uint8)
 
-    rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    rgba[:, :, 3] = alpha[:, None]
+    # 👇 РАЗМЫТИЕ ДЛЯ ПЛАВНОГО ПЕРЕХОДА
+    alpha_2d = np.tile(alpha[:, None], (1, width))
+    alpha_blurred = cv2.GaussianBlur(alpha_2d, (0, 0), sigmaY=GRADIENT_BLUR_SIGMA, sigmaX=0)
 
-    logger.info(f"✨ Градиент: cover={cover_percent}%, start_row={start_row}, solid_from={solid_from:.3f}, raise_px={raise_px}")
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+    rgba[:, :, 3] = alpha_blurred  # 👈 ИСПОЛЬЗУЕМ РАЗМЫТУЮ АЛЬФУ
+
+    logger.info(f"✨ Градиент: cover={cover_percent}%, blur={GRADIENT_BLUR_SIGMA}, solid_from={solid_from:.3f}")
     return Image.fromarray(rgba, mode="RGBA")
 
 
@@ -723,7 +728,7 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     if mode == 3:
         grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=65, solid_raise_px=20)
     else:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=55, solid_raise_px=60)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=55, solid_raise_px=70)
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
