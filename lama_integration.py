@@ -73,6 +73,7 @@ GRADIENT_SOLID_FRACTION = 0.5
 GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "0"))
 GRADIENT_INTENSITY_CURVE = 2.8
 GRADIENT_BLUR_SIGMA = 120  # 👈 ДОБАВЬ ЭТУ СТРОКУ (больше = плавнее)
+GRADIENT_MAX_OPACITY = 0.85  # ⬅️ ДОБАВЬ! 0.0-1.0 (0.85 = 85% непрозрачности)
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 2.1
@@ -392,7 +393,8 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------
 def create_gradient_layer(width: int, height: int,
                           cover_percent: int = GRADIENT_COVER_PERCENT,
-                          solid_raise_px: int = None) -> Image.Image:
+                          solid_raise_px: int = None,
+                          max_opacity: float = None) -> Image.Image:  # ⬅️ ДОБАВЬ ПАРАМЕТР
     cover_percent = int(np.clip(cover_percent, 1, 100))
     start_row = int(height * (1 - cover_percent / 100))
     grad_h = max(1, height - start_row)
@@ -403,14 +405,18 @@ def create_gradient_layer(width: int, height: int,
 
     base_solid_from = 1.0 - float(np.clip(GRADIENT_SOLID_FRACTION, 0.0, 1.0))
     raise_px = solid_raise_px if solid_raise_px is not None else GRADIENT_SOLID_RAISE_PX
-    raise_t = float(raise_px) / float(grad_h)  # ⬅️ УБРАЛ np.clip!
+    raise_t = float(raise_px) / float(grad_h)
     solid_from = float(np.clip(base_solid_from - raise_t, 0.0, 1.0))
+
+    # ⬅️ ИСПОЛЬЗУЕМ max_opacity
+    opacity = max_opacity if max_opacity is not None else GRADIENT_MAX_OPACITY
+    max_alpha = float(np.clip(opacity, 0.0, 1.0)) * 255.0
 
     top_part = np.clip(t / max(solid_from, 1e-6), 0.0, 1.0)
     alpha = np.where(
         t >= solid_from,
-        255.0,
-        255.0 * (top_part ** float(GRADIENT_INTENSITY_CURVE)),
+        max_alpha,  # ⬅️ ВМЕСТО 255.0
+        max_alpha * (top_part ** float(GRADIENT_INTENSITY_CURVE)),  # ⬅️ ВМЕСТО 255.0
     ).astype(np.uint8)
 
     alpha_2d = np.tile(alpha[:, None], (1, width))
@@ -420,7 +426,7 @@ def create_gradient_layer(width: int, height: int,
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha_blurred
 
-    logger.info(f"✨ Градиент: cover={cover_percent}%, blur={GRADIENT_BLUR_SIGMA}, solid_from={solid_from:.3f}")
+    logger.info(f"✨ Градиент: cover={cover_percent}%, opacity={opacity:.2f}, blur={GRADIENT_BLUR_SIGMA}")
     return Image.fromarray(rgba, mode="RGBA")
 
 # ---------------------------------------------------------------------
@@ -724,9 +730,9 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=-60)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=40, solid_raise_px=-60, max_opacity=0.75)
     else:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=80)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=50, solid_raise_px=80, max_opacity=0.9)
     pil = Image.alpha_composite(pil, grad)
     logger.info("✅ Градиент наложен")
 
