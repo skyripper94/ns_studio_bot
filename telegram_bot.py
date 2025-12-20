@@ -496,7 +496,7 @@ async def process_full_mode_step3(update, user_id: int):
     pil = PILImage.fromarray(clean_rgb).convert("RGBA")
     
     if submode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=60, max_opacity=0.8)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=80, max_opacity=0.8)
     else:
         grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=125, max_opacity=0.9)
     
