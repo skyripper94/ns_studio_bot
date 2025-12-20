@@ -68,9 +68,9 @@ MASK_BOTTOM_PERCENT = 32
 OCR_BOTTOM_PERCENT = 32
 
 # ============== ГРАДИЕНТ ==============
-GRADIENT_COVER_PERCENT = 65
-GRADIENT_SOLID_FRACTION = 0.25
-GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "40"))
+GRADIENT_COVER_PERCENT = 40
+GRADIENT_SOLID_FRACTION = 0.5
+GRADIENT_SOLID_RAISE_PX = int(os.getenv("GRADIENT_SOLID_RAISE_PX", "0"))
 GRADIENT_INTENSITY_CURVE = 2.8
 GRADIENT_BLUR_SIGMA = 120  # 👈 ДОБАВЬ ЭТУ СТРОКУ (больше = плавнее)
 
@@ -725,7 +725,7 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
     if mode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=65, solid_raise_px=0)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=65, solid_raise_px=-20)
     else:
         grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=65, solid_raise_px=80)
     pil = Image.alpha_composite(pil, grad)
