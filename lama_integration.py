@@ -393,7 +393,6 @@ def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
 def create_gradient_layer(width: int, height: int,
                           cover_percent: int = GRADIENT_COVER_PERCENT,
                           solid_raise_px: int = None) -> Image.Image:
-    """Создаёт RGBA-слой градиента для нижних cover_percent%."""
     cover_percent = int(np.clip(cover_percent, 1, 100))
     start_row = int(height * (1 - cover_percent / 100))
     grad_h = max(1, height - start_row)
@@ -414,14 +413,14 @@ def create_gradient_layer(width: int, height: int,
         255.0 * (top_part ** float(GRADIENT_INTENSITY_CURVE)),
     ).astype(np.uint8)
 
-    # 👇 РАЗМЫТИЕ ДЛЯ ПЛАВНОГО ПЕРЕХОДА
     alpha_2d = np.tile(alpha[:, None], (1, width))
-    alpha_blurred = cv2.GaussianBlur(alpha_2d, (0, 0), sigmaY=GRADIENT_BLUR_SIGMA, sigmaX=0)
+    ksize_y = int(GRADIENT_BLUR_SIGMA * 6) | 1
+    alpha_blurred = cv2.GaussianBlur(alpha_2d, (1, ksize_y), sigmaX=0, sigmaY=GRADIENT_BLUR_SIGMA)
 
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
-    rgba[:, :, 3] = alpha_blurred  # 👈 ИСПОЛЬЗУЕМ РАЗМЫТУЮ АЛЬФУ
+    rgba[:, :, 3] = alpha_blurred
 
-    logger.info(f"✨ Градиент: cover={cover_percent}%, blur={GRADIENT_BLUR_SIGMA}, solid_from={solid_from:.3f}")
+    logger.info(f"✨ Градиент: cover={cover_percent}%, blur={GRADIENT_BLUR_SIGMA}, ksize={ksize_y}")
     return Image.fromarray(rgba, mode="RGBA")
 
 
