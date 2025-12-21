@@ -80,6 +80,11 @@ ENHANCE_CONTRAST = 1.2      # контраст (1.0 = без изменений,
 ENHANCE_SATURATION = 1.25   # насыщенность (1.0 = без изменений, 1.3 = +30%)
 ENHANCE_SHARPNESS = 1.3     # резкость (1.0 = без изменений, 1.5 = сильно)
 
+# ============== УЛУЧШЕНИЯ ТЕКСТА ==============
+TEXT_GRAIN_INTENSITY = 0.15  # зернистость (0.0 = нет, 0.3 = сильная)
+TEXT_INNER_SHADOW_SIZE = 1   # внутренняя тень в px (1-2)
+TEXT_SHARPEN_AMOUNT = 0.3    # резкость (0.0 = нет, 0.5 = сильная)
+
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 2.1
 TEXT_STRETCH_WIDTH = 1.05
@@ -493,7 +498,8 @@ def draw_text_with_stretch(base_image: Image.Image,
                            outline_color: tuple,
                            stretch_width: float = TEXT_STRETCH_WIDTH,
                            stretch_height: float = TEXT_STRETCH_HEIGHT,
-                           shadow_offset: int = TEXT_SHADOW_OFFSET) -> int:
+                           shadow_offset: int = TEXT_SHADOW_OFFSET,
+                           apply_enhancements: bool = True) -> int:  # ⬅️ НОВЫЙ ПАРАМЕТР
     """Рисует текст с тенью+обводкой, затем растягивает."""
     bbox = font.getbbox(text)
     tw = bbox[2] - bbox[0]
@@ -516,6 +522,32 @@ def draw_text_with_stretch(base_image: Image.Image,
             d.text((tx + dx * r, ty + dy * r), text, font=font, fill=outline_color)
 
     d.text((tx, ty), text, font=font, fill=fill_color)
+    
+    # ========== УЛУЧШЕНИЯ (ТОЛЬКО ДЛЯ ЗАГОЛОВКОВ) ==========
+    if apply_enhancements:
+        # 1. ВНУТРЕННЯЯ ТЕНЬ
+        if TEXT_INNER_SHADOW_SIZE > 0:
+            temp_arr = np.array(temp)
+            alpha = temp_arr[:, :, 3]
+            
+            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
+            eroded = cv2.erode(alpha, kernel, iterations=1)
+            inner_shadow_mask = (alpha > 0) & (eroded == 0)
+            
+            temp_arr[inner_shadow_mask, :3] = temp_arr[inner_shadow_mask, :3] * 0.7
+            temp = Image.fromarray(temp_arr)
+        
+        # 2. ЗЕРНИСТОСТЬ
+        if TEXT_GRAIN_INTENSITY > 0:
+            temp_arr = np.array(temp).astype(np.float32)
+            alpha = temp_arr[:, :, 3]
+            
+            noise = np.random.normal(0, TEXT_GRAIN_INTENSITY * 25, (temp_h, temp_w, 3))
+            text_mask = alpha > 0
+            
+            temp_arr[:, :, :3][text_mask] += noise[text_mask]
+            temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
+            temp = Image.fromarray(temp_arr)
 
     bb = temp.getbbox()
     if not bb:
@@ -525,6 +557,19 @@ def draw_text_with_stretch(base_image: Image.Image,
     sw = max(1, int(crop.width * stretch_width))
     sh = max(1, int(crop.height * stretch_height))
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
+    
+    # 3. РЕЗКОСТЬ (после resize)
+    if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
+        crop_arr = np.array(crop).astype(np.float32)
+        rgb = crop_arr[:, :, :3]
+        alpha = crop_arr[:, :, 3:4]
+        
+        blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
+        sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
+        sharpened = np.clip(sharpened, 0, 255)
+        
+        crop_arr[:, :, :3] = sharpened
+        crop = Image.fromarray(crop_arr.astype(np.uint8))
 
     base_image.paste(crop, (x, y), crop)
     return sh
