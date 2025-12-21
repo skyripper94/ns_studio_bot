@@ -723,7 +723,7 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
     clean_rgb = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(clean_rgb).convert("RGBA")
 
-    if submode == 3:
+    if mode == 3:
         grad = create_gradient_layer(pil.size[0], pil.size[1], gradient_height_percent=GRADIENT_HEIGHT_MODE3)
     else:
         grad = create_gradient_layer(pil.size[0], pil.size[1], gradient_height_percent=GRADIENT_HEIGHT_MODE12)
