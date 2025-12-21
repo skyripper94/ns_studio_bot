@@ -646,8 +646,8 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h
+        actual_h = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += max(line_h, actual_h)  # ⬅️ ИСПОЛЬЗУЙ ФАКТИЧЕСКУЮ ВЫСОТУ
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
