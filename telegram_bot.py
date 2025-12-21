@@ -27,6 +27,7 @@ from lama_integration import (
     render_mode1_logo,
     render_mode2_text,
     render_mode3_content,
+    enhance_image, 
     MASK_BOTTOM_PERCENT,
     OCR_BOTTOM_PERCENT,
     GRADIENT_HEIGHT_MODE12,  # ⬅️ ДОБАВЬ
@@ -219,6 +220,7 @@ async def process_remove_mode(update: Update, image: np.ndarray):
     mask[mask_start:, :] = 255
     
     result = flux_kontext_inpaint(image, mask)
+    result = enhance_image(result)  # ⬅️ ДОБАВЬ ЭТУ СТРОКУ
     
     success, buffer = cv2.imencode('.png', result)
     if success:
@@ -513,6 +515,7 @@ async def process_full_mode_step3(update, user_id: int):
     
     out_rgb = np.array(pil.convert("RGB"))
     out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+    out_bgr = enhance_image(out_bgr)  # ⬅️ ДОБАВЬ ЭТУ СТРОКУ
     
     success, buffer = cv2.imencode('.png', out_bgr)
     if success:
