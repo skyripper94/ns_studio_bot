@@ -638,19 +638,22 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     )
 
     line_h = _estimate_fixed_line_height(title_font)
-    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING_MODE2)  # ⬅️ ИЗМЕНЕНО
+    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING_MODE2)
 
-    start_y = height - SPACING_BOTTOM_MODE2 - total_h  # ⬅️ ИЗМЕНЕНО
+    start_y = height - SPACING_BOTTOM_MODE2 - total_h
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h
+        
+        # ⬅️ ИСПОЛЬЗУЙ ВОЗВРАЩАЕМУЮ ВЫСОТУ
+        actual_h = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        
+        cur_y += actual_h  # ⬅️ ИЗМЕНЕНО: используй реальную высоту
         if i < len(title_lines) - 1:
-            cur_y += LINE_SPACING_MODE2  # ⬅️ ИЗМЕНЕНО
+            cur_y += LINE_SPACING_MODE2
 
     return image
 
