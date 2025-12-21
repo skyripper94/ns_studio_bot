@@ -51,11 +51,13 @@ FONT_SIZE_LOGO = 24
 FONT_SIZE_MIN = 44
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = -110
-SPACING_BOTTOM_MODE3 = 40
+SPACING_BOTTOM_MODE1 = -110  # режим 1 (лого)
+SPACING_BOTTOM_MODE2 = -70   # режим 2 (выше на 40px)
+SPACING_BOTTOM_MODE3 = 40    # режим 3
 SPACING_LOGO_TO_TITLE = 8
 SPACING_TITLE_TO_SUBTITLE = -30
 LINE_SPACING = -42
+LINE_SPACING_MODE2 = -35  # режим 2 (меньше наложения)
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -598,7 +600,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_h = bb[3] - bb[1]
 
     total_h = logo_h + SPACING_LOGO_TO_TITLE + total_title_h
-    start_y = height - SPACING_BOTTOM - total_h
+    start_y = height - SPACING_BOTTOM_MODE1 - total_h  # ⬅️ ИЗМЕНЕНО
 
     logo_x = (width - logo_w) // 2
     logo_y = start_y
@@ -636,9 +638,9 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     )
 
     line_h = _estimate_fixed_line_height(title_font)
-    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING_MODE2)  # ⬅️ ИЗМЕНЕНО
 
-    start_y = height - SPACING_BOTTOM - total_h
+    start_y = height - SPACING_BOTTOM_MODE2 - total_h  # ⬅️ ИЗМЕНЕНО
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
@@ -648,7 +650,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         cur_y += line_h
         if i < len(title_lines) - 1:
-            cur_y += LINE_SPACING
+            cur_y += LINE_SPACING_MODE2  # ⬅️ ИЗМЕНЕНО
 
     return image
 
