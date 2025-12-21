@@ -38,71 +38,71 @@ REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))
 FORCE_PRESERVE_OUTSIDE_MASK = True
 
 # ============== ЦВЕТА ==============
-COLOR_TURQUOISE = (0, 206, 209)
-COLOR_WHITE = (255, 255, 255)
-COLOR_OUTLINE = (60, 60, 60)
+COLOR_TURQUOISE = (0, 206, 209)    # бирюзовый цвет заголовков
+COLOR_WHITE = (255, 255, 255)      # белый цвет для лого и подзаголовка
+COLOR_OUTLINE = (60, 60, 60)       # темно-серая обводка текста
 
 # ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 48
-FONT_SIZE_MODE2 = 48
-FONT_SIZE_MODE3_TITLE = 48
-FONT_SIZE_MODE3_SUBTITLE = 46
-FONT_SIZE_LOGO = 24
-FONT_SIZE_MIN = 44
+FONT_SIZE_MODE1 = 48               # заголовок в режиме ЛОГО
+FONT_SIZE_MODE2 = 48               # заголовок в режиме ТЕКСТ
+FONT_SIZE_MODE3_TITLE = 48         # заголовок в режиме КОНТЕНТ
+FONT_SIZE_MODE3_SUBTITLE = 46      # подзаголовок в режиме КОНТЕНТ
+FONT_SIZE_LOGO = 24                # размер @neurostep.media
+FONT_SIZE_MIN = 44                 # минимальный размер (не меньше)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM_MODE1 = -110  # режим 1 (лого)
-SPACING_BOTTOM_MODE2 = -70   # режим 2 (выше на 40px)
-SPACING_BOTTOM_MODE3 = 40    # режим 3
-SPACING_LOGO_TO_TITLE = 8
-SPACING_TITLE_TO_SUBTITLE = -30
-LINE_SPACING = -42
-LINE_SPACING_MODE2 = -35  # режим 2 (меньше наложения)
-LOGO_LINE_LENGTH = 310
-LOGO_LINE_THICKNESS_PX = 3
+SPACING_BOTTOM_MODE1 = -110        # отступ снизу для режима 1 (лого)
+SPACING_BOTTOM_MODE2 = -70         # отступ снизу для режима 2 (+40px выше)
+SPACING_BOTTOM_MODE3 = 40          # отступ снизу для режима 3
+SPACING_LOGO_TO_TITLE = 8          # расстояние от лого до заголовка
+SPACING_TITLE_TO_SUBTITLE = -30    # расстояние заголовок → подзаголовок
+LINE_SPACING = -42                 # межстрочный интервал (режим 1,3)
+LINE_SPACING_MODE2 = -35           # межстрочный интервал для режима 2
+LOGO_LINE_LENGTH = 310             # длина горизонтальных линий у лого
+LOGO_LINE_THICKNESS_PX = 3         # толщина линий у лого
 
 # ============== МАСКА / OCR ==============
-MASK_BOTTOM_PERCENT = 32
-OCR_BOTTOM_PERCENT = 32
+MASK_BOTTOM_PERCENT = 32           # % снизу для удаления (маска)
+OCR_BOTTOM_PERCENT = 32            # % снизу для OCR распознавания
 
 # ============== ГРАДИЕНТ (Instagram-стиль) ==============
-GRADIENT_HEIGHT_MODE12 = 55
-GRADIENT_HEIGHT_MODE3 = 45
-GRADIENT_SOLID_FRACTION = 0.5
-GRADIENT_TRANSITION_CURVE = 2.2
-GRADIENT_BLUR_SIGMA = 120
+GRADIENT_HEIGHT_MODE12 = 55        # % высоты градиента (режим 1-2)
+GRADIENT_HEIGHT_MODE3 = 45         # % высоты градиента (режим 3)
+GRADIENT_SOLID_FRACTION = 0.5      # 50% градиента = сплошной черный
+GRADIENT_TRANSITION_CURVE = 2.2    # плавность перехода (выше = мягче)
+GRADIENT_BLUR_SIGMA = 120          # размытие градиента (выше = больше)
 
 # ============== УЛУЧШЕНИЯ ГРАДИЕНТА ==============
-GRADIENT_NOISE_INTENSITY = 10
+GRADIENT_NOISE_INTENSITY = 10      # шум на градиенте (0-20, пленочный эффект)
 
 # ============== ПОСТОБРАБОТКА ИЗОБРАЖЕНИЯ ==============
-ENHANCE_BRIGHTNESS = 1.05
-ENHANCE_CONTRAST = 1.0
-ENHANCE_SATURATION = 1.25
-ENHANCE_SHARPNESS = 1.3
+ENHANCE_BRIGHTNESS = 1.05          # яркость (1.0 = без изменений)
+ENHANCE_CONTRAST = 1.0             # контраст (1.0 = без изменений)
+ENHANCE_SATURATION = 1.25          # насыщенность (+25%)
+ENHANCE_SHARPNESS = 1.3            # резкость (+30%)
 
 # ============== КЕРНИНГ ТЕКСТА ==============
-LETTER_SPACING_PX = 4
+LETTER_SPACING_PX = 4              # расстояние между буквами (премиум эффект)
 
 # ============== УЛУЧШЕНИЯ ТЕКСТА ==============
-TEXT_GRAIN_INTENSITY = 0.25
-TEXT_INNER_SHADOW_SIZE = 1
-TEXT_SHARPEN_AMOUNT = 0.3
+TEXT_GRAIN_INTENSITY = 0.25        # зернистость на тексте (пленочный эффект)
+TEXT_INNER_SHADOW_SIZE = 1         # внутренняя тень (глубина букв)
+TEXT_SHARPEN_AMOUNT = 0.3          # резкость текста после растяжения
 
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 2.1
-TEXT_STRETCH_WIDTH = 1.05
+TEXT_STRETCH_HEIGHT = 2.1          # вытягивание текста по высоте (х2.1)
+TEXT_STRETCH_WIDTH = 1.05          # вытягивание текста по ширине (х1.05)
 
 # ============== ТЕНИ / ОБВОДКИ ==============
-TEXT_SHADOW_OFFSET = 3
-TEXT_OUTLINE_THICKNESS = 2
+TEXT_SHADOW_OFFSET = 3             # смещение тени (в пикселях)
+TEXT_OUTLINE_THICKNESS = 2         # толщина обводки букв
 
 # ============== БЛОК ТЕКСТА ==============
-TEXT_WIDTH_PERCENT = 0.90
+TEXT_WIDTH_PERCENT = 0.90          # 90% ширины экрана для текста
 
 # ============== OPENCV FALLBACK ==============
-OPENCV_BLUR_SIGMA = 5
-OPENCV_INPAINT_RADIUS = 3
+OPENCV_BLUR_SIGMA = 5              # размытие при fallback (если Replicate не работает)
+OPENCV_INPAINT_RADIUS = 3          # радиус inpaint при fallback
 
 # ============== ПУТЬ К ШРИФТУ ==============
 FONT_PATH = os.getenv("FONT_PATH", "/app/fonts/WaffleSoft.otf").strip()
