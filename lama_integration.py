@@ -74,6 +74,12 @@ GRADIENT_SOLID_FRACTION = 0.5  # 50% градиента = сплошной че�
 GRADIENT_TRANSITION_CURVE = 2.2  # плавность перехода (выше = мягче)
 GRADIENT_BLUR_SIGMA = 120  # размытие для рассеивания (выше = сильнее)
 
+# ============== ПОСТОБРАБОТКА ИЗОБРАЖЕНИЯ ==============
+ENHANCE_BRIGHTNESS = 1.15   # яркость (1.0 = без изменений, 1.2 = +20%)
+ENHANCE_CONTRAST = 1.2      # контраст (1.0 = без изменений, 1.3 = +30%)
+ENHANCE_SATURATION = 1.25   # насыщенность (1.0 = без изменений, 1.3 = +30%)
+ENHANCE_SHARPNESS = 1.3     # резкость (1.0 = без изменений, 1.5 = сильно)
+
 # ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
 TEXT_STRETCH_HEIGHT = 2.1
 TEXT_STRETCH_WIDTH = 1.05
@@ -390,6 +396,28 @@ def create_gradient_layer(width: int, height: int,
     
     logger.info(f"✨ Градиент: {gradient_height_percent}%, solid={GRADIENT_SOLID_FRACTION*100}%, blur={GRADIENT_BLUR_SIGMA}")
     return Image.fromarray(rgba, mode="RGBA")
+
+# ---------------------------------------------------------------------
+# Постобработка
+# ---------------------------------------------------------------------
+def enhance_image(image_bgr: np.ndarray) -> np.ndarray:
+    """Улучшение изображения: яркость, контраст, насыщенность, резкость."""
+    
+    # 1. ЯРКОСТЬ И КОНТРАСТ
+    enhanced = cv2.convertScaleAbs(image_bgr, alpha=ENHANCE_CONTRAST, beta=(ENHANCE_BRIGHTNESS - 1.0) * 30)
+    
+    # 2. НАСЫЩЕННОСТЬ
+    hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * ENHANCE_SATURATION, 0, 255)
+    enhanced = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    
+    # 3. РЕЗКОСТЬ (unsharp mask)
+    if ENHANCE_SHARPNESS > 1.0:
+        blurred = cv2.GaussianBlur(enhanced, (0, 0), 3)
+        enhanced = cv2.addWeighted(enhanced, ENHANCE_SHARPNESS, blurred, -(ENHANCE_SHARPNESS - 1.0), 0)
+    
+    logger.info(f"📸 Улучшение: яркость={ENHANCE_BRIGHTNESS:.2f}, контраст={ENHANCE_CONTRAST:.2f}, насыщенность={ENHANCE_SATURATION:.2f}, резкость={ENHANCE_SHARPNESS:.2f}")
+    return enhanced
 
 # ---------------------------------------------------------------------
 # Текст: подбор размера и отрисовка со "stretch"
