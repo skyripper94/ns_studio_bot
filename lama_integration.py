@@ -68,8 +68,8 @@ MASK_BOTTOM_PERCENT = 32
 OCR_BOTTOM_PERCENT = 32
 
 # ============== ГРАДИЕНТ (Instagram-стиль) ==============
-GRADIENT_HEIGHT_MODE12 = 45  # % высоты изображения для режимов 1-2
-GRADIENT_HEIGHT_MODE3 = 35   # % высоты изображения для режима 3
+GRADIENT_HEIGHT_MODE12 = 55  # % высоты изображения для режимов 1-2
+GRADIENT_HEIGHT_MODE3 = 45   # % высоты изображения для режима 3
 GRADIENT_SOLID_FRACTION = 0.5  # 50% градиента = сплошной черный
 GRADIENT_TRANSITION_CURVE = 2.2  # плавность перехода (выше = мягче)
 GRADIENT_BLUR_SIGMA = 120  # размытие для рассеивания (выше = сильнее)
