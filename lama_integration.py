@@ -74,11 +74,17 @@ GRADIENT_SOLID_FRACTION = 0.5  # 50% градиента = сплошной че�
 GRADIENT_TRANSITION_CURVE = 2.2  # плавность перехода (выше = мягче)
 GRADIENT_BLUR_SIGMA = 120  # размытие для рассеивания (выше = сильнее)
 
+# ============== УЛУЧШЕНИЯ ГРАДИЕНТА ==============
+GRADIENT_NOISE_INTENSITY = 8  # шум на градиенте (0-20, рекомендуется 5-10)
+
 # ============== ПОСТОБРАБОТКА ИЗОБРАЖЕНИЯ ==============
 ENHANCE_BRIGHTNESS = 1.15   # яркость (1.0 = без изменений, 1.2 = +20%)
 ENHANCE_CONTRAST = 1.2      # контраст (1.0 = без изменений, 1.3 = +30%)
 ENHANCE_SATURATION = 1.25   # насыщенность (1.0 = без изменений, 1.3 = +30%)
 ENHANCE_SHARPNESS = 1.3     # резкость (1.0 = без изменений, 1.5 = сильно)
+
+# ============== КЕРНИНГ ТЕКСТА ==============
+LETTER_SPACING_PX = 3  # расстояние между буквами в px (0 = стандарт, 2-4 = минимальный)
 
 # ============== УЛУЧШЕНИЯ ТЕКСТА ==============
 TEXT_GRAIN_INTENSITY = 0.15  # зернистость (0.0 = нет, 0.3 = сильная)
@@ -391,15 +397,21 @@ def create_gradient_layer(width: int, height: int,
                 alpha[i] = 1.0 - (t_norm ** GRADIENT_TRANSITION_CURVE)
     
     alpha_u8 = (alpha * 255).astype(np.uint8)
-    
     alpha_2d = np.tile(alpha_u8[:, None], (1, width))
+    
+    # ШУМОВОЙ СЛОЙ (до блюра)
+    if GRADIENT_NOISE_INTENSITY > 0:
+        noise = np.random.normal(0, GRADIENT_NOISE_INTENSITY, (height, width)).astype(np.float32)
+        alpha_2d_float = alpha_2d.astype(np.float32) + noise
+        alpha_2d = np.clip(alpha_2d_float, 0, 255).astype(np.uint8)
+    
     ksize_y = int(GRADIENT_BLUR_SIGMA * 6) | 1
     alpha_blurred = cv2.GaussianBlur(alpha_2d, (1, ksize_y), sigmaX=0, sigmaY=GRADIENT_BLUR_SIGMA)
     
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha_blurred
     
-    logger.info(f"✨ Градиент: {gradient_height_percent}%, solid={GRADIENT_SOLID_FRACTION*100}%, blur={GRADIENT_BLUR_SIGMA}")
+    logger.info(f"✨ Градиент: {gradient_height_percent}%, solid={GRADIENT_SOLID_FRACTION*100}%, blur={GRADIENT_BLUR_SIGMA}, noise={GRADIENT_NOISE_INTENSITY}")
     return Image.fromarray(rgba, mode="RGBA")
 
 # ---------------------------------------------------------------------
