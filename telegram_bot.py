@@ -28,7 +28,7 @@ from lama_integration import (
     render_mode2_text,
     render_mode3_content,
     MASK_BOTTOM_PERCENT,
-    OCR_BOTTOM_PERCENT
+    OCR_BOTTOM_PERCENT,
     GRADIENT_HEIGHT_MODE12,  # ⬅️ ДОБАВЬ
     GRADIENT_HEIGHT_MODE3     # ⬅️ ДОБАВЬ
 )
