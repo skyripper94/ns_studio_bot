@@ -29,6 +29,8 @@ from lama_integration import (
     render_mode3_content,
     MASK_BOTTOM_PERCENT,
     OCR_BOTTOM_PERCENT
+    GRADIENT_HEIGHT_MODE12,  # ⬅️ ДОБАВЬ
+    GRADIENT_HEIGHT_MODE3     # ⬅️ ДОБАВЬ
 )
 
 load_dotenv()
@@ -496,9 +498,9 @@ async def process_full_mode_step3(update, user_id: int):
     pil = PILImage.fromarray(clean_rgb).convert("RGBA")
     
     if submode == 3:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=80, max_opacity=0.8)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], gradient_height_percent=GRADIENT_HEIGHT_MODE3)
     else:
-        grad = create_gradient_layer(pil.size[0], pil.size[1], cover_percent=45, solid_raise_px=125, max_opacity=0.9)
+        grad = create_gradient_layer(pil.size[0], pil.size[1], gradient_height_percent=GRADIENT_HEIGHT_MODE12)
     
     pil = PILImage.alpha_composite(pil, grad)
     
