@@ -92,8 +92,8 @@ TEXT_STRETCH_HEIGHT = 2.1
 TEXT_STRETCH_WIDTH = 1.05
 
 # ============== ТЕНИ / ОБВОДКИ ==============
-TEXT_SHADOW_OFFSET = 2
-TEXT_OUTLINE_THICKNESS = 1
+TEXT_SHADOW_OFFSET = 3
+TEXT_OUTLINE_THICKNESS = 2
 
 # ============== БЛОК ТЕКСТА ==============
 TEXT_WIDTH_PERCENT = 0.90
