@@ -51,11 +51,11 @@ FONT_SIZE_LOGO = 24
 FONT_SIZE_MIN = 44
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM = -80
+SPACING_BOTTOM = -55
 SPACING_BOTTOM_MODE3 = 40
 SPACING_LOGO_TO_TITLE = 8
 SPACING_TITLE_TO_SUBTITLE = -30
-LINE_SPACING = -45
+LINE_SPACING = -41
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -71,7 +71,7 @@ GRADIENT_TRANSITION_CURVE = 2.2
 GRADIENT_BLUR_SIGMA = 120
 
 # ============== УЛУЧШЕНИЯ ГРАДИЕНТА ==============
-GRADIENT_NOISE_INTENSITY = 8
+GRADIENT_NOISE_INTENSITY = 10
 
 # ============== ПОСТОБРАБОТКА ИЗОБРАЖЕНИЯ ==============
 ENHANCE_BRIGHTNESS = 1.05
@@ -80,10 +80,10 @@ ENHANCE_SATURATION = 1.25
 ENHANCE_SHARPNESS = 1.3
 
 # ============== КЕРНИНГ ТЕКСТА ==============
-LETTER_SPACING_PX = 3
+LETTER_SPACING_PX = 4
 
 # ============== УЛУЧШЕНИЯ ТЕКСТА ==============
-TEXT_GRAIN_INTENSITY = 0.15
+TEXT_GRAIN_INTENSITY = 0.25
 TEXT_INNER_SHADOW_SIZE = 1
 TEXT_SHARPEN_AMOUNT = 0.3
 
