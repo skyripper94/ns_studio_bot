@@ -56,7 +56,7 @@ SPACING_BOTTOM_MODE2 = -20         # отступ снизу для режима
 SPACING_BOTTOM_MODE3 = 40          # отступ снизу для режима 3
 SPACING_LOGO_TO_TITLE = 8          # расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = -30    # расстояние заголовок → подзаголовок
-LINE_SPACING = -47                 # межстрочный интервал (режим 1,3)
+LINE_SPACING = -60                 # межстрочный интервал (режим 1,3)
 LOGO_LINE_LENGTH = 310             # длина горизонтальных линий у лого
 LOGO_LINE_THICKNESS_PX = 3         # толщина линий у лого
 
