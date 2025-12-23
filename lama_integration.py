@@ -56,12 +56,14 @@ SPACING_BOTTOM_MODE2 = -20         # отступ снизу для режима
 SPACING_BOTTOM_MODE3 = 40          # отступ снизу для режима 3
 SPACING_LOGO_TO_TITLE = 4          # расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = -30    # расстояние заголовок → подзаголовок
-LINE_SPACING = -41                  # межстрочный интервал (режим 1,3)
+LINE_SPACING = -35                 # межстрочный интервал (режим 1,3)
 LOGO_LINE_LENGTH = 310             # длина горизонтальных линий у лого
 LOGO_LINE_THICKNESS_PX = 3         # толщина линий у лого
 
 # ============== МАСКА / OCR ==============
-MASK_BOTTOM_PERCENT = 33           # % снизу для удаления (маска)
+MASK_BOTTOM_MODE1 = 36
+MASK_BOTTOM_MODE2 = 33
+MASK_BOTTOM_MODE3 = 30           # % снизу для удаления (маска)
 OCR_BOTTOM_PERCENT = 32            # % снизу для OCR распознавания
 
 # ============== ГРАДИЕНТ (Instagram-стиль) ==============
@@ -578,6 +580,7 @@ def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
     return base + pad
 
 
+# ============== РЕЖИМ 1 ==============
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     image = image.convert("RGBA")
     draw = ImageDraw.Draw(image, "RGBA")
@@ -589,7 +592,15 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    line_h = _estimate_fixed_line_height(title_font)
+    # ПРОХОД 1: Находим максимальную высоту
+    temp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    max_h = 0
+    for ln in title_lines:
+        actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        max_h = max(max_h, actual_h)
+    
+    # Используем max_h как фиксированную высоту строки
+    line_h = max_h
     total_title_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
@@ -599,7 +610,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_h = bb[3] - bb[1]
 
     total_h = logo_h + SPACING_LOGO_TO_TITLE + total_title_h
-    start_y = height - SPACING_BOTTOM_MODE1 - total_h  # ⬅️ ИЗМЕНЕНО
+    start_y = height - SPACING_BOTTOM_MODE1 - total_h
 
     logo_x = (width - logo_w) // 2
     logo_y = start_y
@@ -612,6 +623,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
+    # ПРОХОД 2: Рендер с фиксированным line_h
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
     block_left = (width - max_text_width) // 2
     
@@ -619,13 +631,14 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h
+        cur_y += line_h  # ФИКСИРОВАННАЯ ВЫСОТА
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
     return image
 
 
+# ============== РЕЖИМ 2 ==============
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     image = image.convert("RGBA")
     width, height = image.size
@@ -636,23 +649,33 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    line_h = _estimate_fixed_line_height(title_font)
+    # ПРОХОД 1: Находим максимальную высоту
+    temp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    max_h = 0
+    for ln in title_lines:
+        actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        max_h = max(max_h, actual_h)
+    
+    line_h = max_h
     total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     start_y = height - SPACING_BOTTOM_MODE2 - total_h
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
+    # ПРОХОД 2: Рендер с фиксированным line_h
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        actual_h = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += max(line_h, actual_h)  # ⬅️ ИСПОЛЬЗУЙ ФАКТИЧЕСКУЮ ВЫСОТУ
+        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        cur_y += line_h  # ФИКСИРОВАННАЯ ВЫСОТА
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
     return image
 
+
+# ============== РЕЖИМ 3 ==============
 def render_mode3_content(image: Image.Image, title_translated: str, subtitle_translated: str) -> Image.Image:
     image = image.convert("RGBA")
     width, height = image.size
@@ -670,8 +693,21 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    title_line_h = _estimate_fixed_line_height(title_font)
-    sub_line_h = _estimate_fixed_line_height(subtitle_font)
+    # ПРОХОД 1: Находим максимальные высоты
+    temp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    
+    max_title_h = 0
+    for ln in title_lines:
+        actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        max_title_h = max(max_title_h, actual_h)
+    
+    max_sub_h = 0
+    for ln in subtitle_lines:
+        actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        max_sub_h = max(max_sub_h, actual_h)
+
+    title_line_h = max_title_h
+    sub_line_h = max_sub_h
 
     total_title_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
     total_sub_h = sub_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
@@ -682,6 +718,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
+    # ПРОХОД 2: Рендер заголовков
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
@@ -692,6 +729,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
 
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
+    # ПРОХОД 2: Рендер подзаголовков
     for i, ln in enumerate(subtitle_lines):
         line_w = int(_text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
