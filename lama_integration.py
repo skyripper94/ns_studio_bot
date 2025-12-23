@@ -490,20 +490,24 @@ def _draw_text_with_letter_spacing(draw: ImageDraw.ImageDraw, pos: tuple, text: 
     return total_width - spacing if total_width > 0 else 0
 
 
-def draw_text_with_stretch(base_image: Image.Image,
-                           x: int, y: int,
-                           text: str,
-                           font: ImageFont.FreeTypeFont,
-                           fill_color: tuple,
-                           outline_color: tuple,
-                           stretch_width: float = TEXT_STRETCH_WIDTH,
-                           stretch_height: float = TEXT_STRETCH_HEIGHT,
-                           shadow_offset: int = TEXT_SHADOW_OFFSET,
-                           apply_enhancements: bool = True) -> int:
+def draw_text_with_stretch(
+    base_image: Image.Image,
+    x: int, y: int,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill_color: tuple,
+    outline_color: tuple,
+    stretch_width: float = TEXT_STRETCH_WIDTH,
+    stretch_height: float = TEXT_STRETCH_HEIGHT,
+    shadow_offset: int = TEXT_SHADOW_OFFSET,
+    apply_enhancements: bool = True
+) -> int:
 
+    # ФИКСИРОВАННАЯ ВЫСОТА ИЗ МЕТРИК
     ascent, descent = font.getmetrics()
+    fixed_height = int((ascent + descent) * stretch_height)
 
-    # ширина текста (с учётом letter spacing) — как у тебя
+    bbox = font.getbbox(text)
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
 
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
@@ -514,9 +518,8 @@ def draw_text_with_stretch(base_image: Image.Image,
     d = ImageDraw.Draw(temp)
 
     tx = pad
-    ty = pad + int(ascent)  # baseline в temp
+    ty = pad + int(ascent)  # baseline
 
-    # shadow
     _draw_text_with_letter_spacing(
         d,
         (tx + shadow_offset, ty + shadow_offset),
@@ -526,12 +529,11 @@ def draw_text_with_stretch(base_image: Image.Image,
         spacing=LETTER_SPACING_PX
     )
 
-    # outline
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
         for dx, dy in [(-1, -1), (-1, 0), (-1, 1),
-                       (0, -1),           (0, 1),
-                       (1, -1),  (1, 0),  (1, 1)]:
+                       (0, -1),          (0, 1),
+                       (1, -1),  (1, 0), (1, 1)]:
             _draw_text_with_letter_spacing(
                 d,
                 (tx + dx * r, ty + dy * r),
@@ -541,7 +543,6 @@ def draw_text_with_stretch(base_image: Image.Image,
                 spacing=LETTER_SPACING_PX
             )
 
-    # fill
     _draw_text_with_letter_spacing(
         d,
         (tx, ty),
@@ -555,8 +556,10 @@ def draw_text_with_stretch(base_image: Image.Image,
         if TEXT_INNER_SHADOW_SIZE > 0:
             temp_arr = np.array(temp)
             alpha = temp_arr[:, :, 3]
-            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1,
-                              TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
+            kernel = np.ones(
+                (TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1),
+                np.uint8
+            )
             eroded = cv2.erode(alpha, kernel, iterations=1)
             inner_shadow_mask = (alpha > 0) & (eroded == 0)
             temp_arr[inner_shadow_mask, :3] = temp_arr[inner_shadow_mask, :3] * 0.7
@@ -571,38 +574,38 @@ def draw_text_with_stretch(base_image: Image.Image,
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
 
-    # ---------------------------
-    # ✅ КЛЮЧЕВОЙ FIX:
-    # bbox используем только по X, а по Y — фиксированный line box (ascent+descent + запас).
-    # Тогда запятые/хвосты не меняют межстрочный интервал.
-    # ---------------------------
-    alpha_ch = temp.split()[-1]
-    bb = alpha_ch.getbbox()
+    # -----------------------------
+    # ✅ МИНИМАЛЬНАЯ КОРРЕКТИРОВКА:
+    # getbbox() оставляем для X, но Y фиксируем по baseline (ascent/descent),
+    # чтобы пунктуация (запятая/точка) не влияла на вертикальный bbox и межстрочник.
+    # Что вылезет за line-box — будет обрезано (как ты и просил).
+    # -----------------------------
+    bb = temp.getbbox()
     if not bb:
-        return int((ascent + descent) * stretch_height)
+        return fixed_height
 
-    x0, _, x1, _ = bb
+    x0, y0, x1, y1 = bb
 
-    # запас, чтобы не резать тень/обводку
-    extra = int(shadow_offset + TEXT_OUTLINE_THICKNESS + 2)
+    extra = int(TEXT_OUTLINE_THICKNESS + shadow_offset + 2)  # запас, чтобы не резать обводку/тень
 
-    # фиксированный бокс по Y вокруг baseline
-    y0 = max(0, (ty - ascent) - extra)
-    y1 = min(temp_h, (ty + descent) + extra)
+    # фиксированные границы по Y вокруг baseline
+    fixed_y0 = max(0, (ty - ascent) - extra)
+    fixed_y1 = min(temp_h, (ty + descent) + extra)
 
-    crop = temp.crop((x0, y0, x1, y1))
+    # используем X от bbox, Y фиксируем
+    crop = temp.crop((x0, fixed_y0, x1, fixed_y1))
 
-    # одинаковая высота для всех строк (включая запас)
-    sh = int((ascent + descent + 2 * extra) * stretch_height)
-
-    # одинаковое растяжение по ширине (как у тебя — от tw, а не от bbox)
-    sw = max(1, int(tw * stretch_width))
+    # ✅ ИСПОЛЬЗУЕМ ОРИГИНАЛЬНУЮ ШИРИНУ ДЛЯ РАСТЯЖЕНИЯ
+    original_w = tw  # ширина ДО crop
+    sw = max(1, int(original_w * stretch_width))  # одинаковое растяжение для всех
+    sh = fixed_height
 
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
 
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
         crop_arr = np.array(crop).astype(np.float32)
         rgb = crop_arr[:, :, :3]
+        alpha = crop_arr[:, :, 3:4]
         blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
         sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
         sharpened = np.clip(sharpened, 0, 255)
