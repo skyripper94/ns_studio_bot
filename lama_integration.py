@@ -500,14 +500,13 @@ def draw_text_with_stretch(base_image: Image.Image,
                            stretch_height: float = TEXT_STRETCH_HEIGHT,
                            shadow_offset: int = TEXT_SHADOW_OFFSET,
                            apply_enhancements: bool = True) -> int:
-    
+
     # ФИКСИРОВАННАЯ ВЫСОТА ИЗ МЕТРИК
     ascent, descent = font.getmetrics()
     fixed_height = int((ascent + descent) * stretch_height)
-    
-    bbox = font.getbbox(text)
+
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
-    
+
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
     temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
     temp_h = int((ascent + descent + 10) * (stretch_height + 1.0)) + pad * 2
@@ -516,27 +515,54 @@ def draw_text_with_stretch(base_image: Image.Image,
     d = ImageDraw.Draw(temp)
 
     tx = pad
-    ty = pad + int(ascent)
+    ty = pad + int(ascent)  # baseline
 
-    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
+    # shadow
+    _draw_text_with_letter_spacing(
+        d,
+        (tx + shadow_offset, ty + shadow_offset),
+        text,
+        font,
+        (0, 0, 0, 128),
+        spacing=LETTER_SPACING_PX
+    )
 
+    # outline
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
-        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
-            _draw_text_with_letter_spacing(d, (tx + dx * r, ty + dy * r), text, font, outline_color, spacing=LETTER_SPACING_PX)
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1),
+                       (0, -1),           (0, 1),
+                       (1, -1),  (1, 0),  (1, 1)]:
+            _draw_text_with_letter_spacing(
+                d,
+                (tx + dx * r, ty + dy * r),
+                text,
+                font,
+                outline_color,
+                spacing=LETTER_SPACING_PX
+            )
 
-    _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
-    
+    # fill
+    _draw_text_with_letter_spacing(
+        d,
+        (tx, ty),
+        text,
+        font,
+        fill_color,
+        spacing=LETTER_SPACING_PX
+    )
+
     if apply_enhancements:
         if TEXT_INNER_SHADOW_SIZE > 0:
             temp_arr = np.array(temp)
             alpha = temp_arr[:, :, 3]
-            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
+            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1,
+                              TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
             eroded = cv2.erode(alpha, kernel, iterations=1)
             inner_shadow_mask = (alpha > 0) & (eroded == 0)
             temp_arr[inner_shadow_mask, :3] = temp_arr[inner_shadow_mask, :3] * 0.7
             temp = Image.fromarray(temp_arr)
-        
+
         if TEXT_GRAIN_INTENSITY > 0:
             temp_arr = np.array(temp).astype(np.float32)
             alpha = temp_arr[:, :, 3]
@@ -546,30 +572,22 @@ def draw_text_with_stretch(base_image: Image.Image,
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
 
-    bb = temp.getbbox()
+    # ✅ FIX: bbox берем по alpha, но обрезаем ТОЛЬКО по X, по Y держим фиксированно
+    alpha_ch = temp.split()[-1]
+    bb = alpha_ch.getbbox()
     if not bb:
         return fixed_height
 
-    # ✅ CROP С ФИКСИРОВАННОЙ ВЫСОТОЙ ОТ BASELINE
-    baseline_y = pad + int(ascent)
-    
-    # Crop от baseline минус ascent до baseline плюс descent
-    crop_top = max(0, baseline_y - int(ascent * stretch_height))
-    crop_bottom = min(temp_h, baseline_y + int(descent * stretch_height))
-    
-    # Crop по ширине как обычно
-    crop_left = bb[0]
-    crop_right = bb[2]
-    
-    crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
-    
-    # ✅ RESIZE С ФИКСИРОВАННОЙ ВЫСОТОЙ
+    x0, _, x1, _ = bb
+    crop = temp.crop((x0, 0, x1, temp_h))
+
+    # ✅ ИСПОЛЬЗУЕМ ОРИГИНАЛЬНУЮ ШИРИНУ ДЛЯ РАСТЯЖЕНИЯ
     original_w = tw
-    sw = max(1, int(original_w * stretch_width))
+    sw = max(1, int(original_w * stretch_width))  # одинаковое растяжение для всех
     sh = fixed_height
-    
+
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
-    
+
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
         crop_arr = np.array(crop).astype(np.float32)
         rgb = crop_arr[:, :, :3]
