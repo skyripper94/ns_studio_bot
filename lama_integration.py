@@ -44,7 +44,7 @@ SPACING_BOTTOM_MODE2 = 130
 SPACING_BOTTOM_MODE3 = 90
 SPACING_LOGO_TO_TITLE = 1
 SPACING_TITLE_TO_SUBTITLE = 6
-LINE_SPACING = 3
+LINE_SPACING = 8
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -529,7 +529,7 @@ def draw_text_with_stretch_fixed(base_image: Image.Image,
     
     # Позиция baseline в temp изображении - ФИКСИРОВАННАЯ
     tx = pad
-    ty_baseline = pad + int(ascent * stretch_height * 0.55)  # baseline позиция
+    ty_baseline = pad + ascent  # baseline = pad + ascent (стандартная позиция)
     
     # Рисуем тень
     _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty_baseline + shadow_offset), 
@@ -555,16 +555,14 @@ def draw_text_with_stretch_fixed(base_image: Image.Image,
     if not bb:
         return
     
-    # Вертикальные границы - ФИКСИРОВАННЫЕ
-    crop_top = pad // 2
-    crop_bottom = temp_h - pad // 2
-    
-    # Горизонтальные - по контенту
-    margin_h = 3
-    crop_left = max(0, bb[0] - margin_h)
-    crop_right = min(temp_w, bb[2] + margin_h)
-    
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
+    
+    # Масштабирование к ФИКСИРОВАННЫМ размерам
+    target_w = max(1, int(tw * stretch_width))
+    target_h = fixed_line_height
+    
+    # ПРИНУДИТЕЛЬНЫЙ resize к target размерам (не пропорциональный!)
+    crop = crop.resize((target_w, target_h), Image.Resampling.LANCZOS)
     
     # Масштабирование к ФИКСИРОВАННОЙ высоте
     target_w = max(1, int(tw * stretch_width))
@@ -685,7 +683,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = block_left + (max_text_width - line_w) // 2
+        line_x = (width - line_w) // 2  # центр по всей ширине изображения
         
         draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
                                      COLOR_TURQUOISE, COLOR_OUTLINE, fixed_line_h)
@@ -717,7 +715,7 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
 
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = block_left + (max_text_width - line_w) // 2
+        line_x = (width - line_w) // 2  # центр по всей ширине изображения
         
         draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
                                      COLOR_TURQUOISE, COLOR_OUTLINE, fixed_line_h)
@@ -761,7 +759,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     # Рендер заголовка
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = block_left + (max_text_width - line_w) // 2
+        line_x = (width - line_w) // 2  # центр по всей ширине изображения
         
         draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
                                      COLOR_TURQUOISE, COLOR_OUTLINE, fixed_title_h)
