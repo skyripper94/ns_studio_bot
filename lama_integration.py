@@ -549,11 +549,19 @@ def draw_text_with_stretch_fixed(base_image: Image.Image,
     if apply_enhancements:
         temp = _apply_text_enhancements(temp)
     
-    # ФИКСИРОВАННЫЙ crop - НЕ зависит от содержимого текста
-    # Используем только горизонтальный bbox для ширины
+   # ФИКСИРОВАННЫЙ crop - НЕ зависит от содержимого текста
     bb = temp.getbbox()
     if not bb:
         return
+    
+    # Вертикальные границы - ФИКСИРОВАННЫЕ (не зависят от букв)
+    crop_top = pad // 2
+    crop_bottom = temp_h - pad // 2
+    
+    # Горизонтальные - по контенту
+    margin_h = 3
+    crop_left = max(0, bb[0] - margin_h)
+    crop_right = min(temp_w, bb[2] + margin_h)
     
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
     
@@ -561,19 +569,8 @@ def draw_text_with_stretch_fixed(base_image: Image.Image,
     target_w = max(1, int(tw * stretch_width))
     target_h = fixed_line_height
     
-    # ПРИНУДИТЕЛЬНЫЙ resize к target размерам (не пропорциональный!)
+    # ПРИНУДИТЕЛЬНЫЙ resize к target размерам
     crop = crop.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    
-    # Масштабирование к ФИКСИРОВАННОЙ высоте
-    target_w = max(1, int(tw * stretch_width))
-    target_h = fixed_line_height
-    
-    # Пропорциональное масштабирование с сохранением высоты
-    crop_w, crop_h = crop.size
-    scale = target_h / crop_h if crop_h > 0 else 1
-    new_w = int(crop_w * scale)
-    
-    crop = crop.resize((new_w, target_h), Image.Resampling.LANCZOS)
     
     # Резкость после масштабирования
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
