@@ -51,12 +51,12 @@ FONT_SIZE_LOGO = 24                # размер @neurostep.media
 FONT_SIZE_MIN = 44                 # минимальный размер (не меньше)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM_MODE1 = 45          # отступ снизу для режима 1 (лого)
-SPACING_BOTTOM_MODE2 = 130         # отступ снизу для режима 2 (+40px выше)
-SPACING_BOTTOM_MODE3 = 90          # отступ снизу для режима 3
-SPACING_LOGO_TO_TITLE = 1          # расстояние от лого до заголовка
-SPACING_TITLE_TO_SUBTITLE = 6      # расстояние заголовок → подзаголовок
-LINE_SPACING = -95                # межстрочный интервал (режим 1,3)
+SPACING_BOTTOM_MODE1 = 150          # отступ снизу для режима 1 (лого)
+SPACING_BOTTOM_MODE2 = 150          # отступ снизу для режима 2 (+40px выше)
+SPACING_BOTTOM_MODE3 = 170          # отступ снизу для режима 3
+SPACING_LOGO_TO_TITLE = -50         # расстояние от лого до заголовка
+SPACING_TITLE_TO_SUBTITLE = -95    # расстояние заголовок → подзаголовок
+LINE_SPACING = -97                 # межстрочный интервал (режим 1,3)
 LOGO_LINE_LENGTH = 310             # длина горизонтальных линий у лого
 LOGO_LINE_THICKNESS_PX = 3         # толщина линий у лого
 
@@ -490,79 +490,48 @@ def _draw_text_with_letter_spacing(draw: ImageDraw.ImageDraw, pos: tuple, text: 
     return total_width - spacing if total_width > 0 else 0
 
 
-def draw_text_with_stretch(
-    base_image: Image.Image,
-    x: int, y: int,
-    text: str,
-    font: ImageFont.FreeTypeFont,
-    fill_color: tuple,
-    outline_color: tuple,
-    stretch_width: float = TEXT_STRETCH_WIDTH,
-    stretch_height: float = TEXT_STRETCH_HEIGHT,
-    shadow_offset: int = TEXT_SHADOW_OFFSET,
-    apply_enhancements: bool = True
-) -> int:
-
+def draw_text_with_stretch(base_image: Image.Image,
+                           x: int, y: int,
+                           text: str,
+                           font: ImageFont.FreeTypeFont,
+                           fill_color: tuple,
+                           outline_color: tuple,
+                           stretch_width: float = TEXT_STRETCH_WIDTH,
+                           stretch_height: float = TEXT_STRETCH_HEIGHT,
+                           shadow_offset: int = TEXT_SHADOW_OFFSET,
+                           apply_enhancements: bool = True) -> int:
+    
     # ФИКСИРОВАННАЯ ВЫСОТА ИЗ МЕТРИК
     ascent, descent = font.getmetrics()
     fixed_height = int((ascent + descent) * stretch_height)
-
+    
     bbox = font.getbbox(text)
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
-
+    
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
     temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
     temp_h = int((ascent + descent + 10) * (stretch_height + 1.0)) + pad * 2
-
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
-
     tx = pad
-    ty = pad + int(ascent)  # baseline в temp
-
-    _draw_text_with_letter_spacing(
-        d,
-        (tx + shadow_offset, ty + shadow_offset),
-        text,
-        font,
-        (0, 0, 0, 128),
-        spacing=LETTER_SPACING_PX
-    )
-
+    ty = pad + int(ascent)
+    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
-        for dx, dy in [(-1, -1), (-1, 0), (-1, 1),
-                       (0, -1), (0, 1),
-                       (1, -1), (1, 0), (1, 1)]:
-            _draw_text_with_letter_spacing(
-                d,
-                (tx + dx * r, ty + dy * r),
-                text,
-                font,
-                outline_color,
-                spacing=LETTER_SPACING_PX
-            )
-
-    _draw_text_with_letter_spacing(
-        d,
-        (tx, ty),
-        text,
-        font,
-        fill_color,
-        spacing=LETTER_SPACING_PX
-    )
-
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+            _draw_text_with_letter_spacing(d, (tx + dx * r, ty + dy * r), text, font, outline_color, spacing=LETTER_SPACING_PX)
+    _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
+    
     if apply_enhancements:
         if TEXT_INNER_SHADOW_SIZE > 0:
             temp_arr = np.array(temp)
             alpha = temp_arr[:, :, 3]
-            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1,
-                              TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
+            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
             eroded = cv2.erode(alpha, kernel, iterations=1)
             inner_shadow_mask = (alpha > 0) & (eroded == 0)
             temp_arr[inner_shadow_mask, :3] = temp_arr[inner_shadow_mask, :3] * 0.7
             temp = Image.fromarray(temp_arr)
-
+        
         if TEXT_GRAIN_INTENSITY > 0:
             temp_arr = np.array(temp).astype(np.float32)
             alpha = temp_arr[:, :, 3]
@@ -571,47 +540,43 @@ def draw_text_with_stretch(
             temp_arr[:, :, :3][text_mask] += noise[text_mask]
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
-
-    # ✅ bbox берём по альфе (стабильнее), но логика та же: crop(bb) -> resize
-    alpha_ch = temp.split()[-1]
-    bb = alpha_ch.getbbox()
+    
+    # ✅ ФИКСИРОВАННЫЙ CROP ОТ BASELINE (ИГНОРИРУЕМ ЗНАКИ ПРЕПИНАНИЯ)
+    baseline_y = pad + int(ascent)
+    
+    # Crop по фиксированной высоте от baseline (игнорируем запятые)
+    crop_top = max(0, baseline_y - int(ascent * stretch_height))
+    crop_bottom = min(temp_h, baseline_y + int(descent * stretch_height))
+    
+    # Ширина по реальному bbox
+    bb = temp.getbbox()
     if not bb:
         return fixed_height
-
-    crop = temp.crop(bb)
-
+    
+    crop_left = bb[0]
+    crop_right = bb[2]
+    
+    # Crop с фиксированной высотой
+    crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
+    
     # ✅ ИСПОЛЬЗУЕМ ОРИГИНАЛЬНУЮ ШИРИНУ ДЛЯ РАСТЯЖЕНИЯ
     original_w = tw
     sw = max(1, int(original_w * stretch_width))
     sh = fixed_height
-
-    # --- МИНИМАЛЬНЫЙ FIX: фиксируем baseline при вставке ---
-    raw_h = (bb[3] - bb[1])
-    if raw_h <= 0:
-        return fixed_height
-
-    scale_y = sh / raw_h
-    baseline_in_crop = (ty - bb[1]) * scale_y          # где baseline окажется после resize внутри crop
-    target_baseline = int(ascent * stretch_height)      # baseline должен быть здесь относительно y (верх строки)
-
-    paste_y = int(round(y + target_baseline - baseline_in_crop))
-    # -------------------------------------------------------
-
+    
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
-
+    
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
         crop_arr = np.array(crop).astype(np.float32)
         rgb = crop_arr[:, :, :3]
+        alpha = crop_arr[:, :, 3:4]
         blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
         sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
         sharpened = np.clip(sharpened, 0, 255)
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
-
-    base_image.paste(crop, (x, paste_y), crop)
-    
-    advance = sh + (paste_y - y)
-    return max(1, advance)
+    base_image.paste(crop, (x, y), crop)
+    return sh
 
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
