@@ -515,7 +515,7 @@ def draw_text_with_stretch(base_image: Image.Image,
     d = ImageDraw.Draw(temp)
 
     tx = pad
-    ty = pad + int(ascent)  # baseline
+    ty = pad + int(ascent)  # baseline (в temp)
 
     # shadow
     _draw_text_with_letter_spacing(
@@ -572,33 +572,48 @@ def draw_text_with_stretch(base_image: Image.Image,
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
 
-    # ✅ FIX: bbox берем по alpha, но обрезаем ТОЛЬКО по X, по Y держим фиксированно
+    # bbox берём по альфе (самый стабильный вариант)
     alpha_ch = temp.split()[-1]
     bb = alpha_ch.getbbox()
     if not bb:
         return fixed_height
 
-    x0, _, x1, _ = bb
-    crop = temp.crop((x0, 0, x1, temp_h))
+    # tight crop (как у тебя было), но дальше фиксируем baseline при вставке
+    crop = temp.crop(bb)
 
-    # ✅ ИСПОЛЬЗУЕМ ОРИГИНАЛЬНУЮ ШИРИНУ ДЛЯ РАСТЯЖЕНИЯ
-    original_w = tw
-    sw = max(1, int(original_w * stretch_width))  # одинаковое растяжение для всех
+    raw_h = bb[3] - bb[1]
+    if raw_h <= 0:
+        return fixed_height
+
+    # baseline внутри crop ДО resize
+    baseline_raw = ty - bb[1]
+
+    # целевая высота строки
     sh = fixed_height
+    scale_y = sh / raw_h
+    baseline_resized = baseline_raw * scale_y
+
+    # куда должен попасть baseline относительно верхней границы строки (y)
+    ascent_stretched = int(ascent * stretch_height)
+
+    # ✅ FIX: выравниваем по baseline => запятые/хвосты не меняют межстрочный интервал
+    paste_y = y + ascent_stretched - int(round(baseline_resized))
+
+    # ширина — как у тебя: от исходной ширины текста (tw), а не от crop
+    sw = max(1, int(tw * stretch_width))
 
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
 
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
         crop_arr = np.array(crop).astype(np.float32)
         rgb = crop_arr[:, :, :3]
-        alpha = crop_arr[:, :, 3:4]
         blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
         sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
         sharpened = np.clip(sharpened, 0, 255)
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
-    base_image.paste(crop, (x, y), crop)
+    base_image.paste(crop, (x, paste_y), crop)
     return sh
 
 
