@@ -507,11 +507,7 @@ def draw_text_with_stretch(base_image: Image.Image,
     
     bbox = font.getbbox(text)
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
-    th = bbox[3] - bbox[1]
     
-    # Offset для baseline (сколько пикселей от top до baseline)
-    baseline_offset = int(ascent * stretch_height)
-
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
     temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
     temp_h = int((ascent + descent + 10) * (stretch_height + 1.0)) + pad * 2
@@ -519,9 +515,8 @@ def draw_text_with_stretch(base_image: Image.Image,
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
 
-    # Рисуем в фиксированной позиции относительно baseline
     tx = pad
-    ty = pad + int(ascent)  # baseline на фиксированной позиции
+    ty = pad + int(ascent)
 
     _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
 
@@ -557,9 +552,10 @@ def draw_text_with_stretch(base_image: Image.Image,
 
     crop = temp.crop(bb)
     
-    # ФИКСИРОВАННАЯ ВЫСОТА ПОСЛЕ РАСТЯЖЕНИЯ
-    sw = max(1, int(crop.width * stretch_width))
-    sh = fixed_height  # ← ФИКСИРОВАННАЯ!
+    # ✅ ИСПОЛЬЗУЕМ ОРИГИНАЛЬНУЮ ШИРИНУ ДЛЯ РАСТЯЖЕНИЯ
+    original_w = tw  # ← ширина ДО crop
+    sw = max(1, int(original_w * stretch_width))  # ← одинаковое растяжение для всех
+    sh = fixed_height
     
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
     
@@ -573,8 +569,8 @@ def draw_text_with_stretch(base_image: Image.Image,
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
-    base_image.paste(crop, (x, y), crop)
-    return sh  # возвращаем фиксированную высоту
+    base_image.paste(crop, (x, y), crop)                           
+    return sh
 
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
