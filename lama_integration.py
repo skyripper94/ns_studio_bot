@@ -1,6 +1,5 @@
-# lama_integration.py
+# lama_integration.py - FIXED VERSION
 
-# ============== ИМПОРТЫ ==============
 import os
 import logging
 import base64
@@ -16,18 +15,10 @@ import re
 
 logger = logging.getLogger(__name__)
 
-"""
-==============================================
-НАСТРОЙКИ ДЛЯ БЫСТРОЙ РУЧНОЙ ПРАВКИ
-==============================================
-"""
-
-# ============== API КЛЮЧИ ==============
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "").strip()
 GOOGLE_VISION_API_KEY = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
-# ============== REPLICATE / FLUX (INPAINT) ==============
 REPLICATE_MODEL = os.getenv("REPLICATE_MODEL", "black-forest-labs/flux-fill-pro").strip()
 FLUX_STEPS = int(os.getenv("FLUX_STEPS", "50"))
 FLUX_GUIDANCE = float(os.getenv("FLUX_GUIDANCE", "3.5"))
@@ -37,89 +28,64 @@ REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))
 
 FORCE_PRESERVE_OUTSIDE_MASK = True
 
-# ============== ЦВЕТА ==============
-COLOR_TURQUOISE = (0, 206, 209)    # бирюзовый цвет заголовков
-COLOR_WHITE = (255, 255, 255)      # белый цвет для лого и подзаголовка
-COLOR_OUTLINE = (60, 60, 60)       # темно-серая обводка текста
+COLOR_TURQUOISE = (0, 206, 209)
+COLOR_WHITE = (255, 255, 255)
+COLOR_OUTLINE = (60, 60, 60)
 
-# ============== РАЗМЕРЫ ШРИФТОВ ==============
-FONT_SIZE_MODE1 = 48               # заголовок в режиме ЛОГО
-FONT_SIZE_MODE2 = 48               # заголовок в режиме ТЕКСТ
-FONT_SIZE_MODE3_TITLE = 50         # заголовок в режиме КОНТЕНТ
-FONT_SIZE_MODE3_SUBTITLE = 48      # подзаголовок в режиме КОНТЕНТ
-FONT_SIZE_LOGO = 24                # размер @neurostep.media
-FONT_SIZE_MIN = 44                 # минимальный размер (не меньше)
+FONT_SIZE_MODE1 = 48
+FONT_SIZE_MODE2 = 48
+FONT_SIZE_MODE3_TITLE = 50
+FONT_SIZE_MODE3_SUBTITLE = 48
+FONT_SIZE_LOGO = 24
+FONT_SIZE_MIN = 44
 
-# ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM_MODE1 = 45          # отступ снизу для режима 1 (лого)
-SPACING_BOTTOM_MODE2 = 130         # отступ снизу для режима 2 (+40px выше)
-SPACING_BOTTOM_MODE3 = 90          # отступ снизу для режима 3
-SPACING_LOGO_TO_TITLE = 1          # расстояние от лого до заголовка
-SPACING_TITLE_TO_SUBTITLE = 6    # расстояние заголовок → подзаголовок
-LINE_SPACING = 3                   # межстрочный интервал (режим 1,3)
-LOGO_LINE_LENGTH = 310             # длина горизонтальных линий у лого
-LOGO_LINE_THICKNESS_PX = 3         # толщина линий у лого
+SPACING_BOTTOM_MODE1 = 45
+SPACING_BOTTOM_MODE2 = 130
+SPACING_BOTTOM_MODE3 = 90
+SPACING_LOGO_TO_TITLE = 1
+SPACING_TITLE_TO_SUBTITLE = 6
+LINE_SPACING = 3
+LOGO_LINE_LENGTH = 310
+LOGO_LINE_THICKNESS_PX = 3
 
-# ============== МАСКА / OCR ==============
 MASK_BOTTOM_MODE1 = 36
 MASK_BOTTOM_MODE2 = 33
-MASK_BOTTOM_MODE3 = 30           # % снизу для удаления (маска)
-OCR_BOTTOM_PERCENT = 32            # % снизу для OCR распознавания
+MASK_BOTTOM_MODE3 = 30
+OCR_BOTTOM_PERCENT = 32
 
-# ============== ГРАДИЕНТ (Instagram-стиль) ==============
-GRADIENT_HEIGHT_MODE12 = 45        # % высоты градиента (режим 1-2)
-GRADIENT_HEIGHT_MODE3 = 40         # % высоты градиента (режим 3)
-GRADIENT_SOLID_FRACTION = 0.5      # 50% градиента = сплошной черный
-GRADIENT_TRANSITION_CURVE = 2.2    # плавность перехода (выше = мягче)
-GRADIENT_BLUR_SIGMA = 120          # размытие градиента (выше = больше)
+GRADIENT_HEIGHT_MODE12 = 45
+GRADIENT_HEIGHT_MODE3 = 40
+GRADIENT_SOLID_FRACTION = 0.5
+GRADIENT_TRANSITION_CURVE = 2.2
+GRADIENT_BLUR_SIGMA = 120
+GRADIENT_NOISE_INTENSITY = 10
 
-# ============== УЛУЧШЕНИЯ ГРАДИЕНТА ==============
-GRADIENT_NOISE_INTENSITY = 10      # шум на градиенте (0-20, пленочный эффект)
+ENHANCE_BRIGHTNESS = 1.05
+ENHANCE_CONTRAST = 1.0
+ENHANCE_SATURATION = 1.25
+ENHANCE_SHARPNESS = 1.3
 
-# ============== ПОСТОБРАБОТКА ИЗОБРАЖЕНИЯ ==============
-ENHANCE_BRIGHTNESS = 1.05          # яркость (1.0 = без изменений)
-ENHANCE_CONTRAST = 1.0             # контраст (1.0 = без изменений)
-ENHANCE_SATURATION = 1.25          # насыщенность (+25%)
-ENHANCE_SHARPNESS = 1.3            # резкость (+30%)
+LETTER_SPACING_PX = 4
+TEXT_GRAIN_INTENSITY = 0.25
+TEXT_INNER_SHADOW_SIZE = 1
+TEXT_SHARPEN_AMOUNT = 0.3
 
-# ============== КЕРНИНГ ТЕКСТА ==============
-LETTER_SPACING_PX = 4              # расстояние между буквами (премиум эффект)
+TEXT_STRETCH_HEIGHT = 1.8
+TEXT_STRETCH_WIDTH = 1.05
 
-# ============== УЛУЧШЕНИЯ ТЕКСТА ==============
-TEXT_GRAIN_INTENSITY = 0.25        # зернистость на тексте (пленочный эффект)
-TEXT_INNER_SHADOW_SIZE = 1         # внутренняя тень (глубина букв)
-TEXT_SHARPEN_AMOUNT = 0.3          # резкость текста после растяжения
+TEXT_SHADOW_OFFSET = 3
+TEXT_OUTLINE_THICKNESS = 2
 
-# ============== РАСТЯЖЕНИЕ ТЕКСТА ==============
-TEXT_STRETCH_HEIGHT = 1.8          # вытягивание текста по высоте (х2.1)
-TEXT_STRETCH_WIDTH = 1.05          # вытягивание текста по ширине (х1.05)
+TEXT_WIDTH_PERCENT = 0.90
 
-# ============== ТЕНИ / ОБВОДКИ ==============
-TEXT_SHADOW_OFFSET = 3             # смещение тени (в пикселях)
-TEXT_OUTLINE_THICKNESS = 2         # толщина обводки букв
+OPENCV_BLUR_SIGMA = 5
+OPENCV_INPAINT_RADIUS = 3
 
-# ============== БЛОК ТЕКСТА ==============
-TEXT_WIDTH_PERCENT = 0.90          # 90% ширины экрана для текста
-
-# ============== OPENCV FALLBACK ==============
-OPENCV_BLUR_SIGMA = 5              # размытие при fallback (если Replicate не работает)
-OPENCV_INPAINT_RADIUS = 3          # радиус inpaint при fallback
-
-# ============== ПУТЬ К ШРИФТУ ==============
 FONT_PATH = os.getenv("FONT_PATH", "/app/fonts/WaffleSoft.otf").strip()
-
-"""
-==============================================
-КОНЕЦ НАСТРОЕК
-==============================================
-"""
 
 openai.api_key = OPENAI_API_KEY
 
 
-# ---------------------------------------------------------------------
-# OCR (Google Vision)
-# ---------------------------------------------------------------------
 def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTTOM_PERCENT) -> dict:
     if not GOOGLE_VISION_API_KEY:
         logger.warning("⚠️ GOOGLE_VISION_API_KEY не установлен")
@@ -342,18 +308,18 @@ def flux_inpaint(image_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
         logger.error(f"❌ Ошибка Replicate inpaint: {e}")
         return opencv_fallback(image_bgr, mask_u8)
 
+
 def _composite_by_mask(original_bgr: np.ndarray, edited_bgr: np.ndarray, mask_u8: np.ndarray) -> np.ndarray:
     m = (mask_u8.astype(np.float32) / 255.0)[:, :, None]
     out = (original_bgr.astype(np.float32) * (1.0 - m) + edited_bgr.astype(np.float32) * m)
     return np.clip(out, 0, 255).astype(np.uint8)
 
+
 def flux_kontext_inpaint(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return flux_inpaint(image, mask)
 
 
-def create_gradient_layer(width: int, height: int,
-                          gradient_height_percent: int) -> Image.Image:
-    
+def create_gradient_layer(width: int, height: int, gradient_height_percent: int) -> Image.Image:
     grad_h = int(height * gradient_height_percent / 100)
     start_row = height - grad_h
     
@@ -390,7 +356,6 @@ def create_gradient_layer(width: int, height: int,
 
 
 def enhance_image(image_bgr: np.ndarray) -> np.ndarray:
-    
     enhanced = cv2.convertScaleAbs(image_bgr, alpha=ENHANCE_CONTRAST, beta=(ENHANCE_BRIGHTNESS - 1.0) * 30)
     
     hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV).astype(np.float32)
@@ -490,107 +455,195 @@ def _draw_text_with_letter_spacing(draw: ImageDraw.ImageDraw, pos: tuple, text: 
     return total_width - spacing if total_width > 0 else 0
 
 
-def draw_text_with_stretch(base_image: Image.Image,
-                           x: int, y: int,
-                           text: str,
-                           font: ImageFont.FreeTypeFont,
-                           fill_color: tuple,
-                           outline_color: tuple,
-                           stretch_width: float = TEXT_STRETCH_WIDTH,
-                           stretch_height: float = TEXT_STRETCH_HEIGHT,
-                           shadow_offset: int = TEXT_SHADOW_OFFSET,
-                           apply_enhancements: bool = True) -> int:
+# =============================================================================
+# ИСПРАВЛЕННАЯ ФУНКЦИЯ: ФИКСИРОВАННАЯ BASELINE ДЛЯ ВСЕХ СТРОК
+# =============================================================================
+def get_fixed_line_metrics(font: ImageFont.FreeTypeFont) -> dict:
+    """
+    Вычисляет ФИКСИРОВАННЫЕ метрики для строки, независимые от содержимого.
     
-    # ФИКСИРОВАННАЯ ВЫСОТА ИЗ МЕТРИК
+    Ключевой принцип: использовать "эталонную" строку с максимальными 
+    ascender и descender для расчета.
+    """
+    # Эталонные символы: включают максимальные хвостики
+    # Русские: б (верх), р у д ф (низ), й (верх)
+    # Латинские: A g y p q (для совместимости)
+    reference_chars = "АбБгДйруфЦЩAgjpqy|"
+    
     ascent, descent = font.getmetrics()
-    fixed_height = int((ascent + descent) * stretch_height)
+    
+    # Получаем bbox эталонной строки для реальных границ
+    ref_bbox = font.getbbox(reference_chars)
+    
+    # Реальная высота с учетом всех выносных элементов
+    real_top = ref_bbox[1]  # может быть отрицательным (выше baseline)
+    real_bottom = ref_bbox[3]  # ниже baseline
+    
+    return {
+        'ascent': ascent,
+        'descent': descent,
+        'font_height': ascent + descent,
+        'real_top': real_top,
+        'real_bottom': real_bottom,
+        'total_height': real_bottom - real_top
+    }
+
+
+def draw_text_with_stretch_fixed(base_image: Image.Image,
+                                  x: int, y: int,
+                                  text: str,
+                                  font: ImageFont.FreeTypeFont,
+                                  fill_color: tuple,
+                                  outline_color: tuple,
+                                  fixed_line_height: int,
+                                  stretch_width: float = TEXT_STRETCH_WIDTH,
+                                  stretch_height: float = TEXT_STRETCH_HEIGHT,
+                                  shadow_offset: int = TEXT_SHADOW_OFFSET,
+                                  apply_enhancements: bool = True) -> None:
+    """
+    ИСПРАВЛЕННАЯ версия: рендерит текст с ФИКСИРОВАННОЙ высотой строки.
+    
+    Ключевые изменения:
+    1. Не использует getbbox() для определения crop
+    2. Фиксированная область рендера на основе font metrics
+    3. Позиционирование по baseline, не по bbox
+    """
+    if not text.strip():
+        return
+    
+    metrics = get_fixed_line_metrics(font)
+    ascent = metrics['ascent']
+    descent = metrics['descent']
+    
+    # Размер временного изображения - ФИКСИРОВАННЫЙ
+    pad = max(10, shadow_offset + TEXT_OUTLINE_THICKNESS * 2 + 5)
     
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
     
-    pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
-    temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
-    temp_h = int((ascent + descent + 10) * (stretch_height + 1.0)) + pad * 2
+    # Используем фиксированную высоту из метрик, не из bbox
+    temp_w = int(tw * (stretch_width + 0.5)) + pad * 2
+    temp_h = int((ascent + descent) * (stretch_height + 0.5)) + pad * 2
     
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
     
+    # Позиция baseline в temp изображении - ФИКСИРОВАННАЯ
     tx = pad
-    ty = pad + int(ascent)
+    ty_baseline = pad + int(ascent * stretch_height * 0.55)  # baseline позиция
     
-    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
+    # Рисуем тень
+    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty_baseline + shadow_offset), 
+                                   text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
     
+    # Рисуем обводку
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
         for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
-            _draw_text_with_letter_spacing(d, (tx + dx * r, ty + dy * r), text, font, outline_color, spacing=LETTER_SPACING_PX)
+            _draw_text_with_letter_spacing(d, (tx + dx * r, ty_baseline + dy * r), 
+                                          text, font, outline_color, spacing=LETTER_SPACING_PX)
     
-    _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
+    # Рисуем основной текст
+    _draw_text_with_letter_spacing(d, (tx, ty_baseline), text, font, fill_color, spacing=LETTER_SPACING_PX)
     
+    # Применяем улучшения
     if apply_enhancements:
-        if TEXT_INNER_SHADOW_SIZE > 0:
-            temp_arr = np.array(temp)
-            alpha = temp_arr[:, :, 3]
-            kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
-            eroded = cv2.erode(alpha, kernel, iterations=1)
-            inner_shadow_mask = (alpha > 0) & (eroded == 0)
-            temp_arr[inner_shadow_mask, :3] = temp_arr[inner_shadow_mask, :3] * 0.7
-            temp = Image.fromarray(temp_arr)
-        
-        if TEXT_GRAIN_INTENSITY > 0:
-            temp_arr = np.array(temp).astype(np.float32)
-            alpha = temp_arr[:, :, 3]
-            noise = np.random.normal(0, TEXT_GRAIN_INTENSITY * 25, (temp_h, temp_w, 3))
-            text_mask = alpha > 0
-            temp_arr[:, :, :3][text_mask] += noise[text_mask]
-            temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
-            temp = Image.fromarray(temp_arr)
+        temp = _apply_text_enhancements(temp)
     
-    # ✅ ФИКСИРОВАННЫЙ CROP (ИГНОРИРУЕТ ЗНАКИ ПРЕПИНАНИЯ)
-    baseline_y = pad + int(ascent)
-    margin = max(shadow_offset, TEXT_OUTLINE_THICKNESS) + 2
-    
-    crop_top = max(0, baseline_y - int(ascent * stretch_height) - margin)
-    crop_bottom = min(temp_h, baseline_y + int(descent * stretch_height) + margin)
-    
+    # ФИКСИРОВАННЫЙ crop - НЕ зависит от содержимого текста
+    # Используем только горизонтальный bbox для ширины
     bb = temp.getbbox()
     if not bb:
-        return fixed_height
+        return
     
-    crop_left = max(0, bb[0] - margin)
-    crop_right = min(temp_w, bb[2] + margin)
+    # Вертикальные границы - ФИКСИРОВАННЫЕ
+    crop_top = pad // 2
+    crop_bottom = temp_h - pad // 2
+    
+    # Горизонтальные - по контенту
+    margin_h = 3
+    crop_left = max(0, bb[0] - margin_h)
+    crop_right = min(temp_w, bb[2] + margin_h)
     
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
     
-    sw = max(1, int(tw * stretch_width))
-    sh = fixed_height
+    # Масштабирование к ФИКСИРОВАННОЙ высоте
+    target_w = max(1, int(tw * stretch_width))
+    target_h = fixed_line_height
     
-    crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
+    # Пропорциональное масштабирование с сохранением высоты
+    crop_w, crop_h = crop.size
+    scale = target_h / crop_h if crop_h > 0 else 1
+    new_w = int(crop_w * scale)
     
+    crop = crop.resize((new_w, target_h), Image.Resampling.LANCZOS)
+    
+    # Резкость после масштабирования
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
-        crop_arr = np.array(crop).astype(np.float32)
-        rgb = crop_arr[:, :, :3]
-        blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
-        sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
-        sharpened = np.clip(sharpened, 0, 255)
-        crop_arr[:, :, :3] = sharpened
-        crop = Image.fromarray(crop_arr.astype(np.uint8))
+        crop = _sharpen_image(crop)
     
-    base_image.paste(crop, (x, y), crop)
+    # Paste в ФИКСИРОВАННУЮ позицию
+    paste_x = x
+    paste_y = y
     
-    return fixed_height
+    base_image.paste(crop, (paste_x, paste_y), crop)
 
 
-def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
-    try:
-        ascent, descent = font.getmetrics()
-        base = int((ascent + descent) * TEXT_STRETCH_HEIGHT)
-    except Exception:
-        base = int(font.size * TEXT_STRETCH_HEIGHT)
-    pad = max(6, TEXT_SHADOW_OFFSET + int(TEXT_OUTLINE_THICKNESS) * 2)
-    return base + pad
+def _apply_text_enhancements(img: Image.Image) -> Image.Image:
+    """Применяет внутреннюю тень и зернистость к тексту."""
+    if TEXT_INNER_SHADOW_SIZE <= 0 and TEXT_GRAIN_INTENSITY <= 0:
+        return img
+    
+    arr = np.array(img)
+    h, w = arr.shape[:2]
+    alpha = arr[:, :, 3]
+    
+    if TEXT_INNER_SHADOW_SIZE > 0:
+        kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
+        eroded = cv2.erode(alpha, kernel, iterations=1)
+        inner_shadow_mask = (alpha > 0) & (eroded == 0)
+        arr[inner_shadow_mask, :3] = (arr[inner_shadow_mask, :3] * 0.7).astype(np.uint8)
+    
+    if TEXT_GRAIN_INTENSITY > 0:
+        noise = np.random.normal(0, TEXT_GRAIN_INTENSITY * 25, (h, w, 3))
+        text_mask = alpha > 0
+        arr_float = arr[:, :, :3].astype(np.float32)
+        arr_float[text_mask] += noise[text_mask]
+        arr[:, :, :3] = np.clip(arr_float, 0, 255).astype(np.uint8)
+    
+    return Image.fromarray(arr)
 
 
-# ============== РЕЖИМ 1 ==============
+def _sharpen_image(img: Image.Image) -> Image.Image:
+    """Применяет резкость к изображению."""
+    arr = np.array(img).astype(np.float32)
+    rgb = arr[:, :, :3]
+    blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
+    sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
+    sharpened = np.clip(sharpened, 0, 255)
+    arr[:, :, :3] = sharpened
+    return Image.fromarray(arr.astype(np.uint8))
+
+
+def calculate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
+    """
+    Вычисляет ФИКСИРОВАННУЮ высоту строки для данного шрифта.
+    Используется одинаковая для ВСЕХ строк.
+    """
+    metrics = get_fixed_line_metrics(font)
+    
+    # Базовая высота с растяжением
+    base_h = int(metrics['font_height'] * TEXT_STRETCH_HEIGHT)
+    
+    # Добавляем padding для теней и обводки
+    extra = max(TEXT_SHADOW_OFFSET, TEXT_OUTLINE_THICKNESS) * 2 + 4
+    
+    return base_h + extra
+
+
+# =============================================================================
+# RENDER ФУНКЦИИ С ФИКСИРОВАННЫМ ИНТЕРВАЛОМ
+# =============================================================================
+
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     image = image.convert("RGBA")
     draw = ImageDraw.Draw(image, "RGBA")
@@ -602,10 +655,10 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    ascent, descent = title_font.getmetrics()
-    line_h = int((ascent + descent) * TEXT_STRETCH_HEIGHT)
+    # ФИКСИРОВАННАЯ высота строки
+    fixed_line_h = calculate_fixed_line_height(title_font)
     
-    total_title_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_title_h = fixed_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
@@ -634,16 +687,15 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
+                                     COLOR_TURQUOISE, COLOR_OUTLINE, fixed_line_h)
         
-        cur_y += line_h
-        if i < len(title_lines) - 1:
-            cur_y += LINE_SPACING
+        # ФИКСИРОВАННЫЙ шаг
+        cur_y += fixed_line_h + LINE_SPACING
 
     return image
 
 
-# ============== РЕЖИМ 2 ==============
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     image = image.convert("RGBA")
     width, height = image.size
@@ -654,10 +706,10 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    ascent, descent = title_font.getmetrics()
-    line_h = int((ascent + descent) * TEXT_STRETCH_HEIGHT)
+    # ФИКСИРОВАННАЯ высота строки
+    fixed_line_h = calculate_fixed_line_height(title_font)
     
-    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_h = fixed_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     start_y = height - SPACING_BOTTOM_MODE2 - total_h
     cur_y = start_y
@@ -667,16 +719,15 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
+                                     COLOR_TURQUOISE, COLOR_OUTLINE, fixed_line_h)
         
-        cur_y += line_h
-        if i < len(title_lines) - 1:
-            cur_y += LINE_SPACING
+        # ФИКСИРОВАННЫЙ шаг
+        cur_y += fixed_line_h + LINE_SPACING
 
     return image
 
 
-# ============== РЕЖИМ 3 ==============
 def render_mode3_content(image: Image.Image, title_translated: str, subtitle_translated: str) -> Image.Image:
     image = image.convert("RGBA")
     width, height = image.size
@@ -694,14 +745,12 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    title_ascent, title_descent = title_font.getmetrics()
-    title_line_h = int((title_ascent + title_descent) * TEXT_STRETCH_HEIGHT)
-    
-    sub_ascent, sub_descent = subtitle_font.getmetrics()
-    sub_line_h = int((sub_ascent + sub_descent) * TEXT_STRETCH_HEIGHT)
+    # ФИКСИРОВАННЫЕ высоты строк
+    fixed_title_h = calculate_fixed_line_height(title_font)
+    fixed_sub_h = calculate_fixed_line_height(subtitle_font)
 
-    total_title_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
-    total_sub_h = sub_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
+    total_title_h = fixed_title_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_sub_h = fixed_sub_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
 
     total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
     start_y = height - SPACING_BOTTOM_MODE3 - total_h
@@ -709,27 +758,29 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
+    # Рендер заголовка
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
+                                     COLOR_TURQUOISE, COLOR_OUTLINE, fixed_title_h)
         
-        cur_y += title_line_h
-        if i < len(title_lines) - 1:
-            cur_y += LINE_SPACING
+        cur_y += fixed_title_h + LINE_SPACING
 
+    # Убираем лишний LINE_SPACING после последней строки заголовка
+    cur_y -= LINE_SPACING
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
+    # Рендер подзаголовка
     for i, ln in enumerate(subtitle_lines):
         line_w = int(_text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, subtitle_font, 
+                                     COLOR_WHITE, COLOR_OUTLINE, fixed_sub_h)
         
-        cur_y += sub_line_h
-        if i < len(subtitle_lines) - 1:
-            cur_y += LINE_SPACING
+        cur_y += fixed_sub_h + LINE_SPACING
 
     return image
 
@@ -749,9 +800,17 @@ def process_full_workflow(image_bgr: np.ndarray, mode: int) -> tuple:
 
     logger.info("📋 ШАГ 2: Маска (нижние %)")
     mask = np.zeros((h, w), dtype=np.uint8)
-    mask_start = int(h * (1 - MASK_BOTTOM_PERCENT / 100))
+    
+    if mode == 1:
+        mask_percent = MASK_BOTTOM_MODE1
+    elif mode == 2:
+        mask_percent = MASK_BOTTOM_MODE2
+    else:
+        mask_percent = MASK_BOTTOM_MODE3
+        
+    mask_start = int(h * (1 - mask_percent / 100))
     mask[mask_start:, :] = 255
-    logger.info(f"📐 Маска: строки {mask_start}-{h} (нижние {MASK_BOTTOM_PERCENT}%)")
+    logger.info(f"📐 Маска: строки {mask_start}-{h} (нижние {mask_percent}%)")
 
     logger.info("📋 ШАГ 3: Inpaint (Replicate FLUX Fill)")
     clean_bgr = flux_inpaint(image_bgr, mask)
