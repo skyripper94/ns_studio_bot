@@ -44,7 +44,7 @@ SPACING_BOTTOM_MODE2 = 130
 SPACING_BOTTOM_MODE3 = 90
 SPACING_LOGO_TO_TITLE = 1
 SPACING_TITLE_TO_SUBTITLE = 6
-LINE_SPACING = 8
+LINE_SPACING = 3
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -565,13 +565,6 @@ def draw_text_with_stretch_fixed(base_image: Image.Image,
     
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
     
-    # Масштабирование к ФИКСИРОВАННЫМ размерам
-    target_w = max(1, int(tw * stretch_width))
-    target_h = fixed_line_height
-    
-    # ПРИНУДИТЕЛЬНЫЙ resize к target размерам
-    crop = crop.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    
     # Резкость после масштабирования
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
         crop = _sharpen_image(crop)
@@ -621,16 +614,17 @@ def _sharpen_image(img: Image.Image) -> Image.Image:
 
 def calculate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
     """
-    Вычисляет ФИКСИРОВАННУЮ высоту строки для данного шрифта.
-    Используется одинаковая для ВСЕХ строк.
+    Вычисляет ФИКСИРОВАННУЮ высоту строки для шага между строками.
+    НЕ для resize текста!
     """
     metrics = get_fixed_line_metrics(font)
     
-    # Базовая высота с растяжением
-    base_h = int(metrics['font_height'] * TEXT_STRETCH_HEIGHT)
+    # Высота = реальная высота символов (не растянутая)
+    # Растяжение уже применяется при рендере
+    base_h = metrics['total_height']
     
-    # Добавляем padding для теней и обводки
-    extra = max(TEXT_SHADOW_OFFSET, TEXT_OUTLINE_THICKNESS) * 2 + 4
+    # Минимальный padding
+    extra = max(TEXT_SHADOW_OFFSET, TEXT_OUTLINE_THICKNESS) + 2
     
     return base_h + extra
 
