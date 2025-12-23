@@ -28,10 +28,12 @@ from lama_integration import (
     render_mode2_text,
     render_mode3_content,
     enhance_image, 
-    MASK_BOTTOM_PERCENT,
+    MASK_BOTTOM_MODE1,
+    MASK_BOTTOM_MODE2,
+    MASK_BOTTOM_MODE3,
     OCR_BOTTOM_PERCENT,
-    GRADIENT_HEIGHT_MODE12,  # ⬅️ ДОБАВЬ
-    GRADIENT_HEIGHT_MODE3     # ⬅️ ДОБАВЬ
+    GRADIENT_HEIGHT_MODE12,
+    GRADIENT_HEIGHT_MODE3
 )
 
 load_dotenv()
@@ -99,7 +101,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "✅ **Режим: УДАЛИТЬ ТЕКСТ**\n\n"
             "Просто отправьте изображение.\n"
-            f"Бот удалит текст и градиент ({MASK_BOTTOM_PERCENT}% снизу).",
+            f"Бот удалит текст и градиент ({MASK_BOTTOM_MODE2}% снизу).",
             parse_mode='Markdown'
         )
     
@@ -136,7 +138,6 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             3: "КОНТЕНТ (заголовок + подзаголовок)"
         }
         
-        # Подсказка для режима 3
         mode3_hint = ""
         if submode == 3:
             mode3_hint = (
@@ -216,11 +217,11 @@ async def process_remove_mode(update: Update, image: np.ndarray):
     
     height, width = image.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
-    mask_start = int(height * (1 - MASK_BOTTOM_PERCENT / 100))
+    mask_start = int(height * (1 - MASK_BOTTOM_MODE2 / 100))
     mask[mask_start:, :] = 255
     
     result = flux_kontext_inpaint(image, mask)
-    result = enhance_image(result)  # ⬅️ ДОБАВЬ ЭТУ СТРОКУ
+    result = enhance_image(result)
     
     success, buffer = cv2.imencode('.png', result)
     if success:
@@ -373,8 +374,6 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
     
     h, w = image.shape[:2]
     
-    from lama_integration import MASK_BOTTOM_MODE1, MASK_BOTTOM_MODE2, MASK_BOTTOM_MODE3
-    
     if submode == 1:
         mask_percent = MASK_BOTTOM_MODE1
     elif submode == 2:
@@ -432,7 +431,6 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
-    # НЕ УДАЛЯЕМ сообщение "Шаг 3/4: Перевод (LLM)..." - оставляем как с OCR
 
 
 async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -456,7 +454,6 @@ async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         hint = "Пришлите текст для заголовка"
     
-    # ИЗМЕНЕНО: было query.edit_message_text
     await query.message.reply_text(
         f"✏️ **Отправьте исправленный перевод**\n\n{hint}",
         parse_mode='Markdown'
@@ -474,7 +471,6 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
     
-    # ИЗМЕНЕНО: было query.edit_message_text
     await query.message.reply_text(
         f"✅ **Перевод принят**\n\n{preview[:200]}...",
         parse_mode='Markdown'
@@ -525,7 +521,7 @@ async def process_full_mode_step3(update, user_id: int):
     
     out_rgb = np.array(pil.convert("RGB"))
     out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
-    out_bgr = enhance_image(out_bgr)  # ⬅️ ДОБАВЬ ЭТУ СТРОКУ
+    out_bgr = enhance_image(out_bgr)
     
     success, buffer = cv2.imencode('.png', out_bgr)
     if success:
