@@ -500,18 +500,28 @@ def draw_text_with_stretch(base_image: Image.Image,
                            stretch_height: float = TEXT_STRETCH_HEIGHT,
                            shadow_offset: int = TEXT_SHADOW_OFFSET,
                            apply_enhancements: bool = True) -> int:
+    
+    # ФИКСИРОВАННАЯ ВЫСОТА ИЗ МЕТРИК
+    ascent, descent = font.getmetrics()
+    fixed_height = int((ascent + descent) * stretch_height)
+    
     bbox = font.getbbox(text)
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
     th = bbox[3] - bbox[1]
+    
+    # Offset для baseline (сколько пикселей от top до baseline)
+    baseline_offset = int(ascent * stretch_height)
 
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
     temp_w = int(tw * (stretch_width + 1.0)) + pad * 2
-    temp_h = int(th * (stretch_height + 1.0)) + pad * 2
+    temp_h = int((ascent + descent + 10) * (stretch_height + 1.0)) + pad * 2
 
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
 
-    tx, ty = pad, pad
+    # Рисуем в фиксированной позиции относительно baseline
+    tx = pad
+    ty = pad + int(ascent)  # baseline на фиксированной позиции
 
     _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
 
@@ -526,48 +536,45 @@ def draw_text_with_stretch(base_image: Image.Image,
         if TEXT_INNER_SHADOW_SIZE > 0:
             temp_arr = np.array(temp)
             alpha = temp_arr[:, :, 3]
-            
             kernel = np.ones((TEXT_INNER_SHADOW_SIZE * 2 + 1, TEXT_INNER_SHADOW_SIZE * 2 + 1), np.uint8)
             eroded = cv2.erode(alpha, kernel, iterations=1)
             inner_shadow_mask = (alpha > 0) & (eroded == 0)
-            
             temp_arr[inner_shadow_mask, :3] = temp_arr[inner_shadow_mask, :3] * 0.7
             temp = Image.fromarray(temp_arr)
         
         if TEXT_GRAIN_INTENSITY > 0:
             temp_arr = np.array(temp).astype(np.float32)
             alpha = temp_arr[:, :, 3]
-            
             noise = np.random.normal(0, TEXT_GRAIN_INTENSITY * 25, (temp_h, temp_w, 3))
             text_mask = alpha > 0
-            
             temp_arr[:, :, :3][text_mask] += noise[text_mask]
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
 
     bb = temp.getbbox()
     if not bb:
-        return th
+        return fixed_height
 
     crop = temp.crop(bb)
+    
+    # ФИКСИРОВАННАЯ ВЫСОТА ПОСЛЕ РАСТЯЖЕНИЯ
     sw = max(1, int(crop.width * stretch_width))
-    sh = max(1, int(crop.height * stretch_height))
+    sh = fixed_height  # ← ФИКСИРОВАННАЯ!
+    
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
     
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
         crop_arr = np.array(crop).astype(np.float32)
         rgb = crop_arr[:, :, :3]
         alpha = crop_arr[:, :, 3:4]
-        
         blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
         sharpened = rgb + TEXT_SHARPEN_AMOUNT * (rgb - blurred)
         sharpened = np.clip(sharpened, 0, 255)
-        
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
     base_image.paste(crop, (x, y), crop)
-    return sh
+    return sh  # возвращаем фиксированную высоту
 
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
