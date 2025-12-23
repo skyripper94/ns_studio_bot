@@ -8,7 +8,7 @@ from io import BytesIO
 import numpy as np
 import cv2
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 import openai
 import re
@@ -42,9 +42,9 @@ FONT_SIZE_MIN = 44
 SPACING_BOTTOM_MODE1 = 45
 SPACING_BOTTOM_MODE2 = 130
 SPACING_BOTTOM_MODE3 = 90
-SPACING_LOGO_TO_TITLE = 1
-SPACING_TITLE_TO_SUBTITLE = 6
-LINE_SPACING = 3
+SPACING_LOGO_TO_TITLE = 25
+SPACING_TITLE_TO_SUBTITLE = 10
+LINE_SPACING = 6
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -455,29 +455,12 @@ def _draw_text_with_letter_spacing(draw: ImageDraw.ImageDraw, pos: tuple, text: 
     return total_width - spacing if total_width > 0 else 0
 
 
-# =============================================================================
-# ИСПРАВЛЕННАЯ ФУНКЦИЯ: ФИКСИРОВАННАЯ BASELINE ДЛЯ ВСЕХ СТРОК
-# =============================================================================
 def get_fixed_line_metrics(font: ImageFont.FreeTypeFont) -> dict:
-    """
-    Вычисляет ФИКСИРОВАННЫЕ метрики для строки, независимые от содержимого.
-    
-    Ключевой принцип: использовать "эталонную" строку с максимальными 
-    ascender и descender для расчета.
-    """
-    # Эталонные символы: включают максимальные хвостики
-    # Русские: б (верх), р у д ф (низ), й (верх)
-    # Латинские: A g y p q (для совместимости)
     reference_chars = "АбБгДйруфЦЩAgjpqy|"
-    
     ascent, descent = font.getmetrics()
-    
-    # Получаем bbox эталонной строки для реальных границ
     ref_bbox = font.getbbox(reference_chars)
-    
-    # Реальная высота с учетом всех выносных элементов
-    real_top = ref_bbox[1]  # может быть отрицательным (выше baseline)
-    real_bottom = ref_bbox[3]  # ниже baseline
+    real_top = ref_bbox[1]
+    real_bottom = ref_bbox[3]
     
     return {
         'ascent': ascent,
@@ -489,95 +472,77 @@ def get_fixed_line_metrics(font: ImageFont.FreeTypeFont) -> dict:
     }
 
 
-def draw_text_with_stretch_fixed(base_image: Image.Image,
-                                  x: int, y: int,
-                                  text: str,
-                                  font: ImageFont.FreeTypeFont,
-                                  fill_color: tuple,
-                                  outline_color: tuple,
-                                  fixed_line_height: int,
-                                  stretch_width: float = TEXT_STRETCH_WIDTH,
-                                  stretch_height: float = TEXT_STRETCH_HEIGHT,
-                                  shadow_offset: int = TEXT_SHADOW_OFFSET,
-                                  apply_enhancements: bool = True) -> None:
-    """
-    ИСПРАВЛЕННАЯ версия: рендерит текст с ФИКСИРОВАННОЙ высотой строки.
-    
-    Ключевые изменения:
-    1. Не использует getbbox() для определения crop
-    2. Фиксированная область рендера на основе font metrics
-    3. Позиционирование по baseline, не по bbox
-    """
+def draw_text_with_stretch(base_image: Image.Image,
+                           x: int, y: int,
+                           text: str,
+                           font: ImageFont.FreeTypeFont,
+                           fill_color: tuple,
+                           outline_color: tuple,
+                           stretch_width: float = TEXT_STRETCH_WIDTH,
+                           stretch_height: float = TEXT_STRETCH_HEIGHT,
+                           shadow_offset: int = TEXT_SHADOW_OFFSET,
+                           apply_enhancements: bool = True) -> int:
     if not text.strip():
-        return
+        return 0
     
     metrics = get_fixed_line_metrics(font)
     ascent = metrics['ascent']
     descent = metrics['descent']
+    font_h = metrics['font_height']
     
-    # Размер временного изображения - ФИКСИРОВАННЫЙ
-    pad = max(10, shadow_offset + TEXT_OUTLINE_THICKNESS * 2 + 5)
-    
+    pad = max(15, shadow_offset + TEXT_OUTLINE_THICKNESS * 2 + 10)
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
     
-    # Используем фиксированную высоту из метрик, не из bbox
-    temp_w = int(tw * (stretch_width + 0.5)) + pad * 2
-    temp_h = int((ascent + descent) * (stretch_height + 0.5)) + pad * 2
+    temp_w = tw + pad * 2
+    temp_h = font_h + pad * 2
     
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
     
-    # Позиция baseline в temp изображении - ФИКСИРОВАННАЯ
     tx = pad
-    ty_baseline = pad + ascent  # baseline = pad + ascent (стандартная позиция)
+    ty = pad
     
-    # Рисуем тень
-    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty_baseline + shadow_offset), 
+    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), 
                                    text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
     
-    # Рисуем обводку
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
         for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
-            _draw_text_with_letter_spacing(d, (tx + dx * r, ty_baseline + dy * r), 
+            _draw_text_with_letter_spacing(d, (tx + dx * r, ty + dy * r), 
                                           text, font, outline_color, spacing=LETTER_SPACING_PX)
     
-    # Рисуем основной текст
-    _draw_text_with_letter_spacing(d, (tx, ty_baseline), text, font, fill_color, spacing=LETTER_SPACING_PX)
+    _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
     
-    # Применяем улучшения
     if apply_enhancements:
         temp = _apply_text_enhancements(temp)
     
-   # ФИКСИРОВАННЫЙ crop - НЕ зависит от содержимого текста
     bb = temp.getbbox()
     if not bb:
-        return
+        return 0
     
-    # Вертикальные границы - ФИКСИРОВАННЫЕ (не зависят от букв)
-    crop_top = pad // 2
-    crop_bottom = temp_h - pad // 2
-    
-    # Горизонтальные - по контенту
-    margin_h = 3
-    crop_left = max(0, bb[0] - margin_h)
-    crop_right = min(temp_w, bb[2] + margin_h)
+    margin = 3
+    crop_left = max(0, bb[0] - margin)
+    crop_top = max(0, bb[1] - margin)
+    crop_right = min(temp_w, bb[2] + margin)
+    crop_bottom = min(temp_h, bb[3] + margin)
     
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
+    crop_w, crop_h = crop.size
     
-    # Резкость после масштабирования
+    target_w = max(1, int(crop_w * stretch_width))
+    target_h = max(1, int(crop_h * stretch_height))
+    
+    stretched = crop.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    
     if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
-        crop = _sharpen_image(crop)
+        stretched = _sharpen_image(stretched)
     
-    # Paste в ФИКСИРОВАННУЮ позицию
-    paste_x = x
-    paste_y = y
+    base_image.paste(stretched, (x, y), stretched)
     
-    base_image.paste(crop, (paste_x, paste_y), crop)
+    return target_h
 
 
 def _apply_text_enhancements(img: Image.Image) -> Image.Image:
-    """Применяет внутреннюю тень и зернистость к тексту."""
     if TEXT_INNER_SHADOW_SIZE <= 0 and TEXT_GRAIN_INTENSITY <= 0:
         return img
     
@@ -602,7 +567,6 @@ def _apply_text_enhancements(img: Image.Image) -> Image.Image:
 
 
 def _sharpen_image(img: Image.Image) -> Image.Image:
-    """Применяет резкость к изображению."""
     arr = np.array(img).astype(np.float32)
     rgb = arr[:, :, :3]
     blurred = cv2.GaussianBlur(rgb, (0, 0), 1.0)
@@ -611,27 +575,6 @@ def _sharpen_image(img: Image.Image) -> Image.Image:
     arr[:, :, :3] = sharpened
     return Image.fromarray(arr.astype(np.uint8))
 
-
-def calculate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
-    """
-    Вычисляет ФИКСИРОВАННУЮ высоту строки для шага между строками.
-    НЕ для resize текста!
-    """
-    metrics = get_fixed_line_metrics(font)
-    
-    # Высота = реальная высота символов (не растянутая)
-    # Растяжение уже применяется при рендере
-    base_h = metrics['total_height']
-    
-    # Минимальный padding
-    extra = max(TEXT_SHADOW_OFFSET, TEXT_OUTLINE_THICKNESS) + 2
-    
-    return base_h + extra
-
-
-# =============================================================================
-# RENDER ФУНКЦИИ С ФИКСИРОВАННЫМ ИНТЕРВАЛОМ
-# =============================================================================
 
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     image = image.convert("RGBA")
@@ -644,10 +587,11 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # ФИКСИРОВАННАЯ высота строки
-    fixed_line_h = calculate_fixed_line_height(title_font)
+    metrics = get_fixed_line_metrics(title_font)
+    base_line_h = metrics['total_height']
+    stretched_line_h = int(base_line_h * TEXT_STRETCH_HEIGHT)
     
-    total_title_h = fixed_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_title_h = stretched_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
@@ -670,17 +614,16 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
-    block_left = (width - max_text_width) // 2
     
-    for i, ln in enumerate(title_lines):
-        line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2  # центр по всей ширине изображения
+    for ln in title_lines:
+        tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
+        line_w = int(tw * TEXT_STRETCH_WIDTH)
+        line_x = (width - line_w) // 2
         
-        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
-                                     COLOR_TURQUOISE, COLOR_OUTLINE, fixed_line_h)
+        actual_h = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, 
+                                          COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        # ФИКСИРОВАННЫЙ шаг
-        cur_y += fixed_line_h + LINE_SPACING
+        cur_y += stretched_line_h + LINE_SPACING
 
     return image
 
@@ -695,24 +638,24 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # ФИКСИРОВАННАЯ высота строки
-    fixed_line_h = calculate_fixed_line_height(title_font)
+    metrics = get_fixed_line_metrics(title_font)
+    base_line_h = metrics['total_height']
+    stretched_line_h = int(base_line_h * TEXT_STRETCH_HEIGHT)
     
-    total_h = fixed_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_h = stretched_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
     start_y = height - SPACING_BOTTOM_MODE2 - total_h
     cur_y = start_y
-    block_left = (width - max_text_width) // 2
 
-    for i, ln in enumerate(title_lines):
-        line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2  # центр по всей ширине изображения
+    for ln in title_lines:
+        tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
+        line_w = int(tw * TEXT_STRETCH_WIDTH)
+        line_x = (width - line_w) // 2
         
-        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
-                                     COLOR_TURQUOISE, COLOR_OUTLINE, fixed_line_h)
+        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, 
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        # ФИКСИРОВАННЫЙ шаг
-        cur_y += fixed_line_h + LINE_SPACING
+        cur_y += stretched_line_h + LINE_SPACING
 
     return image
 
@@ -734,42 +677,42 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # ФИКСИРОВАННЫЕ высоты строк
-    fixed_title_h = calculate_fixed_line_height(title_font)
-    fixed_sub_h = calculate_fixed_line_height(subtitle_font)
+    title_metrics = get_fixed_line_metrics(title_font)
+    sub_metrics = get_fixed_line_metrics(subtitle_font)
+    
+    title_line_h = int(title_metrics['total_height'] * TEXT_STRETCH_HEIGHT)
+    sub_line_h = int(sub_metrics['total_height'] * TEXT_STRETCH_HEIGHT)
 
-    total_title_h = fixed_title_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
-    total_sub_h = fixed_sub_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
+    total_title_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_sub_h = sub_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
 
     total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
     start_y = height - SPACING_BOTTOM_MODE3 - total_h
 
     cur_y = start_y
-    block_left = (width - max_text_width) // 2
 
-    # Рендер заголовка
-    for i, ln in enumerate(title_lines):
-        line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2  # центр по всей ширине изображения
+    for ln in title_lines:
+        tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
+        line_w = int(tw * TEXT_STRETCH_WIDTH)
+        line_x = (width - line_w) // 2
         
-        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, title_font, 
-                                     COLOR_TURQUOISE, COLOR_OUTLINE, fixed_title_h)
+        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, 
+                               COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        cur_y += fixed_title_h + LINE_SPACING
+        cur_y += title_line_h + LINE_SPACING
 
-    # Убираем лишний LINE_SPACING после последней строки заголовка
     cur_y -= LINE_SPACING
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
-    # Рендер подзаголовка
-    for i, ln in enumerate(subtitle_lines):
-        line_w = int(_text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
-        line_x = block_left + (max_text_width - line_w) // 2
+    for ln in subtitle_lines:
+        tw = _text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX)
+        line_w = int(tw * TEXT_STRETCH_WIDTH)
+        line_x = (width - line_w) // 2
         
-        draw_text_with_stretch_fixed(image, line_x, cur_y, ln, subtitle_font, 
-                                     COLOR_WHITE, COLOR_OUTLINE, fixed_sub_h)
+        draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, 
+                               COLOR_WHITE, COLOR_OUTLINE)
         
-        cur_y += fixed_sub_h + LINE_SPACING
+        cur_y += sub_line_h + LINE_SPACING
 
     return image
 
