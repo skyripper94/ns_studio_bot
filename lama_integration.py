@@ -609,7 +609,9 @@ def draw_text_with_stretch(
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
     base_image.paste(crop, (x, paste_y), crop)
-    return sh + (paste_y - y)
+    
+    advance = sh + (paste_y - y)
+    return max(1, advance)
 
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
@@ -668,11 +670,12 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        cur_y += line_h
+        adv = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+
+        cur_y += adv
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
+
 
     return image
 
@@ -703,11 +706,12 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        cur_y += line_h
+        adv = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+
+        cur_y += adv
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
+
 
     return image
 
@@ -751,9 +755,9 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        adv = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        cur_y += title_line_h
+        cur_y += adv
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
@@ -764,9 +768,9 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         line_w = int(_text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
-        draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        adv = draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
         
-        cur_y += sub_line_h
+        cur_y += adv
         if i < len(subtitle_lines) - 1:
             cur_y += LINE_SPACING
 
