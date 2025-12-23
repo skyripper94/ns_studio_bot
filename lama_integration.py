@@ -550,11 +550,22 @@ def draw_text_with_stretch(base_image: Image.Image,
     if not bb:
         return fixed_height
 
-    crop = temp.crop(bb)
+    # ✅ CROP С ФИКСИРОВАННОЙ ВЫСОТОЙ ОТ BASELINE
+    baseline_y = pad + int(ascent)
     
-    # ✅ ИСПОЛЬЗУЕМ ОРИГИНАЛЬНУЮ ШИРИНУ ДЛЯ РАСТЯЖЕНИЯ
-    original_w = tw  # ← ширина ДО crop
-    sw = max(1, int(original_w * stretch_width))  # ← одинаковое растяжение для всех
+    # Crop от baseline минус ascent до baseline плюс descent
+    crop_top = max(0, baseline_y - int(ascent * stretch_height))
+    crop_bottom = min(temp_h, baseline_y + int(descent * stretch_height))
+    
+    # Crop по ширине как обычно
+    crop_left = bb[0]
+    crop_right = bb[2]
+    
+    crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
+    
+    # ✅ RESIZE С ФИКСИРОВАННОЙ ВЫСОТОЙ
+    original_w = tw
+    sw = max(1, int(original_w * stretch_width))
     sh = fixed_height
     
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
@@ -569,7 +580,7 @@ def draw_text_with_stretch(base_image: Image.Image,
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
-    base_image.paste(crop, (x, y), crop)                           
+    base_image.paste(crop, (x, y), crop)
     return sh
 
 
