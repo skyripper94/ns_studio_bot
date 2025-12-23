@@ -542,6 +542,67 @@ def draw_text_with_stretch(base_image: Image.Image,
     return target_h
 
 
+def measure_text_with_stretch(text: str,
+                             font: ImageFont.FreeTypeFont,
+                             fill_color: tuple = COLOR_TURQUOISE,
+                             outline_color: tuple = COLOR_OUTLINE,
+                             stretch_width: float = TEXT_STRETCH_WIDTH,
+                             stretch_height: float = TEXT_STRETCH_HEIGHT,
+                             shadow_offset: int = TEXT_SHADOW_OFFSET,
+                             apply_enhancements: bool = True) -> int:
+    """Return final stretched height (px) for a given text line without drawing it."""
+    if not (text or '').strip():
+        return 0
+
+    metrics = get_fixed_line_metrics(font)
+    font_h = metrics['font_height']
+
+    pad = max(15, shadow_offset + TEXT_OUTLINE_THICKNESS * 2 + 10)
+    tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
+
+    temp_w = tw + pad * 2
+    temp_h = font_h + pad * 2
+
+    temp = Image.new('RGBA', (temp_w, temp_h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(temp)
+
+    tx = pad
+    ty = pad
+
+    _draw_text_with_letter_spacing(
+        d, (tx + shadow_offset, ty + shadow_offset),
+        text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX
+    )
+
+    for t in range(int(TEXT_OUTLINE_THICKNESS)):
+        r = t + 1
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+            _draw_text_with_letter_spacing(
+                d, (tx + dx * r, ty + dy * r),
+                text, font, outline_color, spacing=LETTER_SPACING_PX
+            )
+
+    _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
+
+    if apply_enhancements:
+        temp = _apply_text_enhancements(temp)
+
+    bb = temp.getbbox()
+    if not bb:
+        return 0
+
+    margin = 3
+    crop_left = max(0, bb[0] - margin)
+    crop_top = max(0, bb[1] - margin)
+    crop_right = min(temp_w, bb[2] + margin)
+    crop_bottom = min(temp_h, bb[3] + margin)
+
+    crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
+    crop_h = crop.size[1]
+
+    return max(1, int(crop_h * stretch_height))
+
+
 def _apply_text_enhancements(img: Image.Image) -> Image.Image:
     if TEXT_INNER_SHADOW_SIZE <= 0 and TEXT_GRAIN_INTENSITY <= 0:
         return img
@@ -587,12 +648,22 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    metrics = get_fixed_line_metrics(title_font)
-    base_line_h = metrics['total_height']
-    stretched_line_h = int(base_line_h * TEXT_STRETCH_HEIGHT)
-    
-    total_title_h = stretched_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    # --- PASS 1: measure real stretched heights per line
+    title_line_heights = [
+        measure_text_with_stretch(
+            ln, title_font,
+            fill_color=COLOR_TURQUOISE,
+            outline_color=COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True,
+        )
+        for ln in title_lines
+    ]
+    total_title_h = sum(title_line_heights) + max(0, (len(title_line_heights) - 1) * LINE_SPACING)
 
+    # logo block
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
     bb = logo_font.getbbox(logo_text)
@@ -605,25 +676,40 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_x = (width - logo_w) // 2
     logo_y = start_y
 
+    # lines around logo
     line_y = logo_y + logo_h // 2
     line_left_start = logo_x - LOGO_LINE_LENGTH - 10
     line_right_start = logo_x + logo_w + 10
 
-    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
-    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
+    draw.line(
+        [(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)],
+        fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX
+    )
+    draw.line(
+        [(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)],
+        fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX
+    )
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
+    # --- PASS 2: draw using real heights (no “floating” gaps)
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
-    
-    for ln in title_lines:
+
+    for i, ln in enumerate(title_lines):
         tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
         line_w = int(tw * TEXT_STRETCH_WIDTH)
         line_x = (width - line_w) // 2
-        
-        actual_h = draw_text_with_stretch(image, line_x, cur_y, ln, title_font, 
-                                          COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        cur_y += stretched_line_h + LINE_SPACING
+
+        actual_h = draw_text_with_stretch(
+            image, line_x, cur_y, ln, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True
+        )
+
+        if i < len(title_lines) - 1:
+            cur_y += actual_h + LINE_SPACING
 
     return image
 
@@ -638,24 +724,41 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    metrics = get_fixed_line_metrics(title_font)
-    base_line_h = metrics['total_height']
-    stretched_line_h = int(base_line_h * TEXT_STRETCH_HEIGHT)
-    
-    total_h = stretched_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    # PASS 1: measure real stretched heights per line
+    title_line_heights = [
+        measure_text_with_stretch(
+            ln, title_font,
+            fill_color=COLOR_TURQUOISE,
+            outline_color=COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True,
+        )
+        for ln in title_lines
+    ]
+    total_h = sum(title_line_heights) + max(0, (len(title_line_heights) - 1) * LINE_SPACING)
 
     start_y = height - SPACING_BOTTOM_MODE2 - total_h
     cur_y = start_y
 
-    for ln in title_lines:
+    # PASS 2: draw with real heights
+    for i, ln in enumerate(title_lines):
         tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
         line_w = int(tw * TEXT_STRETCH_WIDTH)
         line_x = (width - line_w) // 2
-        
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, 
-                               COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        cur_y += stretched_line_h + LINE_SPACING
+
+        actual_h = draw_text_with_stretch(
+            image, line_x, cur_y, ln, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True
+        )
+
+        if i < len(title_lines) - 1:
+            cur_y += actual_h + LINE_SPACING
 
     return image
 
@@ -677,42 +780,82 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    title_metrics = get_fixed_line_metrics(title_font)
-    sub_metrics = get_fixed_line_metrics(subtitle_font)
-    
-    title_line_h = int(title_metrics['total_height'] * TEXT_STRETCH_HEIGHT)
-    sub_line_h = int(sub_metrics['total_height'] * TEXT_STRETCH_HEIGHT)
+    # PASS 1: measure real stretched heights for BOTH blocks
+    title_line_heights = [
+        measure_text_with_stretch(
+            ln, title_font,
+            fill_color=COLOR_TURQUOISE,
+            outline_color=COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True,
+        )
+        for ln in title_lines
+    ]
+    total_title_h = sum(title_line_heights) + max(0, (len(title_line_heights) - 1) * LINE_SPACING)
 
-    total_title_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
-    total_sub_h = sub_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
+    subtitle_line_heights = [
+        measure_text_with_stretch(
+            ln, subtitle_font,
+            fill_color=COLOR_WHITE,
+            outline_color=COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True,
+        )
+        for ln in subtitle_lines
+    ]
+    total_sub_h = sum(subtitle_line_heights) + max(0, (len(subtitle_line_heights) - 1) * LINE_SPACING)
 
-    total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
+    gap = SPACING_TITLE_TO_SUBTITLE if (title_lines and subtitle_lines) else 0
+    total_h = total_title_h + gap + total_sub_h
+
     start_y = height - SPACING_BOTTOM_MODE3 - total_h
-
     cur_y = start_y
 
-    for ln in title_lines:
+    # PASS 2: draw title with real heights
+    for i, ln in enumerate(title_lines):
         tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
         line_w = int(tw * TEXT_STRETCH_WIDTH)
         line_x = (width - line_w) // 2
-        
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, 
-                               COLOR_TURQUOISE, COLOR_OUTLINE)
-        
-        cur_y += title_line_h + LINE_SPACING
 
-    cur_y -= LINE_SPACING
-    cur_y += SPACING_TITLE_TO_SUBTITLE
+        actual_h = draw_text_with_stretch(
+            image, line_x, cur_y, ln, title_font,
+            COLOR_TURQUOISE, COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True
+        )
 
-    for ln in subtitle_lines:
+        if i < len(title_lines) - 1:
+            cur_y += actual_h + LINE_SPACING
+        else:
+            cur_y += actual_h
+
+    # gap between title and subtitle
+    if gap:
+        cur_y += SPACING_TITLE_TO_SUBTITLE
+
+    # draw subtitle with real heights
+    for i, ln in enumerate(subtitle_lines):
         tw = _text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX)
         line_w = int(tw * TEXT_STRETCH_WIDTH)
         line_x = (width - line_w) // 2
-        
-        draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, 
-                               COLOR_WHITE, COLOR_OUTLINE)
-        
-        cur_y += sub_line_h + LINE_SPACING
+
+        actual_h = draw_text_with_stretch(
+            image, line_x, cur_y, ln, subtitle_font,
+            COLOR_WHITE, COLOR_OUTLINE,
+            stretch_width=TEXT_STRETCH_WIDTH,
+            stretch_height=TEXT_STRETCH_HEIGHT,
+            shadow_offset=TEXT_SHADOW_OFFSET,
+            apply_enhancements=True
+        )
+
+        if i < len(subtitle_lines) - 1:
+            cur_y += actual_h + LINE_SPACING
 
     return image
 
