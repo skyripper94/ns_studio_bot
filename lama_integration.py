@@ -609,7 +609,7 @@ def draw_text_with_stretch(
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
     base_image.paste(crop, (x, paste_y), crop)
-    return sh
+    return sh + (paste_y - y)
 
 
 def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
