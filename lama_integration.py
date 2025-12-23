@@ -501,10 +501,9 @@ def draw_text_with_stretch(base_image: Image.Image,
                            shadow_offset: int = TEXT_SHADOW_OFFSET,
                            apply_enhancements: bool = True) -> int:
 
-    # ФИКСИРОВАННАЯ ВЫСОТА ИЗ МЕТРИК
     ascent, descent = font.getmetrics()
-    fixed_height = int((ascent + descent) * stretch_height)
 
+    # ширина текста (с учётом letter spacing) — как у тебя
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
 
     pad = max(6, shadow_offset + TEXT_OUTLINE_THICKNESS * 2)
@@ -515,7 +514,7 @@ def draw_text_with_stretch(base_image: Image.Image,
     d = ImageDraw.Draw(temp)
 
     tx = pad
-    ty = pad + int(ascent)  # baseline (в temp)
+    ty = pad + int(ascent)  # baseline в temp
 
     # shadow
     _draw_text_with_letter_spacing(
@@ -572,34 +571,31 @@ def draw_text_with_stretch(base_image: Image.Image,
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
 
-    # bbox берём по альфе (самый стабильный вариант)
+    # ---------------------------
+    # ✅ КЛЮЧЕВОЙ FIX:
+    # bbox используем только по X, а по Y — фиксированный line box (ascent+descent + запас).
+    # Тогда запятые/хвосты не меняют межстрочный интервал.
+    # ---------------------------
     alpha_ch = temp.split()[-1]
     bb = alpha_ch.getbbox()
     if not bb:
-        return fixed_height
+        return int((ascent + descent) * stretch_height)
 
-    # tight crop (как у тебя было), но дальше фиксируем baseline при вставке
-    crop = temp.crop(bb)
+    x0, _, x1, _ = bb
 
-    raw_h = bb[3] - bb[1]
-    if raw_h <= 0:
-        return fixed_height
+    # запас, чтобы не резать тень/обводку
+    extra = int(shadow_offset + TEXT_OUTLINE_THICKNESS + 2)
 
-    # baseline внутри crop ДО resize
-    baseline_raw = ty - bb[1]
+    # фиксированный бокс по Y вокруг baseline
+    y0 = max(0, (ty - ascent) - extra)
+    y1 = min(temp_h, (ty + descent) + extra)
 
-    # целевая высота строки
-    sh = fixed_height
-    scale_y = sh / raw_h
-    baseline_resized = baseline_raw * scale_y
+    crop = temp.crop((x0, y0, x1, y1))
 
-    # куда должен попасть baseline относительно верхней границы строки (y)
-    ascent_stretched = int(ascent * stretch_height)
+    # одинаковая высота для всех строк (включая запас)
+    sh = int((ascent + descent + 2 * extra) * stretch_height)
 
-    # ✅ FIX: выравниваем по baseline => запятые/хвосты не меняют межстрочный интервал
-    paste_y = y + ascent_stretched - int(round(baseline_resized))
-
-    # ширина — как у тебя: от исходной ширины текста (tw), а не от crop
+    # одинаковое растяжение по ширине (как у тебя — от tw, а не от bbox)
     sw = max(1, int(tw * stretch_width))
 
     crop = crop.resize((sw, sh), Image.Resampling.LANCZOS)
@@ -613,7 +609,7 @@ def draw_text_with_stretch(base_image: Image.Image,
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
 
-    base_image.paste(crop, (x, paste_y), crop)
+    base_image.paste(crop, (x, y), crop)
     return sh
 
 
