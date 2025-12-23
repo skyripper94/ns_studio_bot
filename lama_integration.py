@@ -51,8 +51,8 @@ FONT_SIZE_LOGO = 24                # размер @neurostep.media
 FONT_SIZE_MIN = 44                 # минимальный размер (не меньше)
 
 # ============== ОТСТУПЫ И РАССТОЯНИЯ ==============
-SPACING_BOTTOM_MODE1 = 45         # отступ снизу для режима 1 (лого)
-SPACING_BOTTOM_MODE2 = 90         # отступ снизу для режима 2 (+40px выше)
+SPACING_BOTTOM_MODE1 = 45          # отступ снизу для режима 1 (лого)
+SPACING_BOTTOM_MODE2 = 130         # отступ снизу для режима 2 (+40px выше)
 SPACING_BOTTOM_MODE3 = 90          # отступ снизу для режима 3
 SPACING_LOGO_TO_TITLE = 1          # расстояние от лого до заголовка
 SPACING_TITLE_TO_SUBTITLE = 6    # расстояние заголовок → подзаголовок
