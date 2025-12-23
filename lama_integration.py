@@ -595,11 +595,12 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     # ПРОХОД 1: Находим максимальную высоту
     temp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     max_h = 0
+    actual_heights = []
     for ln in title_lines:
         actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        actual_heights.append(actual_h)
         max_h = max(max_h, actual_h)
     
-    # Используем max_h как фиксированную высоту строки
     line_h = max_h
     total_title_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
 
@@ -623,15 +624,20 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
-    # ПРОХОД 2: Рендер с фиксированным line_h
+    # ПРОХОД 2: Рендер с вертикальным центрированием
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
     block_left = (width - max_text_width) // 2
     
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h  # ФИКСИРОВАННАЯ ВЫСОТА
+        
+        # Центрируем вертикально внутри блока line_h
+        vertical_offset = (line_h - actual_heights[i]) // 2
+        
+        draw_text_with_stretch(image, line_x, cur_y + vertical_offset, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        
+        cur_y += line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
@@ -652,8 +658,10 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     # ПРОХОД 1: Находим максимальную высоту
     temp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     max_h = 0
+    actual_heights = []
     for ln in title_lines:
         actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        actual_heights.append(actual_h)
         max_h = max(max_h, actual_h)
     
     line_h = max_h
@@ -663,12 +671,17 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
-    # ПРОХОД 2: Рендер с фиксированным line_h
+    # ПРОХОД 2: Рендер с вертикальным центрированием
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
-        cur_y += line_h  # ФИКСИРОВАННАЯ ВЫСОТА
+        
+        # Центрируем вертикально внутри блока line_h
+        vertical_offset = (line_h - actual_heights[i]) // 2
+        
+        draw_text_with_stretch(image, line_x, cur_y + vertical_offset, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        
+        cur_y += line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
@@ -697,13 +710,17 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     temp_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     
     max_title_h = 0
+    title_actual_heights = []
     for ln in title_lines:
         actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        title_actual_heights.append(actual_h)
         max_title_h = max(max_title_h, actual_h)
     
     max_sub_h = 0
+    sub_actual_heights = []
     for ln in subtitle_lines:
         actual_h = draw_text_with_stretch(temp_img, 0, 0, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        sub_actual_heights.append(actual_h)
         max_sub_h = max(max_sub_h, actual_h)
 
     title_line_h = max_title_h
@@ -718,22 +735,30 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     cur_y = start_y
     block_left = (width - max_text_width) // 2
 
-    # ПРОХОД 2: Рендер заголовков
+    # ПРОХОД 2: Рендер заголовков с центрированием
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        
+        vertical_offset = (title_line_h - title_actual_heights[i]) // 2
+        
+        draw_text_with_stretch(image, line_x, cur_y + vertical_offset, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
+        
         cur_y += title_line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
 
     cur_y += SPACING_TITLE_TO_SUBTITLE
 
-    # ПРОХОД 2: Рендер подзаголовков
+    # ПРОХОД 2: Рендер подзаголовков с центрированием
     for i, ln in enumerate(subtitle_lines):
         line_w = int(_text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
-        draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        
+        vertical_offset = (sub_line_h - sub_actual_heights[i]) // 2
+        
+        draw_text_with_stretch(image, line_x, cur_y + vertical_offset, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
+        
         cur_y += sub_line_h
         if i < len(subtitle_lines) - 1:
             cur_y += LINE_SPACING
