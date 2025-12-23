@@ -545,14 +545,13 @@ def draw_text_with_stretch(base_image: Image.Image,
             temp_arr = np.clip(temp_arr, 0, 255).astype(np.uint8)
             temp = Image.fromarray(temp_arr)
     
-    # ✅ ФИКСИРОВАННЫЙ CROP ОТ BASELINE (ИГНОРИРУЕТ ЗНАКИ ПРЕПИНАНИЯ)
+    # ✅ ФИКСИРОВАННЫЙ CROP (ИГНОРИРУЕТ ЗНАКИ ПРЕПИНАНИЯ)
     baseline_y = pad + int(ascent)
     margin = max(shadow_offset, TEXT_OUTLINE_THICKNESS) + 2
     
     crop_top = max(0, baseline_y - int(ascent * stretch_height) - margin)
     crop_bottom = min(temp_h, baseline_y + int(descent * stretch_height) + margin)
     
-    # Ширина по bbox
     bb = temp.getbbox()
     if not bb:
         return fixed_height
@@ -562,7 +561,6 @@ def draw_text_with_stretch(base_image: Image.Image,
     
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
     
-    # ✅ RESIZE С ФИКСИРОВАННОЙ ШИРИНОЙ И ВЫСОТОЙ
     sw = max(1, int(tw * stretch_width))
     sh = fixed_height
     
@@ -577,10 +575,8 @@ def draw_text_with_stretch(base_image: Image.Image,
         crop_arr[:, :, :3] = sharpened
         crop = Image.fromarray(crop_arr.astype(np.uint8))
     
-    # ✅ ВСТАВКА БЕЗ СМЕЩЕНИЯ
     base_image.paste(crop, (x, y), crop)
     
-    # ✅ ВСЕГДА ВОЗВРАЩАЕМ ФИКСИРОВАННУЮ ВЫСОТУ
     return fixed_height
 
 
@@ -596,8 +592,41 @@ def _estimate_fixed_line_height(font: ImageFont.FreeTypeFont) -> int:
 
 # ============== РЕЖИМ 1 ==============
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
-    # ... (setup код)
+    image = image.convert("RGBA")
+    draw = ImageDraw.Draw(image, "RGBA")
+    width, height = image.size
+    max_text_width = int(width * TEXT_WIDTH_PERCENT)
+
+    title = (title_translated or "").upper()
+    _, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
+    )
+
+    ascent, descent = title_font.getmetrics()
+    line_h = int((ascent + descent) * TEXT_STRETCH_HEIGHT)
     
+    total_title_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+
+    logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
+    logo_text = "@neurostep.media"
+    bb = logo_font.getbbox(logo_text)
+    logo_w = bb[2] - bb[0]
+    logo_h = bb[3] - bb[1]
+
+    total_h = logo_h + SPACING_LOGO_TO_TITLE + total_title_h
+    start_y = height - SPACING_BOTTOM_MODE1 - total_h
+
+    logo_x = (width - logo_w) // 2
+    logo_y = start_y
+
+    line_y = logo_y + logo_h // 2
+    line_left_start = logo_x - LOGO_LINE_LENGTH - 10
+    line_right_start = logo_x + logo_w + 10
+
+    draw.line([(line_left_start, line_y), (line_left_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
+    draw.line([(line_right_start, line_y), (line_right_start + LOGO_LINE_LENGTH, line_y)], fill=COLOR_TURQUOISE, width=LOGO_LINE_THICKNESS_PX)
+    draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
+
     cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
     block_left = (width - max_text_width) // 2
     
@@ -607,56 +636,101 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         
         draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        cur_y += line_h  # line_h = fixed_height
+        cur_y += line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
-    
+
     return image
 
-# ============== РЕЖИМ 2 ==============  
+
+# ============== РЕЖИМ 2 ==============
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
-    # ... (setup код)
+    image = image.convert("RGBA")
+    width, height = image.size
+    max_text_width = int(width * TEXT_WIDTH_PERCENT)
+
+    title = (title_translated or "").upper()
+    _, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
+    )
+
+    ascent, descent = title_font.getmetrics()
+    line_h = int((ascent + descent) * TEXT_STRETCH_HEIGHT)
     
+    total_h = line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+
+    start_y = height - SPACING_BOTTOM_MODE2 - total_h
+    cur_y = start_y
+    block_left = (width - max_text_width) // 2
+
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
         draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        cur_y += line_h  # line_h = fixed_height
+        cur_y += line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
-    
+
     return image
+
 
 # ============== РЕЖИМ 3 ==============
 def render_mode3_content(image: Image.Image, title_translated: str, subtitle_translated: str) -> Image.Image:
-    # ... (setup код)
+    image = image.convert("RGBA")
+    width, height = image.size
+    max_text_width = int(width * TEXT_WIDTH_PERCENT)
+
+    title = (title_translated or "").upper()
+    subtitle = (subtitle_translated or "").upper()
+
+    title_size, title_font, title_lines = calculate_adaptive_font_size(
+        title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
+    )
+
+    subtitle_initial = int(title_size * 0.80)
+    _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
+        subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
+    )
+
+    title_ascent, title_descent = title_font.getmetrics()
+    title_line_h = int((title_ascent + title_descent) * TEXT_STRETCH_HEIGHT)
     
-    # Заголовки
+    sub_ascent, sub_descent = subtitle_font.getmetrics()
+    sub_line_h = int((sub_ascent + sub_descent) * TEXT_STRETCH_HEIGHT)
+
+    total_title_h = title_line_h * len(title_lines) + max(0, (len(title_lines) - 1) * LINE_SPACING)
+    total_sub_h = sub_line_h * len(subtitle_lines) + max(0, (len(subtitle_lines) - 1) * LINE_SPACING)
+
+    total_h = total_title_h + SPACING_TITLE_TO_SUBTITLE + total_sub_h
+    start_y = height - SPACING_BOTTOM_MODE3 - total_h
+
+    cur_y = start_y
+    block_left = (width - max_text_width) // 2
+
     for i, ln in enumerate(title_lines):
         line_w = int(_text_width_px(title_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
         draw_text_with_stretch(image, line_x, cur_y, ln, title_font, COLOR_TURQUOISE, COLOR_OUTLINE)
         
-        cur_y += title_line_h  # title_line_h = fixed_height
+        cur_y += title_line_h
         if i < len(title_lines) - 1:
             cur_y += LINE_SPACING
-    
+
     cur_y += SPACING_TITLE_TO_SUBTITLE
-    
-    # Подзаголовки
+
     for i, ln in enumerate(subtitle_lines):
         line_w = int(_text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX) * TEXT_STRETCH_WIDTH)
         line_x = block_left + (max_text_width - line_w) // 2
         
         draw_text_with_stretch(image, line_x, cur_y, ln, subtitle_font, COLOR_WHITE, COLOR_OUTLINE)
         
-        cur_y += sub_line_h  # sub_line_h = fixed_height
+        cur_y += sub_line_h
         if i < len(subtitle_lines) - 1:
             cur_y += LINE_SPACING
-    
+
     return image
 
 
