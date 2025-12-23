@@ -372,8 +372,18 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         image = pickle.load(f)
     
     h, w = image.shape[:2]
+    
+    from lama_integration import MASK_BOTTOM_MODE1, MASK_BOTTOM_MODE2, MASK_BOTTOM_MODE3
+    
+    if submode == 1:
+        mask_percent = MASK_BOTTOM_MODE1
+    elif submode == 2:
+        mask_percent = MASK_BOTTOM_MODE2
+    else:
+        mask_percent = MASK_BOTTOM_MODE3
+    
     mask = np.zeros((h, w), dtype=np.uint8)
-    mask_start = int(h * (1 - MASK_BOTTOM_PERCENT / 100))
+    mask_start = int(h * (1 - mask_percent / 100))
     mask[mask_start:, :] = 255
     
     clean_image = flux_inpaint(image, mask)
