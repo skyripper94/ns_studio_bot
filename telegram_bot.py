@@ -10,6 +10,7 @@ import os
 import logging
 from io import BytesIO
 import pickle
+import time
 
 import cv2
 import numpy as np
@@ -592,9 +593,9 @@ async def process_full_mode_step3(update, user_id: int):
         "Что дальше?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    
-    
-    async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Пользователь хочет перерендерить текст после финальной картинки."""
     query = update.callback_query
     await query.answer()
