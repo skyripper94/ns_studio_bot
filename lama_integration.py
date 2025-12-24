@@ -45,6 +45,7 @@ SPACING_BOTTOM_MODE3 = 75
 SPACING_LOGO_TO_TITLE = -15
 SPACING_TITLE_TO_SUBTITLE = -50
 LINE_SPACING = -60
+LINE_SPACING_SUBTITLE = -55
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -867,7 +868,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         stretch_height=TEXT_STRETCH_HEIGHT,
         shadow_offset=TEXT_SHADOW_OFFSET,
         apply_enhancements=True,
-        line_spacing=LINE_SPACING,
+        line_spacing=LINE_SPACING_SUBTITLE,
     )
 
     gap = SPACING_TITLE_TO_SUBTITLE if (title_layout["items"] and sub_layout["items"]) else 0
