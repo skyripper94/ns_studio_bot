@@ -441,52 +441,53 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
 async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    msg_target = query.message  # FIX: target message for reply_text
     user_id = update.effective_user.id
-    
-    user_states[user_id]['step'] = 'editing_llm'
-    
-    submode = user_states[user_id]['submode']
-    
-    if submode == 3:
-        hint = (
-            "**Как писать:**\n"
-            "Все строки КРОМЕ последней → ЗАГОЛОВОК (бирюзовый)\n"
-            "Последняя строка → ПОДЗАГОЛОВОК (белый)\n\n"
-            "Пример:\n"
-            "`Портфель Ambani`\n"
-            "`Недвижимость на $50 млрд.`"
-        )
-    else:
-        hint = "Пришлите текст для заголовка"
-    
+
+    state = user_states[user_id]
+    llm_title = state.get("llm_title", "")
+    llm_subtitle = state.get("llm_subtitle", "")
+    llm_preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
+
+    # reuse your existing hint/reply markup if present in the file
+    reply_markup = state.get("reply_markup")
+    hint = state.get("hint", "")
+
+    # Put bot into "editing_llm" mode
+    user_states[user_id]["step"] = "editing_llm"
+
+    # Show current translation + instructions (includes MANUAL_BREAK_HINT if you defined it)
     await msg_target.reply_text(
-        f"🌐 **LLM перевёл:**\n\n{llm_preview}\n\n"
-        f"Выберите действие:{MANUAL_BREAK_HINT}",
+        f"✏️ **Отправьте исправленный перевод**\n\n"
+        f"{hint}\n\n"
+        f"Текущий текст:\n{llm_preview}"
+        f"{MANUAL_BREAK_HINT if 'MANUAL_BREAK_HINT' in globals() else ''}",
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode="Markdown"
     )
 
 
 async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    msg_target = query.message  # FIX: target message for reply_text
     user_id = update.effective_user.id
-    
+
     state = user_states[user_id]
-    llm_title = state['llm_title']
-    llm_subtitle = state.get('llm_subtitle', '')
-    
+    llm_title = state.get("llm_title", "")
+    llm_subtitle = state.get("llm_subtitle", "")
+
     preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
-    
+
     await msg_target.reply_text(
-        f"🌐 **LLM перевёл:**\n\n{llm_preview}\n\n"
-        f"Выберите действие:{MANUAL_BREAK_HINT}",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
+        f"✅ **Перевод принят**\n\n{preview[:200]}...",
+        parse_mode="Markdown"
     )
 
-
-    await process_full_mode_step3(query, user_id)
+    # IMPORTANT: pass update (not query) so step3 can access update.callback_query.message
+    await process_full_mode_step3(update, user_id)
     
 
 async def process_full_mode_step3(update, user_id: int):
