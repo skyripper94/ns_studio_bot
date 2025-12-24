@@ -202,6 +202,12 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif query.data == "edit_llm":
         await handle_llm_edit(update, context)
+        
+    elif query.data == "rerender_text":
+        await handle_rerender_text(update, context)
+        
+    elif query.data == "finish_render":
+        await handle_finish_render(update, context)
 
 
 async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -516,11 +522,11 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
 
 async def process_full_mode_step3(update, user_id: int):
-    """ШАГ 3: Градиент + Рендер → готово."""
-    msg_target = _pick_msg_target(update)
-    if msg_target is None:
-        logger.error("❌ process_full_mode_step3: msg_target is None")
-        return
+    """ШАГ 3: Градиент + Рендер → готово. + возможность перерендерить текст."""
+    if hasattr(update, 'message'):
+        msg_target = update.message
+    else:
+        msg_target = update
 
     status_msg = await msg_target.reply_text(
         "⏳ **Шаг 4/4:** Рендер...",
@@ -570,15 +576,77 @@ async def process_full_mode_step3(update, user_id: int):
             ),
             parse_mode='Markdown'
         )
-        await status_msg.delete()
+
+    await status_msg.delete()
+
+    # ВАЖНО: тут НЕ удаляем clean_path/image_path — они нужны для перерендеров
+    user_states[user_id]['step'] = 'post_render'
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🔁 Перерендерить текст", callback_data="rerender_text"),
+            InlineKeyboardButton("✅ Завершить", callback_data="finish_render")
+        ]
+    ]
+    await msg_target.reply_text(
+        "Что дальше?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
+    
+    async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь хочет перерендерить текст после финальной картинки."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    if user_id not in user_states:
+        return
+
+    # возвращаемся в режим правки текста
+    user_states[user_id]['step'] = 'editing_llm'
+
+    submode = user_states[user_id].get('submode')
+
+    if submode == 3:
+        hint = (
+            "**Как писать:**\n"
+            "Все строки КРОМЕ последней → ЗАГОЛОВОК (бирюзовый)\n"
+            "Последняя строка → ПОДЗАГОЛОВОК (белый)\n\n"
+            "Можно использовать `|` для принудительного переноса.\n"
+            "Пример: `ПРОИСХОДИТ|В МИРЕ`"
+        )
+    else:
+        hint = "Пришлите новый текст заголовка (можно `|` для переноса)."
+
+    await query.message.reply_text(
+        f"✏️ **Перерендер текста**\n\n{hint}",
+        parse_mode='Markdown'
+    )
+
+
+async def handle_finish_render(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь завершил — чистим файлы."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    if user_id not in user_states:
+        return
+
+    state = user_states[user_id]
 
     try:
-        os.remove(state['image_path'])
-        os.remove(clean_path)
+        if state.get('image_path'):
+            os.remove(state['image_path'])
+        if state.get('clean_path'):
+            os.remove(state['clean_path'])
     except:
         pass
 
     user_states[user_id]['step'] = None
+
+    await query.message.reply_text("✅ **Готово. Сессию закрыл, временные файлы очищены.**", parse_mode='Markdown')
 
 
 def main():
