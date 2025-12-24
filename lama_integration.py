@@ -44,7 +44,7 @@ SPACING_BOTTOM_MODE2 = 45
 SPACING_BOTTOM_MODE3 = 75
 SPACING_LOGO_TO_TITLE = 3
 SPACING_TITLE_TO_SUBTITLE = 8
-LINE_SPACING = -12
+LINE_SPACING = 0
 LOGO_LINE_LENGTH = 310
 LOGO_LINE_THICKNESS_PX = 3
 
@@ -73,7 +73,7 @@ TEXT_SHARPEN_AMOUNT = 0.3
 TEXT_STRETCH_HEIGHT = 1.8
 TEXT_STRETCH_WIDTH = 1.05
 
-TEXT_SHADOW_OFFSET = 3
+TEXT_SHADOW_OFFSET = 2
 TEXT_OUTLINE_THICKNESS = 2
 
 TEXT_WIDTH_PERCENT = 0.90
@@ -542,65 +542,156 @@ def draw_text_with_stretch(base_image: Image.Image,
     return target_h
 
 
-def measure_text_with_stretch(text: str,
-                             font: ImageFont.FreeTypeFont,
-                             fill_color: tuple = COLOR_TURQUOISE,
-                             outline_color: tuple = COLOR_OUTLINE,
-                             stretch_width: float = TEXT_STRETCH_WIDTH,
-                             stretch_height: float = TEXT_STRETCH_HEIGHT,
-                             shadow_offset: int = TEXT_SHADOW_OFFSET,
-                             apply_enhancements: bool = True) -> int:
-    """Return final stretched height (px) for a given text line without drawing it."""
-    if not (text or '').strip():
-        return 0
+def build_stretched_line_image(
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill_color: tuple,
+    outline_color: tuple,
+    stretch_width: float = TEXT_STRETCH_WIDTH,
+    stretch_height: float = TEXT_STRETCH_HEIGHT,
+    shadow_offset: int = TEXT_SHADOW_OFFSET,
+    apply_enhancements: bool = True,
+):
+    """
+    Returns:
+      (line_img_rgba_stretched, baseline_offset_stretched_px)
+    baseline_offset = distance from top of the returned image to baseline.
+    """
+    text = (text or "")
+    if not text.strip():
+        return None, 0
 
-    metrics = get_fixed_line_metrics(font)
-    font_h = metrics['font_height']
+    ascent, descent = font.getmetrics()
+    font_h = ascent + descent
 
     pad = max(15, shadow_offset + TEXT_OUTLINE_THICKNESS * 2 + 10)
     tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
-
     temp_w = tw + pad * 2
     temp_h = font_h + pad * 2
 
-    temp = Image.new('RGBA', (temp_w, temp_h), (0, 0, 0, 0))
+    # baseline in temp coords
+    baseline_y = pad + ascent
+    text_top_y = baseline_y - ascent  # == pad
+
+    temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
 
     tx = pad
-    ty = pad
+    ty = text_top_y
 
+    # shadow
     _draw_text_with_letter_spacing(
         d, (tx + shadow_offset, ty + shadow_offset),
         text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX
     )
 
+    # outline
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
-        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1),
+                       (0, -1),           (0, 1),
+                       (1, -1),  (1, 0),  (1, 1)]:
             _draw_text_with_letter_spacing(
                 d, (tx + dx * r, ty + dy * r),
                 text, font, outline_color, spacing=LETTER_SPACING_PX
             )
 
+    # fill
     _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
 
     if apply_enhancements:
         temp = _apply_text_enhancements(temp)
 
-    bb = temp.getbbox()
+        bb = temp.getbbox()
     if not bb:
-        return 0
+        return None, 0
 
-    margin = 3
-    crop_left = max(0, bb[0] - margin)
-    crop_top = max(0, bb[1] - margin)
-    crop_right = min(temp_w, bb[2] + margin)
-    crop_bottom = min(temp_h, bb[3] + margin)
+    # --- FIX: crop X by bbox, but keep Y fixed to a line-box
+    margin_x = 3
+    crop_left  = max(0, bb[0] - margin_x)
+    crop_right = min(temp_w, bb[2] + margin_x)
+
+    # фиксированное вертикальное окно вокруг "нормальной" строки
+    extra_y = shadow_offset + int(TEXT_OUTLINE_THICKNESS) * 2 + 6
+    crop_top    = max(0, pad - extra_y)
+    crop_bottom = min(temp_h, pad + font_h + extra_y)
 
     crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
-    crop_h = crop.size[1]
 
-    return max(1, int(crop_h * stretch_height))
+    baseline_offset = baseline_y - crop_top
+    baseline_offset = max(0, baseline_offset)
+
+    # stretch
+    target_w = max(1, int(crop.size[0] * stretch_width))
+    target_h = max(1, int(crop.size[1] * stretch_height))
+    crop = crop.resize((target_w, target_h), Image.LANCZOS)
+
+    baseline_offset_stretched = int(baseline_offset * stretch_height)
+    return crop, baseline_offset_stretched
+
+
+def layout_baseline_block(
+    lines: list,
+    font: ImageFont.FreeTypeFont,
+    fill_color: tuple,
+    outline_color: tuple,
+    stretch_width: float = TEXT_STRETCH_WIDTH,
+    stretch_height: float = TEXT_STRETCH_HEIGHT,
+    shadow_offset: int = TEXT_SHADOW_OFFSET,
+    apply_enhancements: bool = True,
+    line_spacing: int = LINE_SPACING,
+):
+    """
+    Prepares baseline-aligned layout for multiple lines.
+    Returns:
+      dict with:
+        items: [{img, base_off, baseline_rel}]
+        total_h: int
+        shift: int  (value added to all baseline_rel to make top = 0)
+        step: int   (baseline step)
+    """
+    ascent, descent = font.getmetrics()
+
+    # constant baseline step (this is the key)
+    extra = shadow_offset + int(TEXT_OUTLINE_THICKNESS) * 2 + 6
+    line_box_h = ascent + descent + extra
+    step = int(line_box_h * stretch_height) + line_spacing
+
+    items_raw = []
+    for ln in lines:
+        img, base_off = build_stretched_line_image(
+            ln, font,
+            fill_color=fill_color,
+            outline_color=outline_color,
+            stretch_width=stretch_width,
+            stretch_height=stretch_height,
+            shadow_offset=shadow_offset,
+            apply_enhancements=apply_enhancements,
+        )
+        if img is None:
+            continue
+        items_raw.append((img, base_off))
+
+    if not items_raw:
+        return {"items": [], "total_h": 0, "shift": 0, "step": step}
+
+    # compute extents in a baseline coordinate system
+    min_top = 10**9
+    max_bottom = -10**9
+    items = []
+
+    for i, (img, base_off) in enumerate(items_raw):
+        baseline_rel = i * step
+        top = baseline_rel - base_off
+        bottom = top + img.size[1]
+        min_top = min(min_top, top)
+        max_bottom = max(max_bottom, bottom)
+        items.append({"img": img, "base_off": base_off, "baseline_rel": baseline_rel})
+
+    shift = -min_top
+    total_h = max_bottom - min_top
+
+    return {"items": items, "total_h": total_h, "shift": shift, "step": step}
 
 
 def _apply_text_enhancements(img: Image.Image) -> Image.Image:
@@ -639,7 +730,6 @@ def _sharpen_image(img: Image.Image) -> Image.Image:
 
 def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     image = image.convert("RGBA")
-    draw = ImageDraw.Draw(image, "RGBA")
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
 
@@ -648,22 +738,21 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # --- PASS 1: measure real stretched heights per line
-    title_line_heights = [
-        measure_text_with_stretch(
-            ln, title_font,
-            fill_color=COLOR_TURQUOISE,
-            outline_color=COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True,
-        )
-        for ln in title_lines
-    ]
-    total_title_h = sum(title_line_heights) + max(0, (len(title_line_heights) - 1) * LINE_SPACING)
+    # baseline layout for title block
+    title_layout = layout_baseline_block(
+        title_lines, title_font,
+        fill_color=COLOR_TURQUOISE,
+        outline_color=COLOR_OUTLINE,
+        stretch_width=TEXT_STRETCH_WIDTH,
+        stretch_height=TEXT_STRETCH_HEIGHT,
+        shadow_offset=TEXT_SHADOW_OFFSET,
+        apply_enhancements=True,
+        line_spacing=LINE_SPACING,
+    )
+    total_title_h = title_layout["total_h"]
 
     # logo block
+    draw = ImageDraw.Draw(image, "RGBA")
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
     bb = logo_font.getbbox(logo_text)
@@ -691,27 +780,17 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     )
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
-    # --- PASS 2: draw using real heights (no “floating” gaps)
-    cur_y = start_y + logo_h + SPACING_LOGO_TO_TITLE
-
-    for i, ln in enumerate(title_lines):
-        tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
-        line_w = int(tw * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2
-
-        actual_h = draw_text_with_stretch(
-            image, line_x, cur_y, ln, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True
-        )
-
-        if i < len(title_lines) - 1:
-            cur_y += actual_h + LINE_SPACING
+    # paste title lines baseline-aligned
+    block_top = start_y + logo_h + SPACING_LOGO_TO_TITLE
+    for it in title_layout["items"]:
+        img = it["img"]
+        baseline = block_top + title_layout["shift"] + it["baseline_rel"]
+        y = baseline - it["base_off"]
+        x = (width - img.size[0]) // 2
+        image.alpha_composite(img, (int(x), int(y)))
 
     return image
+
 
 
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
@@ -724,41 +803,26 @@ def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE2, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # PASS 1: measure real stretched heights per line
-    title_line_heights = [
-        measure_text_with_stretch(
-            ln, title_font,
-            fill_color=COLOR_TURQUOISE,
-            outline_color=COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True,
-        )
-        for ln in title_lines
-    ]
-    total_h = sum(title_line_heights) + max(0, (len(title_line_heights) - 1) * LINE_SPACING)
+    layout = layout_baseline_block(
+        title_lines, title_font,
+        fill_color=COLOR_TURQUOISE,
+        outline_color=COLOR_OUTLINE,
+        stretch_width=TEXT_STRETCH_WIDTH,
+        stretch_height=TEXT_STRETCH_HEIGHT,
+        shadow_offset=TEXT_SHADOW_OFFSET,
+        apply_enhancements=True,
+        line_spacing=LINE_SPACING,
+    )
 
+    total_h = layout["total_h"]
     start_y = height - SPACING_BOTTOM_MODE2 - total_h
-    cur_y = start_y
 
-    # PASS 2: draw with real heights
-    for i, ln in enumerate(title_lines):
-        tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
-        line_w = int(tw * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2
-
-        actual_h = draw_text_with_stretch(
-            image, line_x, cur_y, ln, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True
-        )
-
-        if i < len(title_lines) - 1:
-            cur_y += actual_h + LINE_SPACING
+    for it in layout["items"]:
+        img = it["img"]
+        baseline = start_y + layout["shift"] + it["baseline_rel"]
+        y = baseline - it["base_off"]
+        x = (width - img.size[0]) // 2
+        image.alpha_composite(img, (int(x), int(y)))
 
     return image
 
@@ -780,82 +844,49 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # PASS 1: measure real stretched heights for BOTH blocks
-    title_line_heights = [
-        measure_text_with_stretch(
-            ln, title_font,
-            fill_color=COLOR_TURQUOISE,
-            outline_color=COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True,
-        )
-        for ln in title_lines
-    ]
-    total_title_h = sum(title_line_heights) + max(0, (len(title_line_heights) - 1) * LINE_SPACING)
+    title_layout = layout_baseline_block(
+        title_lines, title_font,
+        fill_color=COLOR_TURQUOISE,
+        outline_color=COLOR_OUTLINE,
+        stretch_width=TEXT_STRETCH_WIDTH,
+        stretch_height=TEXT_STRETCH_HEIGHT,
+        shadow_offset=TEXT_SHADOW_OFFSET,
+        apply_enhancements=True,
+        line_spacing=LINE_SPACING,
+    )
 
-    subtitle_line_heights = [
-        measure_text_with_stretch(
-            ln, subtitle_font,
-            fill_color=COLOR_WHITE,
-            outline_color=COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True,
-        )
-        for ln in subtitle_lines
-    ]
-    total_sub_h = sum(subtitle_line_heights) + max(0, (len(subtitle_line_heights) - 1) * LINE_SPACING)
+    sub_layout = layout_baseline_block(
+        subtitle_lines, subtitle_font,
+        fill_color=COLOR_WHITE,
+        outline_color=COLOR_OUTLINE,
+        stretch_width=TEXT_STRETCH_WIDTH,
+        stretch_height=TEXT_STRETCH_HEIGHT,
+        shadow_offset=TEXT_SHADOW_OFFSET,
+        apply_enhancements=True,
+        line_spacing=LINE_SPACING,
+    )
 
-    gap = SPACING_TITLE_TO_SUBTITLE if (title_lines and subtitle_lines) else 0
-    total_h = total_title_h + gap + total_sub_h
-
+    gap = SPACING_TITLE_TO_SUBTITLE if (title_layout["items"] and sub_layout["items"]) else 0
+    total_h = title_layout["total_h"] + gap + sub_layout["total_h"]
     start_y = height - SPACING_BOTTOM_MODE3 - total_h
-    cur_y = start_y
 
-    # PASS 2: draw title with real heights
-    for i, ln in enumerate(title_lines):
-        tw = _text_width_px(title_font, ln, spacing=LETTER_SPACING_PX)
-        line_w = int(tw * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2
+    # paste title
+    block_top = start_y
+    for it in title_layout["items"]:
+        img = it["img"]
+        baseline = block_top + title_layout["shift"] + it["baseline_rel"]
+        y = baseline - it["base_off"]
+        x = (width - img.size[0]) // 2
+        image.alpha_composite(img, (int(x), int(y)))
 
-        actual_h = draw_text_with_stretch(
-            image, line_x, cur_y, ln, title_font,
-            COLOR_TURQUOISE, COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True
-        )
-
-        if i < len(title_lines) - 1:
-            cur_y += actual_h + LINE_SPACING
-        else:
-            cur_y += actual_h
-
-    # gap between title and subtitle
-    if gap:
-        cur_y += SPACING_TITLE_TO_SUBTITLE
-
-    # draw subtitle with real heights
-    for i, ln in enumerate(subtitle_lines):
-        tw = _text_width_px(subtitle_font, ln, spacing=LETTER_SPACING_PX)
-        line_w = int(tw * TEXT_STRETCH_WIDTH)
-        line_x = (width - line_w) // 2
-
-        actual_h = draw_text_with_stretch(
-            image, line_x, cur_y, ln, subtitle_font,
-            COLOR_WHITE, COLOR_OUTLINE,
-            stretch_width=TEXT_STRETCH_WIDTH,
-            stretch_height=TEXT_STRETCH_HEIGHT,
-            shadow_offset=TEXT_SHADOW_OFFSET,
-            apply_enhancements=True
-        )
-
-        if i < len(subtitle_lines) - 1:
-            cur_y += actual_h + LINE_SPACING
+    # paste subtitle under
+    block_top = start_y + title_layout["total_h"] + gap
+    for it in sub_layout["items"]:
+        img = it["img"]
+        baseline = block_top + sub_layout["shift"] + it["baseline_rel"]
+        y = baseline - it["base_off"]
+        x = (width - img.size[0]) // 2
+        image.alpha_composite(img, (int(x), int(y)))
 
     return image
 
