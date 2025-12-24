@@ -120,25 +120,24 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start - показывает меню выбора режима."""
     user_id = update.effective_user.id
+
+    # 1) Общая уборка старых файлов в /tmp
     removed = cleanup_temp_files(TEMP_DIR, max_age_hours=6)
-if removed:
-    logger.info(f"🧹 TEMP cleanup: удалено {removed} старых файлов из {TEMP_DIR}")
+    if removed:
+        logger.info(f"🧹 TEMP cleanup: удалено {removed} старых файлов из {TEMP_DIR}")
 
-
-    
-    if user_id not in user_states:
-        user_states[user_id] = {}
-    
-    user_states[user_id].update({'mode': None, 'submode': None, 'step': None})
+    # 2) Точечная уборка хвостов прошлого сеанса этого пользователя
     prev = user_states.get(user_id, {})
-for k in ("image_path", "clean_path"):
-    p = prev.get(k)
-    if p and os.path.isfile(p):
-        try:
-            os.remove(p)
-        except:
-            pass
+    for k in ("image_path", "clean_path"):
+        p = prev.get(k)
+        if p and os.path.isfile(p):
+            try:
+                os.remove(p)
+            except:
+                pass
 
+    # 3) Сброс состояния
+    user_states[user_id] = {'mode': None, 'submode': None, 'step': None}
 
     keyboard = [
         [
@@ -147,7 +146,7 @@ for k in ("image_path", "clean_path"):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(
         "👋 **Бот для работы с изображениями**\n\n"
         "**🗑️ УДАЛИТЬ ТЕКСТ:**\n"
