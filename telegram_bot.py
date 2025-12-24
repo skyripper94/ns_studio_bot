@@ -569,10 +569,11 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_full_mode_step3(update, user_id: int):
     """ШАГ 3: Градиент + Рендер → готово. + возможность перерендерить текст."""
-    if hasattr(update, 'message'):
-        msg_target = update.message
-    else:
-        msg_target = update
+    msg_target = _pick_msg_target(update)
+    if msg_target is None:
+        logger.error("❌ step3: msg_target is None")
+        return
+
 
     status_msg = await msg_target.reply_text(
         "⏳ **Шаг 4/4:** Рендер...",
