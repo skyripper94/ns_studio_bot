@@ -50,6 +50,11 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 user_states = {}
 
+MANUAL_BREAK_HINT = (
+    "\n\n⚙️ Ручной перенос строки:\n"
+    "Вставь символ `|` там, где нужно принудительно перенести.\n"
+    "Пример: `ПРОИСХОДИТ|В МИРЕ`.
+)
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Глобальный обработчик ошибок."""
@@ -455,7 +460,7 @@ async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hint = "Пришлите текст для заголовка"
     
     await query.message.reply_text(
-        f"✏️ **Отправьте исправленный перевод**\n\n{hint}",
+        f"✏️ **Отправьте исправленный перевод**\n\n{hint}" + MANUAL_BREAK_HINT,
         parse_mode='Markdown'
     )
 
@@ -472,9 +477,10 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
     
     await query.message.reply_text(
-        f"✅ **Перевод принят**\n\n{preview[:200]}...",
+        f"✏️ **Отправьте исправленный перевод**\n\n{hint}" + MANUAL_BREAK_HINT,
         parse_mode='Markdown'
     )
+
     
     await process_full_mode_step3(query, user_id)
     
