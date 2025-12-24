@@ -50,11 +50,34 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 user_states = {}
 
-MANUAL_BREAK_HINT = (
-    "\n\n⚙️ Ручной перенос строки:\n"
-    "Вставь символ `|` там, где нужно принудительно перенести.\n"
-    "Пример: `ПРОИСХОДИТ|В МИРЕ`."
-)
+def _pick_msg_target(obj):
+    """
+    Возвращает telegram.Message, куда можно писать reply_text/edit_text.
+    Поддерживает: Update, CallbackQuery, Message.
+    """
+    # 1) Если это Update с обычным сообщением
+    if hasattr(obj, "message") and obj.message:
+        return obj.message
+
+    # 2) Если это Update с callback_query
+    if hasattr(obj, "callback_query") and obj.callback_query:
+        if getattr(obj.callback_query, "message", None):
+            return obj.callback_query.message
+
+    # 3) Если это CallbackQuery напрямую
+    if hasattr(obj, "message") and obj.message:
+        return obj.message
+
+    # 4) Если это уже Message
+    if hasattr(obj, "reply_text"):
+        return obj
+
+    # 5) запасной вариант (если где-то передашь context/update-like)
+    if hasattr(obj, "effective_message") and obj.effective_message:
+        return obj.effective_message
+
+    return None
+    
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Глобальный обработчик ошибок."""
@@ -359,46 +382,45 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_full_mode_step2(update, user_id: int, ocr_text: str):
     """ШАГ 2: Inpaint + LLM → показать → ждать решения."""
-    
-    if hasattr(update, 'message'):
-        msg_target = update.message
-    else:
-        msg_target = update
-    
+    msg_target = _pick_msg_target(update)
+    if msg_target is None:
+        logger.error("❌ step2: msg_target is None")
+        return
+
     status_msg = await msg_target.reply_text(
-        "⏳ **Шаг 2/4:** Удаление текста...",
+        "⏳ **Шаг 2/4:** Удаление текста.",
         parse_mode='Markdown'
     )
-    
+
     state = user_states[user_id]
     image_path = state['image_path']
     submode = state['submode']
-    
+
     with open(image_path, 'rb') as f:
         image = pickle.load(f)
-    
+
     h, w = image.shape[:2]
-    
+
     if submode == 1:
         mask_percent = MASK_BOTTOM_MODE1
     elif submode == 2:
         mask_percent = MASK_BOTTOM_MODE2
     else:
         mask_percent = MASK_BOTTOM_MODE3
-    
+
     mask = np.zeros((h, w), dtype=np.uint8)
     mask_start = int(h * (1 - mask_percent / 100))
     mask[mask_start:, :] = 255
-    
+
     clean_image = flux_inpaint(image, mask)
-    
+
     clean_path = f"{TEMP_DIR}/{user_id}_clean.pkl"
     with open(clean_path, 'wb') as f:
         pickle.dump(clean_image, f)
     user_states[user_id]['clean_path'] = clean_path
-    
-    await status_msg.edit_text("⏳ **Шаг 3/4:** Перевод (LLM)...", parse_mode='Markdown')
-    
+
+    await status_msg.edit_text("⏳ **Шаг 3/4:** Перевод (LLM).", parse_mode='Markdown')
+
     if submode == 3:
         lines = ocr_text.split('\n')
         if len(lines) >= 2:
@@ -406,22 +428,22 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
             subtitle = lines[-1]
         else:
             title, subtitle = ocr_text, ""
-        
+
         title_translated = openai_translate(title)
         subtitle_translated = openai_translate(subtitle) if subtitle else ""
-        
+
         user_states[user_id]['llm_title'] = title_translated
         user_states[user_id]['llm_subtitle'] = subtitle_translated
-        
+
         llm_preview = f"{title_translated}\n{subtitle_translated}" if subtitle_translated else title_translated
     else:
         title_translated = openai_translate(ocr_text)
         user_states[user_id]['llm_title'] = title_translated
         user_states[user_id]['llm_subtitle'] = ""
         llm_preview = title_translated
-    
+
     user_states[user_id]['step'] = 'waiting_llm_decision'
-    
+
     keyboard = [
         [
             InlineKeyboardButton("✏️ Править", callback_data="edit_llm"),
@@ -429,7 +451,7 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await msg_target.reply_text(
         f"🌐 **LLM перевёл:**\n\n{llm_preview}\n\n"
         f"Выберите действие:",
@@ -441,103 +463,105 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
 async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
-    msg_target = query.message  # FIX: target message for reply_text
     user_id = update.effective_user.id
 
-    state = user_states[user_id]
-    llm_title = state.get("llm_title", "")
-    llm_subtitle = state.get("llm_subtitle", "")
-    llm_preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
+    user_states[user_id]['step'] = 'editing_llm'
+    submode = user_states[user_id]['submode']
 
-    # reuse your existing hint/reply markup if present in the file
-    reply_markup = state.get("reply_markup")
-    hint = state.get("hint", "")
+    if submode == 3:
+        hint = (
+            "**Как писать:**\n"
+            "Все строки КРОМЕ последней → ЗАГОЛОВОК (бирюзовый)\n"
+            "Последняя строка → ПОДЗАГОЛОВОК (белый)\n\n"
+            "Пример:\n"
+            "`Портфель Ambani`\n"
+            "`Недвижимость на $50 млрд.`"
+        )
+    else:
+        hint = "Пришлите текст для заголовка"
 
-    # Put bot into "editing_llm" mode
-    user_states[user_id]["step"] = "editing_llm"
+    msg_target = _pick_msg_target(update)
+    if msg_target is None:
+        logger.error("❌ handle_llm_edit: msg_target is None")
+        return
 
-    # Show current translation + instructions (includes MANUAL_BREAK_HINT if you defined it)
     await msg_target.reply_text(
-        f"✏️ **Отправьте исправленный перевод**\n\n"
-        f"{hint}\n\n"
-        f"Текущий текст:\n{llm_preview}"
-        f"{MANUAL_BREAK_HINT if 'MANUAL_BREAK_HINT' in globals() else ''}",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        f"✏️ **Отправьте исправленный перевод**\n\n{hint}",
+        parse_mode='Markdown'
     )
 
 
 async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
-    msg_target = query.message  # FIX: target message for reply_text
     user_id = update.effective_user.id
 
     state = user_states[user_id]
-    llm_title = state.get("llm_title", "")
-    llm_subtitle = state.get("llm_subtitle", "")
+    llm_title = state['llm_title']
+    llm_subtitle = state.get('llm_subtitle', '')
 
     preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
 
+    msg_target = _pick_msg_target(update)
+    if msg_target is None:
+        logger.error("❌ handle_llm_next: msg_target is None")
+        return
+
     await msg_target.reply_text(
         f"✅ **Перевод принят**\n\n{preview[:200]}...",
-        parse_mode="Markdown"
+        parse_mode='Markdown'
     )
 
-    # IMPORTANT: pass update (not query) so step3 can access update.callback_query.message
     await process_full_mode_step3(update, user_id)
     
 
 async def process_full_mode_step3(update, user_id: int):
     """ШАГ 3: Градиент + Рендер → готово."""
-    
-    if hasattr(update, 'message'):
-        msg_target = update.message
-    else:
-        msg_target = update
-    
+    msg_target = _pick_msg_target(update)
+    if msg_target is None:
+        logger.error("❌ process_full_mode_step3: msg_target is None")
+        return
+
     status_msg = await msg_target.reply_text(
         "⏳ **Шаг 4/4:** Рендер...",
         parse_mode='Markdown'
     )
-    
+
     state = user_states[user_id]
     clean_path = state['clean_path']
     submode = state['submode']
     llm_title = state['llm_title']
     llm_subtitle = state.get('llm_subtitle', '')
-    
+
     with open(clean_path, 'rb') as f:
         clean_image = pickle.load(f)
-    
+
     from PIL import Image as PILImage
     clean_rgb = cv2.cvtColor(clean_image, cv2.COLOR_BGR2RGB)
     pil = PILImage.fromarray(clean_rgb).convert("RGBA")
-    
+
     if submode == 3:
         grad = create_gradient_layer(pil.size[0], pil.size[1], gradient_height_percent=GRADIENT_HEIGHT_MODE3)
     else:
         grad = create_gradient_layer(pil.size[0], pil.size[1], gradient_height_percent=GRADIENT_HEIGHT_MODE12)
-    
+
     pil = PILImage.alpha_composite(pil, grad)
-    
+
     if submode == 1:
         pil = render_mode1_logo(pil, llm_title)
     elif submode == 2:
         pil = render_mode2_text(pil, llm_title)
     elif submode == 3:
         pil = render_mode3_content(pil, llm_title, llm_subtitle)
-    
+
     out_rgb = np.array(pil.convert("RGB"))
     out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
     out_bgr = enhance_image(out_bgr)
-    
+
     success, buffer = cv2.imencode('.png', out_bgr)
     if success:
         mode_names = {1: "ЛОГО", 2: "ТЕКСТ", 3: "КОНТЕНТ"}
-        
+
         await msg_target.reply_photo(
             photo=BytesIO(buffer.tobytes()),
             caption=(
@@ -547,13 +571,13 @@ async def process_full_mode_step3(update, user_id: int):
             parse_mode='Markdown'
         )
         await status_msg.delete()
-    
+
     try:
         os.remove(state['image_path'])
         os.remove(clean_path)
     except:
         pass
-    
+
     user_states[user_id]['step'] = None
 
 
