@@ -603,7 +603,7 @@ def build_stretched_line_image(
     if apply_enhancements:
         temp = _apply_text_enhancements(temp)
 
-        bb = temp.getbbox()
+    bb = temp.getbbox()
     if not bb:
         return None, 0
 
@@ -833,18 +833,21 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     width, height = image.size
     max_text_width = int(width * TEXT_WIDTH_PERCENT)
 
-    title = (title_translated or "").upper()
-    subtitle = (subtitle_translated or "").upper()
+    title = (title_translated or "").upper().strip()
+    subtitle = (subtitle_translated or "").upper().strip()
 
+    # 1) Подбираем шрифт/переносы для title
     title_size, title_font, title_lines = calculate_adaptive_font_size(
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
     )
 
+    # 2) Подбираем шрифт/переносы для subtitle (может стать 2+ строками — это ок)
     subtitle_initial = int(title_size * 0.80)
     _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
         subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
     )
 
+    # 3) Строим baseline-layout для обоих блоков (это и есть “фикс” межстрочника/оптики)
     title_layout = layout_baseline_block(
         title_lines, title_font,
         fill_color=COLOR_TURQUOISE,
@@ -871,7 +874,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     total_h = title_layout["total_h"] + gap + sub_layout["total_h"]
     start_y = height - SPACING_BOTTOM_MODE3 - total_h
 
-    # paste title
+    # 4) Рисуем title (baseline-aligned)
     block_top = start_y
     for it in title_layout["items"]:
         img = it["img"]
@@ -880,7 +883,7 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         x = (width - img.size[0]) // 2
         image.alpha_composite(img, (int(x), int(y)))
 
-    # paste subtitle under
+    # 5) Рисуем subtitle (baseline-aligned) — ключевой момент для 2+ строк
     block_top = start_y + title_layout["total_h"] + gap
     for it in sub_layout["items"]:
         img = it["img"]
