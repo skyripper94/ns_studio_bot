@@ -51,6 +51,38 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 user_states = {}
 
+def cleanup_temp_files(temp_dir: str, max_age_hours: int = 12) -> int:
+    """
+    Удаляет старые временные файлы бота в temp_dir.
+    Чистит только наши файлы: *_image*.pkl, *_clean*.pkl, *_final*.png
+    """
+    now = time.time()
+    max_age_sec = max_age_hours * 3600
+
+    removed = 0
+    try:
+        for name in os.listdir(temp_dir):
+            path = os.path.join(temp_dir, name)
+            if not os.path.isfile(path):
+                continue
+
+            # только наши файлы
+            if not (name.endswith(".pkl") or name.endswith(".png")):
+                continue
+            if ("_image" not in name) and ("_clean" not in name) and ("_final" not in name):
+                continue
+
+            age_sec = now - os.path.getmtime(path)
+            if age_sec >= max_age_sec:
+                os.remove(path)
+                removed += 1
+
+    except Exception as e:
+        logger.warning(f"cleanup_temp_files: ошибка: {e}")
+
+    return removed
+
+
 def _pick_msg_target(obj):
     """
     Возвращает telegram.Message, куда можно писать reply_text/edit_text.
@@ -88,12 +120,26 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start - показывает меню выбора режима."""
     user_id = update.effective_user.id
+    removed = cleanup_temp_files(TEMP_DIR, max_age_hours=6)
+if removed:
+    logger.info(f"🧹 TEMP cleanup: удалено {removed} старых файлов из {TEMP_DIR}")
+
+
     
     if user_id not in user_states:
         user_states[user_id] = {}
     
     user_states[user_id].update({'mode': None, 'submode': None, 'step': None})
-    
+    prev = user_states.get(user_id, {})
+for k in ("image_path", "clean_path"):
+    p = prev.get(k)
+    if p and os.path.isfile(p):
+        try:
+            os.remove(p)
+        except:
+            pass
+
+
     keyboard = [
         [
             InlineKeyboardButton("🗑️ УДАЛИТЬ ТЕКСТ", callback_data="mode_remove"),
