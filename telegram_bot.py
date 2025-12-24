@@ -53,7 +53,7 @@ user_states = {}
 MANUAL_BREAK_HINT = (
     "\n\n⚙️ Ручной перенос строки:\n"
     "Вставь символ `|` там, где нужно принудительно перенести.\n"
-    "Пример: `ПРОИСХОДИТ|В МИРЕ`.
+    "Пример: `ПРОИСХОДИТ|В МИРЕ`."
 )
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -459,8 +459,10 @@ async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         hint = "Пришлите текст для заголовка"
     
-    await query.message.reply_text(
-        f"✏️ **Отправьте исправленный перевод**\n\n{hint}" + MANUAL_BREAK_HINT,
+    await msg_target.reply_text(
+        f"🌐 **LLM перевёл:**\n\n{llm_preview}\n\n"
+        f"Выберите действие:{MANUAL_BREAK_HINT}",
+        reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
@@ -476,12 +478,14 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     preview = f"{llm_title}\n{llm_subtitle}" if llm_subtitle else llm_title
     
-    await query.message.reply_text(
-        f"✏️ **Отправьте исправленный перевод**\n\n{hint}" + MANUAL_BREAK_HINT,
+    await msg_target.reply_text(
+        f"🌐 **LLM перевёл:**\n\n{llm_preview}\n\n"
+        f"Выберите действие:{MANUAL_BREAK_HINT}",
+        reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
-    
+
     await process_full_mode_step3(query, user_id)
     
 
