@@ -51,6 +51,12 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 user_states = {}
 
+def escape_md(text: str) -> str:
+    """Экранирует спецсимволы Markdown для Telegram."""
+    for ch in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
+        text = text.replace(ch, '\\' + ch)
+    return text
+
 def cleanup_temp_files(temp_dir: str, max_age_hours: int = 12) -> int:
     """
     Удаляет старые временные файлы бота в temp_dir.
@@ -178,6 +184,28 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Бот удалит текст и градиент ({MASK_BOTTOM_MODE2}% снизу).",
             parse_mode='Markdown'
         )
+
+    elif query.data.startswith("render_mode_"):
+        submode = int(query.data.split("_")[-1])
+        user_states[user_id]['submode'] = submode
+        user_states[user_id]['step'] = 'editing_llm'
+        user_states[user_id]['llm_title'] = ''
+        user_states[user_id]['llm_subtitle'] = ''
+        
+        if submode == 3:
+            hint = (
+                "Все строки КРОМЕ последней → ЗАГОЛОВОК (бирюзовый)\n"
+                "Последняя строка → ПОДЗАГОЛОВОК (белый)\n\n"
+                "Можно `|` для переноса."
+            )
+        else:
+            hint = "Можно `|` для принудительного переноса."
+        
+        await query.message.reply_text(
+            f"✏️ **Введите текст для рендера:**\n\n{hint}",
+            parse_mode='Markdown'
+        )
+    
     
     elif query.data == "mode_full":
         user_states[user_id]['mode'] = 'full'
@@ -255,6 +283,9 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "finish_render":
         await handle_finish_render(update, context)
 
+    elif query.data == "add_text_after_remove":
+        await handle_add_text_after_remove(update, context)
+
 
 async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка полученного изображения."""
@@ -292,7 +323,8 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def process_remove_mode(update: Update, image: np.ndarray):
-    """РЕЖИМ УДАЛЕНИЯ: только убираем текст."""
+    """РЕЖИМ УДАЛЕНИЯ: убираем текст + опция добавить свой."""
+    user_id = update.effective_user.id
     status_msg = await update.message.reply_text("⏳ Удаление текста...")
     
     height, width = image.shape[:2]
@@ -301,16 +333,35 @@ async def process_remove_mode(update: Update, image: np.ndarray):
     mask[mask_start:, :] = 255
     
     result = flux_kontext_inpaint(image, mask)
-    result = enhance_image(result)
     
-    success, buffer = cv2.imencode('.png', result)
+    # Сохраняем clean image для возможного рендера
+    clean_path = f"{TEMP_DIR}/{user_id}_clean.pkl"
+    with open(clean_path, 'wb') as f:
+        pickle.dump(result, f)
+    
+    user_states[user_id]['clean_path'] = clean_path
+    user_states[user_id]['step'] = 'post_remove'
+    
+    result_enhanced = enhance_image(result)
+    success, buffer = cv2.imencode('.png', result_enhanced)
     if success:
         await update.message.reply_photo(
             photo=BytesIO(buffer.tobytes()),
-            caption="✅ **Текст удалён!**\n🎨 LaMa",
-            parse_mode='Markdown'
+            caption="✅ **Текст удалён\\!**",
+            parse_mode='MarkdownV2'
         )
-        await status_msg.delete()
+    await status_msg.delete()
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ Добавить текст", callback_data="add_text_after_remove"),
+            InlineKeyboardButton("✅ Готово", callback_data="finish_render")
+        ]
+    ]
+    await update.message.reply_text(
+        "Что дальше?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def process_full_mode_step1(update: Update, image: np.ndarray, submode: int, user_id: int):
@@ -325,32 +376,13 @@ async def process_full_mode_step1(update: Update, image: np.ndarray, submode: in
         return
     
     ocr_text = ocr["text"]
-    ocr_preview = ocr_text[:300] + "..." if len(ocr_text) > 300 else ocr_text
-    
-    image_path = f"{TEMP_DIR}/{user_id}_image.pkl"
-    with open(image_path, 'wb') as f:
-        pickle.dump(image, f)
-    
-    user_states[user_id].update({
-        'step': 'waiting_ocr_decision',
-        'ocr_text': ocr_text,
-        'image_path': image_path,
-        'submode': submode
-    })
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("✏️ Править", callback_data="edit_ocr"),
-            InlineKeyboardButton("➡️ Далее", callback_data="next_ocr")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    ocr_preview = escape_md(ocr_text[:300] + "..." if len(ocr_text) > 300 else ocr_text)
     
     await update.message.reply_text(
         f"📝 **OCR распознал:**\n\n{ocr_preview}\n\n"
         f"Выберите действие:",
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode='MarkdownV2'
     )
     await status_msg.delete()
 
@@ -494,6 +526,8 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         user_states[user_id]['llm_subtitle'] = ""
         llm_preview = title_translated
 
+    llm_preview_escaped = escape_md(llm_preview)
+
     user_states[user_id]['step'] = 'waiting_llm_decision'
 
     keyboard = [
@@ -505,10 +539,10 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await msg_target.reply_text(
-        f"🌐 **LLM перевёл:**\n\n{llm_preview}\n\n"
+        f"🌐 **LLM перевёл:**\n\n{llm_preview_escaped}\n\n"
         f"Выберите действие:",
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode='MarkdownV2'
     )
 
 
@@ -694,6 +728,25 @@ async def handle_finish_render(update: Update, context: ContextTypes.DEFAULT_TYP
     user_states[user_id]['step'] = None
 
     await query.message.reply_text("✅ **Готово. Сессию закрыл, временные файлы очищены.**", parse_mode='Markdown')
+
+
+async def handle_add_text_after_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """После удаления текста — выбор режима и ввод своего текста."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+
+    keyboard = [
+        [
+            InlineKeyboardButton("1️⃣ ЛОГО", callback_data="render_mode_1"),
+            InlineKeyboardButton("2️⃣ ТЕКСТ", callback_data="render_mode_2"),
+            InlineKeyboardButton("3️⃣ КОНТЕНТ", callback_data="render_mode_3")
+        ]
+    ]
+    await query.message.reply_text(
+        "Выберите режим рендера:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 def main():
