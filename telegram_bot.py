@@ -45,6 +45,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Приглушаем болтливые логи, которые печатают URL с токеном
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+
+# Железобетон: маскируем токен в любых лог-сообщениях
+class RedactTelegramTokenFilter(logging.Filter):
+    _re = re.compile(r"(https://api\.telegram\.org/bot)(\d+:[A-Za-z0-9_-]+)")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.msg = self._re.sub(r"\1***", str(record.msg))
+            if record.args:
+                record.args = tuple(self._re.sub(r"\1***", str(a)) for a in record.args)
+        except Exception:
+            pass
+        return True
+
+logging.getLogger().addFilter(RedactTelegramTokenFilter())
+
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TEMP_DIR = '/tmp/bot_images'
 os.makedirs(TEMP_DIR, exist_ok=True)
