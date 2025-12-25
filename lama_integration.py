@@ -204,7 +204,7 @@ def openai_translate(text: str) -> str:
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": clean_text},,
+                {"role": "user", "content": clean_text},
             ],
             temperature=0.2,
             max_tokens=120,
