@@ -378,6 +378,25 @@ async def process_full_mode_step1(update: Update, image: np.ndarray, submode: in
     ocr_text = ocr["text"]
     ocr_preview = escape_md(ocr_text[:300] + "..." if len(ocr_text) > 300 else ocr_text)
     
+    image_path = f"{TEMP_DIR}/{user_id}_image.pkl"
+    with open(image_path, 'wb') as f:
+        pickle.dump(image, f)
+    
+    user_states[user_id].update({
+        'step': 'waiting_ocr_decision',
+        'ocr_text': ocr_text,
+        'image_path': image_path,
+        'submode': submode
+    })
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("✏️ Править", callback_data="edit_ocr"),
+            InlineKeyboardButton("➡️ Далее", callback_data="next_ocr")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
         f"📝 **OCR распознал:**\n\n{ocr_preview}\n\n"
         f"Выберите действие:",
