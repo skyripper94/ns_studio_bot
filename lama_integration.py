@@ -41,7 +41,7 @@ FONT_SIZE_MIN = 44
 
 SPACING_BOTTOM_MODE1 = 20
 SPACING_BOTTOM_MODE2 = 45
-SPACING_BOTTOM_MODE3 = 75
+SPACING_BOTTOM_MODE3 = 55
 SPACING_LOGO_TO_TITLE = -15
 SPACING_TITLE_TO_SUBTITLE = -50
 LINE_SPACING = -60
@@ -204,7 +204,7 @@ def openai_translate(text: str) -> str:
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Сделай заголовок для обложки: {clean_text}"},
+                {"role": "user", "content": clean_text},,
             ],
             temperature=0.2,
             max_tokens=120,
