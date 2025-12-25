@@ -430,9 +430,11 @@ async def handle_ocr_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = user_states[user_id]
     ocr_text = state['ocr_text']
     
+    preview = escape_md(ocr_text[:200] + "..." if len(ocr_text) > 200 else ocr_text)
+    
     await query.edit_message_text(
-        f"✅ **OCR текст принят**\n\n{ocr_text[:200]}...",
-        parse_mode='Markdown'
+        f"✅ **OCR текст принят**\n\n{preview}",
+        parse_mode='MarkdownV2'
     )
     
     await process_full_mode_step2(query, user_id, ocr_text)
