@@ -410,100 +410,54 @@ def _wrap_text_preserve_breaks(text: str, font, max_width: int, stretch_width: f
 
 def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
                                  initial_size: int, min_size: int = FONT_SIZE_MIN,
-                                 stretch_width: float = TEXT_STRETCH_WIDTH) -> tuple:
+                                 stretch_width: float = TEXT_STRETCH_WIDTH,
+                                 prefer_fewer_lines: bool = True,
+                                 max_shrink: int = 6) -> tuple:
+    """
+    Подбирает размер шрифта и переносы.
+    prefer_fewer_lines=True: если текст ПОЧТИ влезает в меньшее кол-во строк,
+    уменьшить шрифт на 1-max_shrink пунктов вместо переноса.
+    """
     text = (text or "").strip()
     if not text:
         font = ImageFont.truetype(font_path, int(min_size))
         return int(min_size), font, [""]
 
     size = int(initial_size)
+    
+    # Сначала получаем базовый результат
     while size >= int(min_size):
         try:
             font = ImageFont.truetype(font_path, int(size))
-            # ВАЖНО: теперь учитываем ручные переносы ('|' и '\n')
             lines = _wrap_text_preserve_breaks(text, font, max_width, stretch_width)
             if lines:
-                return int(size), font, lines
+                break
         except Exception as e:
             logger.error(f"Ошибка шрифта {size}: {e}")
         size -= 2
-
-    font = ImageFont.truetype(font_path, int(min_size))
-    return int(min_size), font, [text]
-
-
-def _wrap_greedy(words: list, font: ImageFont.FreeTypeFont, max_width: int, stretch: float) -> list:
-    """
-    Вариант 1 (авто):
-    - перенос по ширине
-    - запрет "висячих" коротких слов (В/К/С/...) в конце строки:
-      если строка заканчивается на такой токен — переносим его вниз.
-    """
-    if not words:
-        return []
-
-    space_w = max(1, _text_width_px(font, " ", spacing=LETTER_SPACING_PX))
-
-    def line_w(ws: list) -> int:
-        if not ws:
-            return 0
-        w = 0
-        for j, ww in enumerate(ws):
-            ww_w = _text_width_px(font, ww, spacing=LETTER_SPACING_PX)
-            w += (space_w if j > 0 else 0) + ww_w
-        return int(w * stretch)
-
-    lines = []
-    cur = []
-
-    i = 0
-    n = len(words)
-
-    while i < n:
-        w = words[i]
-        if not cur:
-            cur = [w]
-            i += 1
-            continue
-
-        trial = cur + [w]
-        if line_w(trial) <= max_width:
-            cur = trial
-            i += 1
-            continue
-
-        # строка переполнена -> фиксируем "висячий" предлог/союз на конце
-        if len(cur) >= 2 and _norm_orphan(cur[-1]) in ORPHANS_RU:
-            orphan = cur.pop()              # снимаем "В"
-            lines.append(" ".join(cur))     # строка без него
-            cur = [orphan]                  # новая строка начинается с "В"
-            # слово w пока НЕ берём — оно будет добавлено на следующей итерации
-        else:
-            lines.append(" ".join(cur))
-            cur = []
-
-        # не забываем: текущий w ещё не обработан, поэтому не увеличиваем i
-
-    if cur:
-        # финальный добивочный фикс: если последняя строка оканчивается на orphan, сдвинем его вниз (если есть куда)
-        if len(cur) >= 2 and _norm_orphan(cur[-1]) in ORPHANS_RU and lines:
-            orphan = cur.pop()
-            lines.append(" ".join(cur))
-            lines.append(orphan)
-        else:
-            lines.append(" ".join(cur))
-
-    return [ln for ln in lines if ln.strip()]
-
-
-def _text_width_px(font: ImageFont.FreeTypeFont, text: str, spacing: int = 0) -> int:
-    bb = font.getbbox(text)
-    base_width = int(bb[2] - bb[0])
+    else:
+        font = ImageFont.truetype(font_path, int(min_size))
+        return int(min_size), font, [text]
     
-    if spacing > 0 and len(text) > 1:
-        return base_width + (len(text) - 1) * spacing
+    # prefer_fewer_lines: пробуем уменьшить шрифт чтобы уменьшить кол-во строк
+    if prefer_fewer_lines and len(lines) > 1:
+        target_lines = len(lines) - 1
+        
+        for shrink in range(1, max_shrink + 1):
+            test_size = size - shrink
+            if test_size < min_size:
+                break
+            try:
+                test_font = ImageFont.truetype(font_path, int(test_size))
+                test_lines = _wrap_text_preserve_breaks(text, test_font, max_width, stretch_width)
+                if len(test_lines) <= target_lines:
+                    # Успех — меньше строк при небольшом уменьшении шрифта
+                    logger.info(f"📏 Шрифт уменьшен {size}→{test_size} для уменьшения строк {len(lines)}→{len(test_lines)}")
+                    return int(test_size), test_font, test_lines
+            except Exception:
+                pass
     
-    return base_width
+    return int(size), font, lines
 
 
 def _draw_text_with_letter_spacing(draw: ImageDraw.ImageDraw, pos: tuple, text: str, 
