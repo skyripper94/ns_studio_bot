@@ -377,8 +377,6 @@ ORPHANS_RU = {
     # 1-буквенные (главные)
     "В", "К", "С", "У", "О", "А", "И", "Я", "ВО", "НА", "НО", "НЕ", "ПО", "ЗА", "ОТ", "ДО"
 
-    # если хочешь — включи 2-буквенные (иногда тоже полезно)
-    # "ВО", "НА", "НО", "НЕ", "ПО", "ЗА", "ОТ", "ДО"
 }
 
 _ORPHAN_STRIP = ".,:;!?…—-()[]{}\"'«»"
@@ -386,6 +384,69 @@ _ORPHAN_STRIP = ".,:;!?…—-()[]{}\"'«»"
 def _norm_orphan(word: str) -> str:
     # "В," -> "В"
     return (word or "").strip().strip(_ORPHAN_STRIP).upper()
+
+
+def _text_width_px(font: ImageFont.FreeTypeFont, text: str, spacing: int = 0) -> int:
+    bb = font.getbbox(text)
+    base_width = int(bb[2] - bb[0])
+    
+    if spacing > 0 and len(text) > 1:
+        return base_width + (len(text) - 1) * spacing
+    
+    return base_width
+
+
+def _wrap_greedy(words: list, font: ImageFont.FreeTypeFont, max_width: int, stretch: float) -> list:
+    if not words:
+        return []
+
+    space_w = max(1, _text_width_px(font, " ", spacing=LETTER_SPACING_PX))
+
+    def line_w(ws: list) -> int:
+        if not ws:
+            return 0
+        w = 0
+        for j, ww in enumerate(ws):
+            ww_w = _text_width_px(font, ww, spacing=LETTER_SPACING_PX)
+            w += (space_w if j > 0 else 0) + ww_w
+        return int(w * stretch)
+
+    lines = []
+    cur = []
+    i = 0
+    n = len(words)
+
+    while i < n:
+        w = words[i]
+        if not cur:
+            cur = [w]
+            i += 1
+            continue
+
+        trial = cur + [w]
+        if line_w(trial) <= max_width:
+            cur = trial
+            i += 1
+            continue
+
+        if len(cur) >= 2 and _norm_orphan(cur[-1]) in ORPHANS_RU:
+            orphan = cur.pop()
+            lines.append(" ".join(cur))
+            cur = [orphan]
+        else:
+            lines.append(" ".join(cur))
+            cur = []
+
+    if cur:
+        if len(cur) >= 2 and _norm_orphan(cur[-1]) in ORPHANS_RU and lines:
+            orphan = cur.pop()
+            lines.append(" ".join(cur))
+            lines.append(orphan)
+        else:
+            lines.append(" ".join(cur))
+
+    return [ln for ln in lines if ln.strip()]
+
 
 def _wrap_text_preserve_breaks(text: str, font, max_width: int, stretch_width: float) -> list:
     """
