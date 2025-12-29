@@ -35,7 +35,7 @@ COLOR_OUTLINE = (60, 60, 60)
 FONT_SIZE_MODE1 = 50
 FONT_SIZE_MODE2 = 50
 FONT_SIZE_MODE3_TITLE = 48
-FONT_SIZE_MODE3_SUBTITLE = 36
+FONT_SIZE_MODE3_SUBTITLE = 42
 FONT_SIZE_LOGO = 24
 FONT_SIZE_MIN = 44
 
@@ -920,10 +920,9 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # 2) Подбираем шрифт/переносы для subtitle (может стать 2+ строками — это ок)
-    subtitle_initial = int(title_size * 0.80)
+    # 2) Подбираем шрифт/переносы для subtitle
     _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
-        subtitle, FONT_PATH, max_text_width, subtitle_initial, stretch_width=TEXT_STRETCH_WIDTH
+        subtitle, FONT_PATH, max_text_width, FONT_SIZE_MODE3_SUBTITLE, stretch_width=TEXT_STRETCH_WIDTH
     )
 
     # 3) Строим baseline-layout для обоих блоков (это и есть “фикс” межстрочника/оптики)
