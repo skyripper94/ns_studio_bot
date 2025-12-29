@@ -1,4 +1,4 @@
-# lama_integration.py - FIXED VERSION
+# lama_integration.py - IMPROVED VERSION
 
 import os
 import logging
@@ -35,9 +35,9 @@ COLOR_OUTLINE = (60, 60, 60)
 FONT_SIZE_MODE1 = 50
 FONT_SIZE_MODE2 = 50
 FONT_SIZE_MODE3_TITLE = 48
-FONT_SIZE_MODE3_SUBTITLE = 42
+FONT_SIZE_MODE3_SUBTITLE = 38
 FONT_SIZE_LOGO = 24
-FONT_SIZE_MIN = 44
+FONT_SIZE_MIN = 38
 
 SPACING_BOTTOM_MODE1 = 15
 SPACING_BOTTOM_MODE2 = 40
@@ -56,10 +56,10 @@ OCR_BOTTOM_PERCENT = 32
 
 GRADIENT_HEIGHT_MODE12 = 42
 GRADIENT_HEIGHT_MODE3 = 38
-GRADIENT_SOLID_FRACTION = 0.5
-GRADIENT_TRANSITION_CURVE = 2.2
-GRADIENT_BLUR_SIGMA = 120
-GRADIENT_NOISE_INTENSITY = 10
+GRADIENT_SOLID_FRACTION = 0.20
+GRADIENT_TRANSITION_CURVE = 1.3
+GRADIENT_BLUR_SIGMA = 180
+GRADIENT_NOISE_INTENSITY = 6
 
 ENHANCE_BRIGHTNESS = 1.05
 ENHANCE_CONTRAST = 1.0
@@ -85,6 +85,14 @@ OPENCV_INPAINT_RADIUS = 3
 FONT_PATH = os.getenv("FONT_PATH", "/app/fonts/WaffleSoft.otf").strip()
 
 openai.api_key = OPENAI_API_KEY
+
+
+def _is_mostly_cyrillic(text: str) -> bool:
+    if not text:
+        return False
+    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+    alpha = sum(1 for c in text if c.isalpha())
+    return alpha > 0 and (cyrillic / alpha) > 0.7
 
 
 def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTTOM_PERCENT) -> dict:
@@ -164,19 +172,23 @@ def openai_translate(text: str) -> str:
         logger.warning("⚠️ OPENAI_API_KEY не установлен или нет текста")
         return text
 
+    if _is_mostly_cyrillic(text):
+        logger.info(f"🇷🇺 Текст уже на русском, пропускаю перевод")
+        return text.upper()
+
     try:
         logger.info(f"🌐 Перевод: {text}")
         clean_text = _preclean_ocr_for_cover(text)
         logger.info(f"🧹 После чистки: {clean_text}")
 
-        system_prompt = """ТТы — профессиональный редактор и контент-стратег медиа уровня Wealth.
+        system_prompt = """Ты — профессиональный редактор и контент-стратег медиа уровня Wealth.
 Твоя задача — не переводить текст дословно, а адаптировать его для
 русскоязычной аудитории Instagram / Reels / Telegram.
 
 Правила:
 1) Сохраняй названия объектов/брендов/мест (Antilia, Sea Wind, Mandarin Oriental, Tribeca и т.п.) в оригинале латиницей, но города/регионы переводи на русский: Mumbai → Мумбаи, New York → Нью-Йорк, Buckinghamshire → Бакингемшир.
 2) Формат вывода: каждая строка отдельно, без списков и без комментариев. 
-3) Денежные суммы конвертируй в русское оформление, ставь знак вылюты после цены или стоимости
+3) Денежные суммы конвертируй в русское оформление, ставь знак валюты после цены или стоимости
 4) Если строка — слоган/фраза, переведи естественно, без кальки, в нейтрально-деловом тоне.
 5) Никаких добавлений фактов. Не выдумывай детали. 
 6) Если в тексте есть многоточие/обрыв — сохрани его.
@@ -187,11 +199,6 @@ def openai_translate(text: str) -> str:
 
 Вход: набор строк на английском (каждая с новой строки).
 Выход: тот же набор строк на русском, в том же порядке.
-
-✅ ХОРОШО:
-
-"Aircraft" → "Истребитель"
-"Northrop B-2 Spirit" → "Стелс-бомбардировщик B-2 Northrop Spirit"
 """
 
         resp = openai.ChatCompletion.create(
@@ -325,13 +332,13 @@ def create_gradient_layer(width: int, height: int, gradient_height_percent: int)
         if i < start_row:
             alpha[i] = 0.0
         else:
-            t = (height - 1 - i) / float(grad_h)
+            progress = (i - start_row) / float(grad_h)
             
-            if t <= GRADIENT_SOLID_FRACTION:
+            if progress >= (1.0 - GRADIENT_SOLID_FRACTION):
                 alpha[i] = 1.0
             else:
-                t_norm = (t - GRADIENT_SOLID_FRACTION) / (1.0 - GRADIENT_SOLID_FRACTION)
-                alpha[i] = 1.0 - (t_norm ** GRADIENT_TRANSITION_CURVE)
+                t_norm = progress / (1.0 - GRADIENT_SOLID_FRACTION)
+                alpha[i] = t_norm ** GRADIENT_TRANSITION_CURVE
     
     alpha_u8 = (alpha * 255).astype(np.uint8)
     alpha_2d = np.tile(alpha_u8[:, None], (1, width))
@@ -347,7 +354,7 @@ def create_gradient_layer(width: int, height: int, gradient_height_percent: int)
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha_blurred
     
-    logger.info(f"✨ Градиент: {gradient_height_percent}%, solid={GRADIENT_SOLID_FRACTION*100}%, blur={GRADIENT_BLUR_SIGMA}, noise={GRADIENT_NOISE_INTENSITY}")
+    logger.info(f"✨ Градиент: {gradient_height_percent}%, solid={GRADIENT_SOLID_FRACTION*100}%, curve={GRADIENT_TRANSITION_CURVE}, blur={GRADIENT_BLUR_SIGMA}")
     return Image.fromarray(rgba, mode="RGBA")
 
 
@@ -365,18 +372,14 @@ def enhance_image(image_bgr: np.ndarray) -> np.ndarray:
     logger.info(f"📸 Улучшение: яркость={ENHANCE_BRIGHTNESS:.2f}, контраст={ENHANCE_CONTRAST:.2f}, насыщенность={ENHANCE_SATURATION:.2f}, резкость={ENHANCE_SHARPNESS:.2f}")
     return enhanced
 
-# --- PATCH: auto "no orphan prepositions" + manual hard breaks ---
 
 ORPHANS_RU = {
-    # 1-буквенные (главные)
     "В", "К", "С", "У", "О", "А", "И", "Я", "ВО", "НА", "НО", "НЕ", "ПО", "ЗА", "ОТ", "ДО"
-
 }
 
 _ORPHAN_STRIP = ".,:;!?…—-()[]{}\"'«»"
 
 def _norm_orphan(word: str) -> str:
-    # "В," -> "В"
     return (word or "").strip().strip(_ORPHAN_STRIP).upper()
 
 
@@ -443,12 +446,6 @@ def _wrap_greedy(words: list, font: ImageFont.FreeTypeFont, max_width: int, stre
 
 
 def _wrap_text_preserve_breaks(text: str, font, max_width: int, stretch_width: float) -> list:
-    """
-    Вариант 2 (ручной):
-    - '|' = жесткий перенос строки
-    - '\n' = жесткий перенос строки
-    Каждый кусок переносится отдельно и не "перетекает" через разрыв.
-    """
     text = (text or "").replace("|", "\n").strip()
     if not text:
         return [""]
@@ -468,11 +465,6 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
                                  stretch_width: float = TEXT_STRETCH_WIDTH,
                                  prefer_fewer_lines: bool = True,
                                  max_shrink: int = 6) -> tuple:
-    """
-    Подбирает размер шрифта и переносы.
-    prefer_fewer_lines=True: если текст ПОЧТИ влезает в меньшее кол-во строк,
-    уменьшить шрифт на 1-max_shrink пунктов вместо переноса.
-    """
     text = (text or "").strip()
     if not text:
         font = ImageFont.truetype(font_path, int(min_size))
@@ -480,7 +472,6 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
 
     size = int(initial_size)
     
-    # Сначала получаем базовый результат
     while size >= int(min_size):
         try:
             font = ImageFont.truetype(font_path, int(size))
@@ -494,7 +485,6 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
         font = ImageFont.truetype(font_path, int(min_size))
         return int(min_size), font, [text]
     
-    # prefer_fewer_lines: пробуем уменьшить шрифт чтобы уменьшить кол-во строк
     if prefer_fewer_lines and len(lines) > 1:
         target_lines = len(lines) - 1
         
@@ -506,7 +496,6 @@ def calculate_adaptive_font_size(text: str, font_path: str, max_width: int,
                 test_font = ImageFont.truetype(font_path, int(test_size))
                 test_lines = _wrap_text_preserve_breaks(text, test_font, max_width, stretch_width)
                 if len(test_lines) <= target_lines:
-                    # Успех — меньше строк при небольшом уменьшении шрифта
                     logger.info(f"📏 Шрифт уменьшен {size}→{test_size} для уменьшения строк {len(lines)}→{len(test_lines)}")
                     return int(test_size), test_font, test_lines
             except Exception:
@@ -552,76 +541,6 @@ def get_fixed_line_metrics(font: ImageFont.FreeTypeFont) -> dict:
     }
 
 
-def draw_text_with_stretch(base_image: Image.Image,
-                           x: int, y: int,
-                           text: str,
-                           font: ImageFont.FreeTypeFont,
-                           fill_color: tuple,
-                           outline_color: tuple,
-                           stretch_width: float = TEXT_STRETCH_WIDTH,
-                           stretch_height: float = TEXT_STRETCH_HEIGHT,
-                           shadow_offset: int = TEXT_SHADOW_OFFSET,
-                           apply_enhancements: bool = True) -> int:
-    if not text.strip():
-        return 0
-    
-    metrics = get_fixed_line_metrics(font)
-    ascent = metrics['ascent']
-    descent = metrics['descent']
-    font_h = metrics['font_height']
-    
-    pad = max(15, shadow_offset + TEXT_OUTLINE_THICKNESS * 2 + 10)
-    tw = _text_width_px(font, text, spacing=LETTER_SPACING_PX)
-    
-    temp_w = tw + pad * 2
-    temp_h = font_h + pad * 2
-    
-    temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(temp)
-    
-    tx = pad
-    ty = pad
-    
-    _draw_text_with_letter_spacing(d, (tx + shadow_offset, ty + shadow_offset), 
-                                   text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX)
-    
-    for t in range(int(TEXT_OUTLINE_THICKNESS)):
-        r = t + 1
-        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
-            _draw_text_with_letter_spacing(d, (tx + dx * r, ty + dy * r), 
-                                          text, font, outline_color, spacing=LETTER_SPACING_PX)
-    
-    _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
-    
-    if apply_enhancements:
-        temp = _apply_text_enhancements(temp)
-    
-    bb = temp.getbbox()
-    if not bb:
-        return 0
-    
-    margin = 3
-    crop_left = max(0, bb[0] - margin)
-    crop_top = max(0, bb[1] - margin)
-    crop_right = min(temp_w, bb[2] + margin)
-    crop_bottom = min(temp_h, bb[3] + margin)
-    
-    crop = temp.crop((crop_left, crop_top, crop_right, crop_bottom))
-    crop_w, crop_h = crop.size
-    
-    target_w = max(1, int(crop_w * stretch_width))
-    target_h = max(1, int(crop_h * stretch_height))
-    
-    stretched = crop.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    
-    if apply_enhancements and TEXT_SHARPEN_AMOUNT > 0:
-        stretched = _sharpen_image(stretched)
-    
-    base_image.paste(stretched, (x, y), stretched)
-    
-    return target_h
-
-
 def build_stretched_line_image(
     text: str,
     font: ImageFont.FreeTypeFont,
@@ -632,11 +551,6 @@ def build_stretched_line_image(
     shadow_offset: int = TEXT_SHADOW_OFFSET,
     apply_enhancements: bool = True,
 ):
-    """
-    Returns:
-      (line_img_rgba_stretched, baseline_offset_stretched_px)
-    baseline_offset = distance from top of the returned image to baseline.
-    """
     text = (text or "")
     if not text.strip():
         return None, 0
@@ -649,9 +563,8 @@ def build_stretched_line_image(
     temp_w = tw + pad * 2
     temp_h = font_h + pad * 2
 
-    # baseline in temp coords
     baseline_y = pad + ascent
-    text_top_y = baseline_y - ascent  # == pad
+    text_top_y = baseline_y - ascent
 
     temp = Image.new("RGBA", (temp_w, temp_h), (0, 0, 0, 0))
     d = ImageDraw.Draw(temp)
@@ -659,13 +572,11 @@ def build_stretched_line_image(
     tx = pad
     ty = text_top_y
 
-    # shadow
     _draw_text_with_letter_spacing(
         d, (tx + shadow_offset, ty + shadow_offset),
         text, font, (0, 0, 0, 128), spacing=LETTER_SPACING_PX
     )
 
-    # outline
     for t in range(int(TEXT_OUTLINE_THICKNESS)):
         r = t + 1
         for dx, dy in [(-1, -1), (-1, 0), (-1, 1),
@@ -676,7 +587,6 @@ def build_stretched_line_image(
                 text, font, outline_color, spacing=LETTER_SPACING_PX
             )
 
-    # fill
     _draw_text_with_letter_spacing(d, (tx, ty), text, font, fill_color, spacing=LETTER_SPACING_PX)
 
     if apply_enhancements:
@@ -686,12 +596,10 @@ def build_stretched_line_image(
     if not bb:
         return None, 0
 
-    # --- FIX: crop X by bbox, but keep Y fixed to a line-box
     margin_x = 3
     crop_left  = max(0, bb[0] - margin_x)
     crop_right = min(temp_w, bb[2] + margin_x)
 
-    # фиксированное вертикальное окно вокруг "нормальной" строки
     extra_y = shadow_offset + int(TEXT_OUTLINE_THICKNESS) * 2 + 6
     crop_top    = max(0, pad - extra_y)
     crop_bottom = min(temp_h, pad + font_h + extra_y)
@@ -701,7 +609,6 @@ def build_stretched_line_image(
     baseline_offset = baseline_y - crop_top
     baseline_offset = max(0, baseline_offset)
 
-    # stretch
     target_w = max(1, int(crop.size[0] * stretch_width))
     target_h = max(1, int(crop.size[1] * stretch_height))
     crop = crop.resize((target_w, target_h), Image.LANCZOS)
@@ -721,18 +628,8 @@ def layout_baseline_block(
     apply_enhancements: bool = True,
     line_spacing: int = LINE_SPACING,
 ):
-    """
-    Prepares baseline-aligned layout for multiple lines.
-    Returns:
-      dict with:
-        items: [{img, base_off, baseline_rel}]
-        total_h: int
-        shift: int  (value added to all baseline_rel to make top = 0)
-        step: int   (baseline step)
-    """
     ascent, descent = font.getmetrics()
 
-    # constant baseline step (this is the key)
     extra = shadow_offset + int(TEXT_OUTLINE_THICKNESS) * 2 + 6
     line_box_h = ascent + descent + extra
     step = int(line_box_h * stretch_height) + line_spacing
@@ -755,7 +652,6 @@ def layout_baseline_block(
     if not items_raw:
         return {"items": [], "total_h": 0, "shift": 0, "step": step}
 
-    # compute extents in a baseline coordinate system
     min_top = 10**9
     max_bottom = -10**9
     items = []
@@ -818,7 +714,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE1, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # baseline layout for title block
     title_layout = layout_baseline_block(
         title_lines, title_font,
         fill_color=COLOR_TURQUOISE,
@@ -831,7 +726,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     )
     total_title_h = title_layout["total_h"]
 
-    # logo block
     draw = ImageDraw.Draw(image, "RGBA")
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
     logo_text = "@neurostep.media"
@@ -845,7 +739,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     logo_x = (width - logo_w) // 2
     logo_y = start_y
 
-    # lines around logo
     line_y = logo_y + logo_h // 2
     line_left_start = logo_x - LOGO_LINE_LENGTH - 10
     line_right_start = logo_x + logo_w + 10
@@ -860,7 +753,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
     )
     draw.text((logo_x, logo_y), logo_text, font=logo_font, fill=COLOR_WHITE)
 
-    # paste title lines baseline-aligned
     block_top = start_y + logo_h + SPACING_LOGO_TO_TITLE
     for it in title_layout["items"]:
         img = it["img"]
@@ -870,7 +762,6 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
         image.alpha_composite(img, (int(x), int(y)))
 
     return image
-
 
 
 def render_mode2_text(image: Image.Image, title_translated: str) -> Image.Image:
@@ -915,17 +806,14 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     title = (title_translated or "").upper().strip()
     subtitle = (subtitle_translated or "").upper().strip()
 
-    # 1) Подбираем шрифт/переносы для title
     title_size, title_font, title_lines = calculate_adaptive_font_size(
         title, FONT_PATH, max_text_width, FONT_SIZE_MODE3_TITLE, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # 2) Подбираем шрифт/переносы для subtitle
     _, subtitle_font, subtitle_lines = calculate_adaptive_font_size(
         subtitle, FONT_PATH, max_text_width, FONT_SIZE_MODE3_SUBTITLE, stretch_width=TEXT_STRETCH_WIDTH
     )
 
-    # 3) Строим baseline-layout для обоих блоков (это и есть “фикс” межстрочника/оптики)
     title_layout = layout_baseline_block(
         title_lines, title_font,
         fill_color=COLOR_TURQUOISE,
@@ -952,7 +840,6 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
     total_h = title_layout["total_h"] + gap + sub_layout["total_h"]
     start_y = height - SPACING_BOTTOM_MODE3 - total_h
 
-    # 4) Рисуем title (baseline-aligned)
     block_top = start_y
     for it in title_layout["items"]:
         img = it["img"]
@@ -961,7 +848,6 @@ def render_mode3_content(image: Image.Image, title_translated: str, subtitle_tra
         x = (width - img.size[0]) // 2
         image.alpha_composite(img, (int(x), int(y)))
 
-    # 5) Рисуем subtitle (baseline-aligned) — ключевой момент для 2+ строк
     block_top = start_y + title_layout["total_h"] + gap
     for it in sub_layout["items"]:
         img = it["img"]
