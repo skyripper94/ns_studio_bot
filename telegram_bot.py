@@ -1,8 +1,8 @@
-# telegram_bot.py
+# telegram_bot.py - IMPROVED VERSION
 
 """
 Telegram бот с 2 основными режимами:
-1. УДАЛИТЬ - только удаление текста (существующий функционал)
+1. УДАЛИТЬ - только удаление текста
 2. FULL - полный workflow с 3 подрежимами + двухэтапный контроль
 """
 
@@ -12,6 +12,7 @@ from io import BytesIO
 import pickle
 import time
 import re
+import asyncio
 
 import cv2
 import numpy as np
@@ -46,12 +47,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Приглушаем болтливые логи, которые печатают URL с токеном
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
-# Железобетон: маскируем токен в любых лог-сообщениях
 class RedactTelegramTokenFilter(logging.Filter):
     _re = re.compile(r"(https://api\.telegram\.org/bot)(\d+:[A-Za-z0-9_-]+)")
 
@@ -73,16 +72,11 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 user_states = {}
 
 def escape_md(text: str) -> str:
-    """Экранирует спецсимволы Markdown для Telegram."""
     for ch in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
         text = text.replace(ch, '\\' + ch)
     return text
 
 def cleanup_temp_files(temp_dir: str, max_age_hours: int = 12) -> int:
-    """
-    Удаляет старые временные файлы бота в temp_dir.
-    Чистит только наши файлы: *_image*.pkl, *_clean*.pkl, *_final*.png
-    """
     now = time.time()
     max_age_sec = max_age_hours * 3600
 
@@ -93,7 +87,6 @@ def cleanup_temp_files(temp_dir: str, max_age_hours: int = 12) -> int:
             if not os.path.isfile(path):
                 continue
 
-            # только наши файлы
             if not (name.endswith(".pkl") or name.endswith(".png")):
                 continue
             if ("_image" not in name) and ("_clean" not in name) and ("_final" not in name):
@@ -111,59 +104,52 @@ def cleanup_temp_files(temp_dir: str, max_age_hours: int = 12) -> int:
 
 
 def _pick_msg_target(obj):
-    """
-    Возвращает telegram.Message, куда можно писать reply_text/edit_text.
-    Поддерживает: Update, CallbackQuery, Message.
-    """
-    # 1) Если это Update с обычным сообщением
     if hasattr(obj, "message") and obj.message:
         return obj.message
 
-    # 2) Если это Update с callback_query
     if hasattr(obj, "callback_query") and obj.callback_query:
         if getattr(obj.callback_query, "message", None):
             return obj.callback_query.message
 
-    # 3) Если это CallbackQuery напрямую
     if hasattr(obj, "message") and obj.message:
         return obj.message
 
-    # 4) Если это уже Message
     if hasattr(obj, "reply_text"):
         return obj
 
-    # 5) запасной вариант (если где-то передашь context/update-like)
     if hasattr(obj, "effective_message") and obj.effective_message:
         return obj.effective_message
 
     return None
-    
-
-async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Глобальный обработчик ошибок."""
-    logger.error("❌ Ошибка в обработчике", exc_info=context.error)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start - показывает меню выбора режима."""
-    user_id = update.effective_user.id
-
-    # 1) Общая уборка старых файлов в /tmp
-    removed = cleanup_temp_files(TEMP_DIR, max_age_hours=6)
-    if removed:
-        logger.info(f"🧹 TEMP cleanup: удалено {removed} старых файлов из {TEMP_DIR}")
-
-    # 2) Точечная уборка хвостов прошлого сеанса этого пользователя
-    prev = user_states.get(user_id, {})
+def _cleanup_user_files(user_id: int):
+    state = user_states.get(user_id, {})
     for k in ("image_path", "clean_path"):
-        p = prev.get(k)
+        p = state.get(k)
         if p and os.path.isfile(p):
             try:
                 os.remove(p)
             except:
                 pass
 
-    # 3) Сброс состояния
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("❌ Ошибка в обработчике", exc_info=context.error)
+    
+    if update and hasattr(update, 'effective_user') and update.effective_user:
+        _cleanup_user_files(update.effective_user.id)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    removed = cleanup_temp_files(TEMP_DIR, max_age_hours=6)
+    if removed:
+        logger.info(f"🧹 TEMP cleanup: удалено {removed} старых файлов из {TEMP_DIR}")
+
+    _cleanup_user_files(user_id)
+
     user_states[user_id] = {'mode': None, 'submode': None, 'step': None}
 
     keyboard = [
@@ -188,7 +174,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка выбора режима через inline кнопки."""
     query = update.callback_query
     await query.answer()
     
@@ -197,12 +182,28 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_states:
         user_states[user_id] = {}
     
-    if query.data == "mode_remove":
+    if query.data == "back_to_start":
+        _cleanup_user_files(user_id)
+        user_states[user_id] = {'mode': None, 'submode': None, 'step': None}
+        keyboard = [
+            [
+                InlineKeyboardButton("🗑️ УДАЛИТЬ ТЕКСТ", callback_data="mode_remove"),
+                InlineKeyboardButton("🔄 ПОЛНЫЙ ЦИКЛ", callback_data="mode_full")
+            ]
+        ]
+        await query.edit_message_text(
+            "👋 Выберите режим:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif query.data == "mode_remove":
         user_states[user_id]['mode'] = 'remove'
+        keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="back_to_start")]]
         await query.edit_message_text(
             "✅ **Режим: УДАЛИТЬ ТЕКСТ**\n\n"
             "Просто отправьте изображение.\n"
             f"Бот удалит текст и градиент ({MASK_BOTTOM_MODE2}% снизу).",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
 
@@ -227,7 +228,6 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     
-    
     elif query.data == "mode_full":
         user_states[user_id]['mode'] = 'full'
         
@@ -236,7 +236,8 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("1️⃣ ЛОГО", callback_data="submode_1"),
                 InlineKeyboardButton("2️⃣ ТЕКСТ", callback_data="submode_2"),
                 InlineKeyboardButton("3️⃣ КОНТЕНТ", callback_data="submode_3")
-            ]
+            ],
+            [InlineKeyboardButton("◀️ Назад", callback_data="back_to_start")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -274,6 +275,8 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "`Стоимость $100 млрд.`"
             )
         
+        keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="mode_full")]]
+        
         await query.edit_message_text(
             f"✅ **Выбран режим {submode}: {mode_names[submode]}**\n\n"
             f"Теперь отправьте изображение для обработки.\n\n"
@@ -283,6 +286,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"3. Перевод → контроль\n"
             f"4. Нанесение текста"
             f"{mode3_hint}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
     
@@ -300,6 +304,40 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif query.data == "rerender_text":
         await handle_rerender_text(update, context)
+    
+    elif query.data == "change_mode_keep_image":
+        keyboard = [
+            [
+                InlineKeyboardButton("1️⃣ ЛОГО", callback_data="rerender_mode_1"),
+                InlineKeyboardButton("2️⃣ ТЕКСТ", callback_data="rerender_mode_2"),
+                InlineKeyboardButton("3️⃣ КОНТЕНТ", callback_data="rerender_mode_3")
+            ]
+        ]
+        await query.message.reply_text(
+            "Выберите новый режим (изображение сохранено):",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif query.data.startswith("rerender_mode_"):
+        submode = int(query.data.split("_")[-1])
+        user_states[user_id]['submode'] = submode
+        user_states[user_id]['step'] = 'editing_llm'
+        user_states[user_id]['llm_title'] = ''
+        user_states[user_id]['llm_subtitle'] = ''
+        
+        if submode == 3:
+            hint = (
+                "Все строки КРОМЕ последней → ЗАГОЛОВОК (бирюзовый)\n"
+                "Последняя строка → ПОДЗАГОЛОВОК (белый)\n\n"
+                "Можно `|` для переноса."
+            )
+        else:
+            hint = "Можно `|` для принудительного переноса."
+        
+        await query.message.reply_text(
+            f"✏️ **Введите текст для рендера (режим {submode}):**\n\n{hint}",
+            parse_mode='Markdown'
+        )
         
     elif query.data == "finish_render":
         await handle_finish_render(update, context)
@@ -309,7 +347,6 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка полученного изображения."""
     user_id = update.effective_user.id
     
     if user_id not in user_states or user_states[user_id].get('mode') is None:
@@ -323,10 +360,25 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Сначала выберите подрежим (1/2/3)")
         return
     
+    # Retry logic для сетевых ошибок
+    image_bytes = None
+    for attempt in range(3):
+        try:
+            photo = await update.message.photo[-1].get_file()
+            image_bytes = await photo.download_as_bytearray()
+            break
+        except Exception as e:
+            logger.warning(f"⚠️ Попытка {attempt+1}/3 скачать фото: {e}")
+            if attempt < 2:
+                await asyncio.sleep(1)
+                continue
+            await update.message.reply_text("⚠️ Ошибка сети при загрузке фото. Попробуйте ещё раз.")
+            return
+    
+    if image_bytes is None:
+        return
+    
     try:
-        photo = await update.message.photo[-1].get_file()
-        image_bytes = await photo.download_as_bytearray()
-        
         logger.info(f"✅ Изображение от пользователя {user_id}, режим: {mode}, подрежим: {submode}")
         
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -344,9 +396,8 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def process_remove_mode(update: Update, image: np.ndarray):
-    """РЕЖИМ УДАЛЕНИЯ: убираем текст + опция добавить свой."""
     user_id = update.effective_user.id
-    status_msg = await update.message.reply_text("⏳ Удаление текста...")
+    status_msg = await update.message.reply_text("⏳ Удаление текста (~20-40 сек)...")
     
     height, width = image.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
@@ -355,7 +406,6 @@ async def process_remove_mode(update: Update, image: np.ndarray):
     
     result = flux_kontext_inpaint(image, mask)
     
-    # Сохраняем clean image для возможного рендера
     clean_path = f"{TEMP_DIR}/{user_id}_clean.pkl"
     with open(clean_path, 'wb') as f:
         pickle.dump(result, f)
@@ -386,8 +436,7 @@ async def process_remove_mode(update: Update, image: np.ndarray):
 
 
 async def process_full_mode_step1(update: Update, image: np.ndarray, submode: int, user_id: int):
-    """ШАГ 1: OCR → показать → ждать решения."""
-    status_msg = await update.message.reply_text("⏳ **Шаг 1/4:** OCR...", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("⏳ **Шаг 1/4:** OCR... (~20-40 сек)", parse_mode='Markdown')
     
     ocr = google_vision_ocr(image, crop_bottom_percent=OCR_BOTTOM_PERCENT)
     
@@ -428,7 +477,6 @@ async def process_full_mode_step1(update: Update, image: np.ndarray, submode: in
 
 
 async def handle_ocr_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь нажал ✏️ Править для OCR."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -443,7 +491,6 @@ async def handle_ocr_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_ocr_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь нажал ➡️ Далее для OCR."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -462,7 +509,6 @@ async def handle_ocr_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка текстового ввода (для редактирования OCR/LLM)."""
     user_id = update.effective_user.id
     
     if user_id not in user_states:
@@ -499,7 +545,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_states[user_id]['llm_title'] = custom_translation
         
         await update.message.reply_text(
-            f"✅ **Перевод обновлён**\n\n{custom_translation[:200]}...",
+            f"✅ **Текст принят**\n\n{custom_translation[:200]}...",
             parse_mode='Markdown'
         )
         
@@ -507,14 +553,13 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def process_full_mode_step2(update, user_id: int, ocr_text: str):
-    """ШАГ 2: Inpaint + LLM → показать → ждать решения."""
     msg_target = _pick_msg_target(update)
     if msg_target is None:
         logger.error("❌ step2: msg_target is None")
         return
 
     status_msg = await msg_target.reply_text(
-        "⏳ **Шаг 2/4:** Удаление текста.",
+        "⏳ **Шаг 2/4:** Удаление текста... 🔄",
         parse_mode='Markdown'
     )
 
@@ -545,7 +590,19 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         pickle.dump(clean_image, f)
     user_states[user_id]['clean_path'] = clean_path
 
-    await status_msg.edit_text("⏳ **Шаг 3/4:** Перевод (LLM).", parse_mode='Markdown')
+    # Показываем превью очищенного изображения
+    preview_bgr = enhance_image(clean_image)
+    success, buf = cv2.imencode('.jpg', preview_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if success:
+        await msg_target.reply_photo(
+            photo=BytesIO(buf.tobytes()),
+            caption="🧹 Текст удалён"
+        )
+
+    try:
+        await status_msg.edit_text("⏳ **Шаг 3/4:** Перевод... 🌐", parse_mode='Markdown')
+    except:
+        pass
 
     if submode == 3:
         lines = ocr_text.split('\n')
@@ -644,15 +701,13 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
 
 async def process_full_mode_step3(update, user_id: int):
-    """ШАГ 3: Градиент + Рендер → готово. + возможность перерендерить текст."""
     msg_target = _pick_msg_target(update)
     if msg_target is None:
         logger.error("❌ step3: msg_target is None")
         return
 
-
     status_msg = await msg_target.reply_text(
-        "⏳ **Шаг 4/4:** Рендер...",
+        "⏳ **Шаг 4/4:** Рендер... 🎨",
         parse_mode='Markdown'
     )
 
@@ -702,14 +757,14 @@ async def process_full_mode_step3(update, user_id: int):
 
     await status_msg.delete()
 
-    # ВАЖНО: тут НЕ удаляем clean_path/image_path — они нужны для перерендеров
     user_states[user_id]['step'] = 'post_render'
 
     keyboard = [
         [
-            InlineKeyboardButton("🔁 Перерендерить текст", callback_data="rerender_text"),
-            InlineKeyboardButton("✅ Завершить", callback_data="finish_render")
-        ]
+            InlineKeyboardButton("🔁 Перерендерить", callback_data="rerender_text"),
+            InlineKeyboardButton("🔄 Другой режим", callback_data="change_mode_keep_image"),
+        ],
+        [InlineKeyboardButton("✅ Завершить", callback_data="finish_render")]
     ]
     await msg_target.reply_text(
         "Что дальше?",
@@ -718,7 +773,6 @@ async def process_full_mode_step3(update, user_id: int):
 
 
 async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь хочет перерендерить текст после финальной картинки."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -726,7 +780,6 @@ async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYP
     if user_id not in user_states:
         return
 
-    # возвращаемся в режим правки текста
     user_states[user_id]['step'] = 'editing_llm'
 
     submode = user_states[user_id].get('submode')
@@ -749,7 +802,6 @@ async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def handle_finish_render(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь завершил — чистим файлы."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -757,23 +809,14 @@ async def handle_finish_render(update: Update, context: ContextTypes.DEFAULT_TYP
     if user_id not in user_states:
         return
 
-    state = user_states[user_id]
-
-    try:
-        if state.get('image_path'):
-            os.remove(state['image_path'])
-        if state.get('clean_path'):
-            os.remove(state['clean_path'])
-    except:
-        pass
+    _cleanup_user_files(user_id)
 
     user_states[user_id]['step'] = None
 
-    await query.message.reply_text("✅ **Готово. Сессию закрыл, временные файлы очищены.**", parse_mode='Markdown')
+    await query.message.reply_text("✅ **Готово. Сессия закрыта, временные файлы очищены.**", parse_mode='Markdown')
 
 
 async def handle_add_text_after_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """После удаления текста — выбор режима и ввод своего текста."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -792,14 +835,19 @@ async def handle_add_text_after_remove(update: Update, context: ContextTypes.DEF
 
 
 def main():
-    """Запуск бота."""
     if not TELEGRAM_TOKEN:
         logger.error("❌ TELEGRAM_TOKEN не установлен!")
         return
     
     logger.info("🚀 Запуск бота...")
     
-    request = HTTPXRequest(connect_timeout=10.0, read_timeout=40.0, write_timeout=40.0, pool_timeout=40.0)
+    request = HTTPXRequest(
+        connect_timeout=20.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=60.0,
+        connection_pool_size=8
+    )
     application = Application.builder().token(TELEGRAM_TOKEN).request(request).build()
     
     application.add_handler(CommandHandler("start", start))
