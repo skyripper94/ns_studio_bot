@@ -28,7 +28,7 @@ REPLICATE_HTTP_TIMEOUT = int(os.getenv("REPLICATE_HTTP_TIMEOUT", "120"))
 
 FORCE_PRESERVE_OUTSIDE_MASK = True
 
-COLOR_TURQUOISE = (0, 206, 209)
+COLOR_TURQUOISE = (0, 168, 107)
 COLOR_WHITE = (255, 255, 255)
 COLOR_OUTLINE = (60, 60, 60)
 
@@ -137,7 +137,7 @@ def google_vision_ocr(image_bgr: np.ndarray, crop_bottom_percent: int = OCR_BOTT
         full_text = ann[0].get("description", "")
         lines = [ln.strip() for ln in full_text.split("\n") if ln.strip()]
 
-        if lines and lines[0].strip().lower() in {"wealth", "@neurostep.media"}:
+        if lines and lines[0].strip().lower() in {"wealth", "NS media"}:
             lines = lines[1:]
             full_text = "\n".join(lines)
 
@@ -728,7 +728,7 @@ def render_mode1_logo(image: Image.Image, title_translated: str) -> Image.Image:
 
     draw = ImageDraw.Draw(image, "RGBA")
     logo_font = ImageFont.truetype(FONT_PATH, FONT_SIZE_LOGO)
-    logo_text = "@neurostep.media"
+    logo_text = "NS Media"
     bb = logo_font.getbbox(logo_text)
     logo_w = bb[2] - bb[0]
     logo_h = bb[3] - bb[1]
