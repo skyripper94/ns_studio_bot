@@ -1,4 +1,4 @@
-# telegram_bot.py - IMPROVED VERSION
+# telegram_bot.py - IMPROVED VERSION WITH RETRY
 
 """
 Telegram бот с 2 основными режимами:
@@ -19,6 +19,7 @@ import numpy as np
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
+from telegram.error import TimedOut, NetworkError
 from dotenv import load_dotenv
 
 from lama_integration import (
@@ -71,10 +72,34 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 user_states = {}
 
+RETRY_ATTEMPTS = 3
+RETRY_DELAY = 3
+
+
+async def send_with_retry(coro_func, retries=RETRY_ATTEMPTS, delay=RETRY_DELAY):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return await coro_func()
+        except (TimedOut, NetworkError, asyncio.TimeoutError) as e:
+            last_error = e
+            if attempt < retries - 1:
+                logger.warning(f"⚠️ Сеть: попытка {attempt+1}/{retries}, ошибка: {type(e).__name__}, жду {delay}с...")
+                await asyncio.sleep(delay)
+            else:
+                logger.error(f"❌ Все {retries} попыток неудачны: {e}")
+                raise
+        except Exception as e:
+            logger.error(f"❌ Неожиданная ошибка: {e}")
+            raise
+    raise last_error
+
+
 def escape_md(text: str) -> str:
     for ch in ('_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'):
         text = text.replace(ch, '\\' + ch)
     return text
+
 
 def cleanup_temp_files(temp_dir: str, max_age_hours: int = 12) -> int:
     now = time.time()
@@ -160,7 +185,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
+    await send_with_retry(lambda: update.message.reply_text(
         "👋 **Бот для работы с изображениями**\n\n"
         "**🗑️ УДАЛИТЬ ТЕКСТ:**\n"
         "Только удаление текста и градиента (LaMa)\n\n"
@@ -170,7 +195,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Выберите режим:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
-    )
+    ))
 
 
 async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,21 +216,21 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("🔄 ПОЛНЫЙ ЦИКЛ", callback_data="mode_full")
             ]
         ]
-        await query.edit_message_text(
+        await send_with_retry(lambda: query.edit_message_text(
             "👋 Выберите режим:",
             reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        ))
     
     elif query.data == "mode_remove":
         user_states[user_id]['mode'] = 'remove'
         keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="back_to_start")]]
-        await query.edit_message_text(
+        await send_with_retry(lambda: query.edit_message_text(
             "✅ **Режим: УДАЛИТЬ ТЕКСТ**\n\n"
             "Просто отправьте изображение.\n"
             f"Бот удалит текст и градиент ({MASK_BOTTOM_MODE2}% снизу).",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
-        )
+        ))
 
     elif query.data.startswith("render_mode_"):
         submode = int(query.data.split("_")[-1])
@@ -223,10 +248,10 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             hint = "Можно `|` для принудительного переноса."
         
-        await query.message.reply_text(
+        await send_with_retry(lambda: query.message.reply_text(
             f"✏️ **Введите текст для рендера:**\n\n{hint}",
             parse_mode='Markdown'
-        )
+        ))
     
     elif query.data == "mode_full":
         user_states[user_id]['mode'] = 'full'
@@ -241,7 +266,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
+        await send_with_retry(lambda: query.edit_message_text(
             "✅ **Режим: ПОЛНЫЙ ЦИКЛ**\n\n"
             "Выберите подрежим:\n\n"
             "**1️⃣ ЛОГО** - Лого + линии + заголовок\n"
@@ -250,7 +275,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "После выбора отправьте изображение.",
             reply_markup=reply_markup,
             parse_mode='Markdown'
-        )
+        ))
     
     elif query.data.startswith("submode_"):
         submode = int(query.data.split("_")[1])
@@ -277,7 +302,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="mode_full")]]
         
-        await query.edit_message_text(
+        await send_with_retry(lambda: query.edit_message_text(
             f"✅ **Выбран режим {submode}: {mode_names[submode]}**\n\n"
             f"Теперь отправьте изображение для обработки.\n\n"
             f"Бот выполнит:\n"
@@ -288,7 +313,7 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{mode3_hint}",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
-        )
+        ))
     
     elif query.data == "next_ocr":
         await handle_ocr_next(update, context)
@@ -313,10 +338,10 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("3️⃣ КОНТЕНТ", callback_data="rerender_mode_3")
             ]
         ]
-        await query.message.reply_text(
+        await send_with_retry(lambda: query.message.reply_text(
             "Выберите новый режим (изображение сохранено):",
             reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        ))
     
     elif query.data.startswith("rerender_mode_"):
         submode = int(query.data.split("_")[-1])
@@ -334,10 +359,10 @@ async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             hint = "Можно `|` для принудительного переноса."
         
-        await query.message.reply_text(
+        await send_with_retry(lambda: query.message.reply_text(
             f"✏️ **Введите текст для рендера (режим {submode}):**\n\n{hint}",
             parse_mode='Markdown'
-        )
+        ))
         
     elif query.data == "finish_render":
         await handle_finish_render(update, context)
@@ -350,29 +375,32 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if user_id not in user_states or user_states[user_id].get('mode') is None:
-        await update.message.reply_text("⚠️ Сначала выберите режим командой /start")
+        await send_with_retry(lambda: update.message.reply_text("⚠️ Сначала выберите режим командой /start"))
         return
     
     mode = user_states[user_id]['mode']
     submode = user_states[user_id].get('submode')
     
     if mode == 'full' and submode is None:
-        await update.message.reply_text("⚠️ Сначала выберите подрежим (1/2/3)")
+        await send_with_retry(lambda: update.message.reply_text("⚠️ Сначала выберите подрежим (1/2/3)"))
         return
     
-    # Retry logic для сетевых ошибок
     image_bytes = None
-    for attempt in range(3):
+    for attempt in range(RETRY_ATTEMPTS):
         try:
             photo = await update.message.photo[-1].get_file()
             image_bytes = await photo.download_as_bytearray()
             break
-        except Exception as e:
-            logger.warning(f"⚠️ Попытка {attempt+1}/3 скачать фото: {e}")
-            if attempt < 2:
-                await asyncio.sleep(1)
+        except (TimedOut, NetworkError) as e:
+            logger.warning(f"⚠️ Попытка {attempt+1}/{RETRY_ATTEMPTS} скачать фото: {e}")
+            if attempt < RETRY_ATTEMPTS - 1:
+                await asyncio.sleep(RETRY_DELAY)
                 continue
-            await update.message.reply_text("⚠️ Ошибка сети при загрузке фото. Попробуйте ещё раз.")
+            await send_with_retry(lambda: update.message.reply_text("⚠️ Ошибка сети при загрузке фото. Попробуйте ещё раз."))
+            return
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки фото: {e}")
+            await send_with_retry(lambda: update.message.reply_text(f"❌ Ошибка: {str(e)}"))
             return
     
     if image_bytes is None:
@@ -392,12 +420,12 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+        await send_with_retry(lambda: update.message.reply_text(f"❌ Ошибка: {str(e)}"))
 
 
 async def process_remove_mode(update: Update, image: np.ndarray):
     user_id = update.effective_user.id
-    status_msg = await update.message.reply_text("⏳ Удаление текста (~20-40 сек)...")
+    status_msg = await send_with_retry(lambda: update.message.reply_text("⏳ Удаление текста (~20-40 сек)..."))
     
     height, width = image.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
@@ -416,12 +444,16 @@ async def process_remove_mode(update: Update, image: np.ndarray):
     result_enhanced = enhance_image(result)
     success, buffer = cv2.imencode('.png', result_enhanced)
     if success:
-        await update.message.reply_photo(
+        await send_with_retry(lambda: update.message.reply_photo(
             photo=BytesIO(buffer.tobytes()),
             caption="✅ **Текст удалён\\!**",
             parse_mode='MarkdownV2'
-        )
-    await status_msg.delete()
+        ))
+    
+    try:
+        await status_msg.delete()
+    except:
+        pass
     
     keyboard = [
         [
@@ -429,20 +461,23 @@ async def process_remove_mode(update: Update, image: np.ndarray):
             InlineKeyboardButton("✅ Готово", callback_data="finish_render")
         ]
     ]
-    await update.message.reply_text(
+    await send_with_retry(lambda: update.message.reply_text(
         "Что дальше?",
         reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    ))
 
 
 async def process_full_mode_step1(update: Update, image: np.ndarray, submode: int, user_id: int):
-    status_msg = await update.message.reply_text("⏳ **Шаг 1/4:** OCR... (~20-40 сек)", parse_mode='Markdown')
+    status_msg = await send_with_retry(lambda: update.message.reply_text("⏳ **Шаг 1/4:** OCR...", parse_mode='Markdown'))
     
     ocr = google_vision_ocr(image, crop_bottom_percent=OCR_BOTTOM_PERCENT)
     
     if not ocr["text"]:
-        await update.message.reply_text("⚠️ Текст не обнаружен")
-        await status_msg.delete()
+        await send_with_retry(lambda: update.message.reply_text("⚠️ Текст не обнаружен"))
+        try:
+            await status_msg.delete()
+        except:
+            pass
         return
     
     ocr_text = ocr["text"]
@@ -467,13 +502,17 @@ async def process_full_mode_step1(update: Update, image: np.ndarray, submode: in
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    await send_with_retry(lambda: update.message.reply_text(
         f"📝 **OCR распознал:**\n\n{ocr_preview}\n\n"
         f"Выберите действие:",
         reply_markup=reply_markup,
         parse_mode='MarkdownV2'
-    )
-    await status_msg.delete()
+    ))
+    
+    try:
+        await status_msg.delete()
+    except:
+        pass
 
 
 async def handle_ocr_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -483,11 +522,11 @@ async def handle_ocr_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_states[user_id]['step'] = 'editing_ocr'
     
-    await query.edit_message_text(
+    await send_with_retry(lambda: query.edit_message_text(
         "✏️ **Отправьте исправленный текст**\n\n"
         "Пришлите текст который должен быть переведён.",
         parse_mode='Markdown'
-    )
+    ))
 
 
 async def handle_ocr_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -500,10 +539,10 @@ async def handle_ocr_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     preview = escape_md(ocr_text[:200] + "..." if len(ocr_text) > 200 else ocr_text)
     
-    await query.edit_message_text(
+    await send_with_retry(lambda: query.edit_message_text(
         f"✅ **OCR текст принят**\n\n{preview}",
         parse_mode='MarkdownV2'
-    )
+    ))
     
     await process_full_mode_step2(query, user_id, ocr_text)
 
@@ -520,10 +559,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         custom_text = update.message.text.strip()
         user_states[user_id]['ocr_text'] = custom_text
         
-        await update.message.reply_text(
+        await send_with_retry(lambda: update.message.reply_text(
             f"✅ **Текст обновлён**\n\n{custom_text[:200]}...",
             parse_mode='Markdown'
-        )
+        ))
         
         await process_full_mode_step2(update, user_id, custom_text)
     
@@ -544,10 +583,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             user_states[user_id]['llm_title'] = custom_translation
         
-        await update.message.reply_text(
+        await send_with_retry(lambda: update.message.reply_text(
             f"✅ **Текст принят**\n\n{custom_translation[:200]}...",
             parse_mode='Markdown'
-        )
+        ))
         
         await process_full_mode_step3(update, user_id)
 
@@ -558,10 +597,10 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         logger.error("❌ step2: msg_target is None")
         return
 
-    status_msg = await msg_target.reply_text(
+    status_msg = await send_with_retry(lambda: msg_target.reply_text(
         "⏳ **Шаг 2/4:** Удаление текста... 🔄",
         parse_mode='Markdown'
-    )
+    ))
 
     state = user_states[user_id]
     image_path = state['image_path']
@@ -590,14 +629,13 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
         pickle.dump(clean_image, f)
     user_states[user_id]['clean_path'] = clean_path
 
-    # Показываем превью очищенного изображения
     preview_bgr = enhance_image(clean_image)
     success, buf = cv2.imencode('.jpg', preview_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if success:
-        await msg_target.reply_photo(
+        await send_with_retry(lambda: msg_target.reply_photo(
             photo=BytesIO(buf.tobytes()),
             caption="🧹 Текст удалён"
-        )
+        ))
 
     try:
         await status_msg.edit_text("⏳ **Шаг 3/4:** Перевод... 🌐", parse_mode='Markdown')
@@ -637,12 +675,12 @@ async def process_full_mode_step2(update, user_id: int, ocr_text: str):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await msg_target.reply_text(
+    await send_with_retry(lambda: msg_target.reply_text(
         f"🌐 **LLM перевёл:**\n\n{llm_preview_escaped}\n\n"
         f"Выберите действие:",
         reply_markup=reply_markup,
         parse_mode='MarkdownV2'
-    )
+    ))
 
 
 async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -670,10 +708,10 @@ async def handle_llm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error("❌ handle_llm_edit: msg_target is None")
         return
 
-    await msg_target.reply_text(
+    await send_with_retry(lambda: msg_target.reply_text(
         f"✏️ **Отправьте исправленный перевод**\n\n{hint}",
         parse_mode='Markdown'
-    )
+    ))
 
 
 async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -692,10 +730,10 @@ async def handle_llm_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error("❌ handle_llm_next: msg_target is None")
         return
 
-    await msg_target.reply_text(
+    await send_with_retry(lambda: msg_target.reply_text(
         f"✅ **Перевод принят**\n\n{preview[:200]}...",
         parse_mode='Markdown'
-    )
+    ))
 
     await process_full_mode_step3(update, user_id)
     
@@ -706,10 +744,10 @@ async def process_full_mode_step3(update, user_id: int):
         logger.error("❌ step3: msg_target is None")
         return
 
-    status_msg = await msg_target.reply_text(
+    status_msg = await send_with_retry(lambda: msg_target.reply_text(
         "⏳ **Шаг 4/4:** Рендер... 🎨",
         parse_mode='Markdown'
-    )
+    ))
 
     state = user_states[user_id]
     clean_path = state['clean_path']
@@ -746,16 +784,19 @@ async def process_full_mode_step3(update, user_id: int):
     if success:
         mode_names = {1: "ЛОГО", 2: "ТЕКСТ", 3: "КОНТЕНТ"}
 
-        await msg_target.reply_photo(
+        await send_with_retry(lambda: msg_target.reply_photo(
             photo=BytesIO(buffer.tobytes()),
             caption=(
                 f"✅ **Готово! (Режим {submode}: {mode_names[submode]})**\n\n"
                 f"🎨 LaMa → Градиент → Рендер"
             ),
             parse_mode='Markdown'
-        )
+        ))
 
-    await status_msg.delete()
+    try:
+        await status_msg.delete()
+    except:
+        pass
 
     user_states[user_id]['step'] = 'post_render'
 
@@ -766,10 +807,10 @@ async def process_full_mode_step3(update, user_id: int):
         ],
         [InlineKeyboardButton("✅ Завершить", callback_data="finish_render")]
     ]
-    await msg_target.reply_text(
+    await send_with_retry(lambda: msg_target.reply_text(
         "Что дальше?",
         reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    ))
 
 
 async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -795,10 +836,10 @@ async def handle_rerender_text(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         hint = "Пришлите новый текст заголовка (можно `|` для переноса)."
 
-    await query.message.reply_text(
+    await send_with_retry(lambda: query.message.reply_text(
         f"✏️ **Перерендер текста**\n\n{hint}",
         parse_mode='Markdown'
-    )
+    ))
 
 
 async def handle_finish_render(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -813,7 +854,10 @@ async def handle_finish_render(update: Update, context: ContextTypes.DEFAULT_TYP
 
     user_states[user_id]['step'] = None
 
-    await query.message.reply_text("✅ **Готово. Сессия закрыта, временные файлы очищены.**", parse_mode='Markdown')
+    await send_with_retry(lambda: query.message.reply_text(
+        "✅ **Готово. Сессия закрыта, временные файлы очищены.**", 
+        parse_mode='Markdown'
+    ))
 
 
 async def handle_add_text_after_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -828,10 +872,10 @@ async def handle_add_text_after_remove(update: Update, context: ContextTypes.DEF
             InlineKeyboardButton("3️⃣ КОНТЕНТ", callback_data="render_mode_3")
         ]
     ]
-    await query.message.reply_text(
+    await send_with_retry(lambda: query.message.reply_text(
         "Выберите режим рендера:",
         reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    ))
 
 
 def main():
@@ -842,10 +886,10 @@ def main():
     logger.info("🚀 Запуск бота...")
     
     request = HTTPXRequest(
-        connect_timeout=20.0,
-        read_timeout=60.0,
-        write_timeout=60.0,
-        pool_timeout=60.0,
+        connect_timeout=30.0,
+        read_timeout=120.0,
+        write_timeout=120.0,
+        pool_timeout=120.0,
         connection_pool_size=8
     )
     application = Application.builder().token(TELEGRAM_TOKEN).request(request).build()
