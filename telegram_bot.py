@@ -886,7 +886,7 @@ def main():
     logger.info("🚀 Запуск бота...")
     
     request = HTTPXRequest(
-        connect_timeout=30.0,
+        connect_timeout=60.0,
         read_timeout=120.0,
         write_timeout=120.0,
         pool_timeout=120.0,
@@ -905,5 +905,22 @@ def main():
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, poll_interval=1.0, timeout=30)
 
 
+def run_with_retry(max_retries=10, base_delay=5):
+    for attempt in range(max_retries):
+        try:
+            main()
+            break
+        except Exception as e:
+            err_str = str(e)
+            if "Timed out" in err_str or "ConnectTimeout" in err_str or "NetworkError" in err_str:
+                delay = base_delay * (2 ** min(attempt, 5))
+                logger.warning(f"⚠️ Ошибка подключения (попытка {attempt+1}/{max_retries}): {e}")
+                logger.info(f"⏳ Повтор через {delay} сек...")
+                time.sleep(delay)
+            else:
+                logger.error(f"❌ Критическая ошибка: {e}")
+                raise
+
+
 if __name__ == '__main__':
-    main()
+    run_with_retry()
