@@ -14,8 +14,9 @@ except ImportError:
     print("CRITICAL: google_services.py not found!")
     sys.exit(1)
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.WARNING)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 CHOOSING_MODE, ENTERING_TOPIC, CONFIRMING_PLAN = range(3)
 
