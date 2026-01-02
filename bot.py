@@ -7,7 +7,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 )
-from telegram.request import HTTPXRequest # <-- Для настройки тайм-аутов
+from telegram.request import HTTPXRequest
 
 # Проверка сервисов
 try:
@@ -28,7 +28,8 @@ try:
 except Exception:
     sys.exit(1)
 
-# --- МЕНЮ ---
+# --- МЕНЮ И СТАРТ ---
+
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
     text = "💎 **Wealth AI Creator**\n\nСоздаю факты, сравнения и чищу фото.\nЧто делаем?"
     keyboard = [
@@ -41,12 +42,18 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     else:
         await context.bot.send_message(update.effective_chat.id, text, reply_markup=markup, parse_mode="Markdown")
 
+# ВОТ ЭТА ФУНКЦИЯ БЫЛА ПРОПУЩЕНА 👇
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
+    return ConversationHandler.END
+
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     await send_main_menu(update, context, edit=True)
     return ConversationHandler.END
 
 # --- ОЧИСТКА ---
+
 async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     await update.callback_query.edit_message_text(
@@ -71,6 +78,7 @@ async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TY
     await send_main_menu(update, context)
 
 # --- КАРУСЕЛИ ---
+
 async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     await update.callback_query.edit_message_text("🧠 Ищу хайповые факты...")
