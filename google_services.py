@@ -1,136 +1,215 @@
-import os
-import json
 import logging
-import base64
+import os
+import asyncio
+import sys
 import io
-from typing import List, Dict, Optional
-import vertexai
-from vertexai.preview.generative_models import GenerativeModel
-from vertexai.preview.vision_models import ImageGenerationModel, Image as VertexImage
-from google.oauth2 import service_account
-from PIL import Image, ImageDraw
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, 
+    CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+)
 
+# Пытаемся импортировать GoogleBrain
+try:
+    from google_services import GoogleBrain
+except ImportError:
+    print("CRITICAL: google_services.py not found!")
+    sys.exit(1)
+
+# Логирование
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- КОНФИГУРАЦИЯ ---
-PROJECT_ID = "tough-shard-479214-t2"  # Ваш ID проекта
-LOCATION = "us-central1"
-KEY_FILE = "google_key.json"
+# Состояния диалога
+CHOOSING_MODE, ENTERING_TOPIC, CONFIRMING_PLAN = range(3)
 
-class GoogleBrain:
-    def __init__(self):
-        self._setup_credentials()
+# Инициализация мозга
+brain = GoogleBrain()
+
+# --- Вспомогательные функции интерфейса ---
+
+async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
+    text = (
+        "🚀 **Nano Banana AI v2.1**\n\n"
+        "Выбери режим работы:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🎡 Создать Карусель", callback_data='mode_carousel')],
+        [InlineKeyboardButton("🧹 Очистить фото от текста", callback_data='mode_cleaner')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+
+# --- Хендлеры управления ---
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_main_menu(update, context)
+    return ConversationHandler.END
+
+async def cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+    await send_main_menu(update, context, edit=True)
+    return ConversationHandler.END
+
+# --- ЛОГИКА ОЧИСТКИ ФОТО ---
+
+async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "📷 Пришли мне фото, с которого нужно удалить текст.\n"
+        "Я автоматически очищу нижнюю область изображения.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]])
+    )
+
+async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        return
         
-        # Инициализация моделей
-        self.text_model = GenerativeModel("gemini-1.5-flash") # Быстрее и стабильнее
-        self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006") # Imagen 3
+    photo_file = await update.message.photo[-1].get_file()
+    img_bytes = await photo_file.download_as_bytearray()
+    
+    msg = await update.message.reply_text("⏳ Nano Banana чистит фон... Подождите.")
+    
+    # Вызываем очистку из GoogleBrain
+    cleaned_bytes = await asyncio.to_thread(brain.remove_text_from_image, bytes(img_bytes))
+    
+    if cleaned_bytes:
+        await msg.delete()
+        await update.message.reply_photo(cleaned_bytes, caption="✅ Готово! Текст удален.")
+    else:
+        await msg.edit_text("❌ Не удалось очистить это фото.")
+    
+    await send_main_menu(update, context)
 
-    def _setup_credentials(self):
-        """Восстанавливает файл ключа из переменной окружения Railway"""
-        # Если файла нет, но есть переменная в Railway -> создаем файл
-        if not os.path.exists(KEY_FILE) and os.getenv("GOOGLE_KEY_BASE64"):
-            try:
-                decoded_key = base64.b64decode(os.getenv("GOOGLE_KEY_BASE64")).decode()
-                with open(KEY_FILE, "w") as f:
-                    f.write(decoded_key)
-                logger.info("🔑 Файл ключа восстановлен из Environment Variables")
-            except Exception as e:
-                logger.error(f"❌ Ошибка декодирования ключа: {e}")
+# --- ЛОГИКА КАРУСЕЛЕЙ ---
 
-        # Подключение
-        if os.path.exists(KEY_FILE):
-            credentials = service_account.Credentials.from_service_account_file(KEY_FILE)
-            vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
-            logger.info("✅ Google Vertex AI успешно подключен")
+async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    msg = await query.edit_message_text("🧠 Gemini подбирает актуальные темы...")
+    
+    try:
+        topics = await asyncio.to_thread(brain.generate_topics)
+        keyboard = []
+        for t in topics:
+            keyboard.append([InlineKeyboardButton(t, callback_data=f"topic_select_{t[:25]}")])
+        
+        keyboard.append([InlineKeyboardButton("✍️ Своя тема", callback_data="topic_custom")])
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
+        
+        await msg.edit_text("Выбери тему для карусели:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return CHOOSING_MODE
+    except Exception as e:
+        logger.error(f"Error getting topics: {e}")
+        await msg.edit_text("❌ Ошибка связи с Google. Попробуйте позже.", 
+                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
+        return ConversationHandler.END
+
+async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "topic_custom":
+        await query.edit_message_text("Введите вашу тему текстом:", 
+                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
+        return ENTERING_TOPIC
+    
+    # Ищем текст кнопки
+    topic = "Выбранная тема"
+    for row in query.message.reply_markup.inline_keyboard:
+        for btn in row:
+            if btn.callback_data == query.data:
+                topic = btn.text
+    
+    return await start_generation_plan(update, context, topic)
+
+async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    topic = update.message.text
+    return await start_generation_plan(update, context, topic)
+
+async def start_generation_plan(update: Update, context: ContextTypes.DEFAULT_TYPE, topic):
+    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⏳ Генерирую план для: *{topic}*...", parse_mode="Markdown")
+    
+    plan = await asyncio.to_thread(brain.generate_carousel_plan, topic)
+    if not plan:
+        await status_msg.edit_text("❌ Ошибка при создании сценария.")
+        return ConversationHandler.END
+
+    context.user_data['current_plan'] = plan
+    
+    preview = "📝 **Сценарий готов:**\n\n"
+    for i, slide in enumerate(plan, 1):
+        preview += f"{i}. {slide.get('ru_caption', '')[:45]}...\n"
+
+    keyboard = [
+        [InlineKeyboardButton("🚀 Создать картинки", callback_data="confirm_gen")],
+        [InlineKeyboardButton("🔄 Другие темы", callback_data="mode_carousel")],
+        [InlineKeyboardButton("⬅️ В меню", callback_data="back_to_main")]
+    ]
+    await status_msg.edit_text(preview, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return CONFIRMING_PLAN
+
+async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    plan = context.user_data.get('current_plan')
+    await query.edit_message_text(f"🎨 Начинаю генерацию {len(plan)} слайдов. Это может занять пару минут...")
+    
+    for slide in plan:
+        img_bytes = await asyncio.to_thread(brain.generate_image, slide.get('image_prompt'))
+        if img_bytes:
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=img_bytes,
+                caption=slide.get('ru_caption')
+            )
         else:
-            raise FileNotFoundError("Нет файла google_key.json и переменной GOOGLE_KEY_BASE64")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ Ошибка генерации одного из слайдов.")
+            
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Карусель готова!")
+    await send_main_menu(update, context)
+    return ConversationHandler.END
 
-    def generate_topics(self) -> List[str]:
-        prompt = """
-        Ты контент-мейкер для Instagram в стиле 'Old Money' / 'Wealth'.
-        Придумай 4 вирусные темы для карусели (факты, история, бизнес, тайны).
-        Верни только список, каждую тему с новой строки. Без нумерации.
-        """
-        try:
-            response = self.text_model.generate_content(prompt)
-            return [line.strip() for line in response.text.strip().split('\n') if line.strip()][:4]
-        except Exception as e:
-            logger.error(f"Ошибка тем: {e}")
-            return ["Ошибка генерации тем"]
+# --- ЗАПУСК ---
 
-    def generate_carousel_plan(self, topic: str) -> List[Dict[str, str]]:
-        # Наш жесткий шаблон стиля
-        style_prompt = """
-        TECHNICAL IMAGE PROMPT RULES:
-        1. "Vertical 4:5 aspect ratio photograph."
-        2. [Scene Description].
-        3. "COMPOSITION: Top right corner circular inset with thick forest green border. Inside: [Detail]. Small forest green arrow points to it."
-        4. "STYLE: Photorealistic, National Geographic, 8k."
-        5. "CRITICAL: Full bleed, no white borders, frameless."
-        """
+def main():
+    token = os.getenv("TELEGRAM_TOKEN", "").strip()
+    if not token: 
+        print("TELEGRAM_TOKEN is missing!")
+        sys.exit(1)
 
-        prompt = f"""
-        Topic: "{topic}"
-        Create a plan for an Instagram carousel (3 to 10 slides).
-        {style_prompt}
-        
-        Output valid JSON list:
-        [
-            {{
-                "slide_number": 1,
-                "ru_caption": "Russian text for post...",
-                "image_prompt": "English prompt following RULES..."
-            }}
+    app = Application.builder().token(token).build()
+
+    carousel_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(mode_carousel_start, pattern='^mode_carousel$')],
+        states={
+            CHOOSING_MODE: [CallbackQueryHandler(handle_topic_selection, pattern='^topic_')],
+            ENTERING_TOPIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_topic_input)],
+            CONFIRMING_PLAN: [CallbackQueryHandler(run_final_generation, pattern='^confirm_gen$')]
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_action, pattern='^back_to_main$'),
+            CommandHandler('start', start)
         ]
-        Do not use markdown blocks. Just JSON.
-        """
-        try:
-            response = self.text_model.generate_content(prompt)
-            clean_json = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_json)
-        except Exception as e:
-            logger.error(f"Ошибка плана: {e}")
-            return []
+    )
 
-    def generate_image(self, prompt: str) -> bytes:
-        try:
-            images = self.image_model.generate_images(
-                prompt=prompt, number_of_images=1, aspect_ratio="4:5"
-            )
-            img_byte_arr = io.BytesIO()
-            images[0].save(img_byte_arr, format="PNG")
-            img_byte_arr.seek(0)
-            return img_byte_arr.getvalue()
-        except Exception as e:
-            logger.error(f"Ошибка Imagen: {e}")
-            return None
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(carousel_handler)
+    app.add_handler(CallbackQueryHandler(mode_cleaner_start, pattern='^mode_cleaner$'))
+    app.add_handler(CallbackQueryHandler(cancel_action, pattern='^back_to_main$'))
+    app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
-    def remove_text_from_image(self, image_bytes: bytes) -> bytes:
-        try:
-            pil_img = Image.open(io.BytesIO(image_bytes))
-            w, h = pil_img.size
-            # Маска на нижние 35% картинки
-            mask = Image.new("L", (w, h), 0)
-            draw = ImageDraw.Draw(mask)
-            draw.rectangle([(0, int(h * 0.65)), (w, h)], fill=255)
-            
-            mask_byte_arr = io.BytesIO()
-            mask.save(mask_byte_arr, format="PNG")
-            
-            vertex_img = VertexImage(image_bytes=image_bytes)
-            vertex_mask = VertexImage(image_bytes=mask_byte_arr.getvalue())
+    print("✅ Бот запущен и готов к работе!")
+    app.run_polling()
 
-            edited = self.image_model.edit_images(
-                base_image=vertex_img,
-                mask=vertex_mask,
-                prompt="clean background, remove text, seamless texture fill",
-                number_of_images=1
-            )
-            
-            out = io.BytesIO()
-            edited[0].save(out, format="PNG")
-            out.seek(0)
-            return out.getvalue()
-        except Exception as e:
-            logger.error(f"Ошибка очистки: {e}")
-            return None
+if __name__ == '__main__':
+    main()
