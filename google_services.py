@@ -22,7 +22,7 @@ class GoogleBrain:
         self._setup_credentials()
         
         # Инициализация моделей
-        self.text_model = GenerativeModel("gemini-1.5-pro-preview-0409")
+        self.text_model = GenerativeModel("gemini-1.5-flash") # Быстрее и стабильнее
         self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006") # Imagen 3
 
     def _setup_credentials(self):
