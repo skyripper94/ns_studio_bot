@@ -1,38 +1,52 @@
 import logging
 import os
 import asyncio
-import traceback
 import sys
+import traceback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 )
 
+# Пытаемся импортировать GoogleBrain
 try:
     from google_services import GoogleBrain
 except ImportError:
     print("CRITICAL: google_services.py not found!")
     sys.exit(1)
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.WARNING)
+# Логирование
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
+# Состояния диалога
 CHOOSING_MODE, ENTERING_TOPIC, CONFIRMING_PLAN = range(3)
 
-brain = GoogleBrain()
+# Инициализация мозга
+try:
+    brain = GoogleBrain()
+except Exception as e:
+    logger.critical(f"Ошибка запуска Google Brain: {e}")
+    sys.exit(1)
+
+# --- Глобальный обработчик ошибок ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+    # Пытаемся сообщить пользователю
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+
+# --- Вспомогательные функции интерфейса ---
 
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
     text = (
-        "👋 **Главное меню Nano Banana AI**\n\n"
-        "Я помогу тебе создать контент с помощью моделей Google Gemini & Imagen 3.\n\n"
-        "Выбери, что хочешь сделать:"
+        "🚀 **Nano Banana AI v2.2 (Stable)**\n\n"
+        "Выбери режим работы:"
     )
     keyboard = [
         [InlineKeyboardButton("🎡 Создать Карусель", callback_data='mode_carousel')],
         [InlineKeyboardButton("🧹 Очистить фото", callback_data='mode_cleaner')],
-        [InlineKeyboardButton("ℹ️ Помощь", callback_data='mode_help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -41,6 +55,8 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
 
+# --- Хендлеры управления ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_main_menu(update, context)
     return ConversationHandler.END
@@ -48,43 +64,83 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
-        await query.answer("Возвращаемся...")
+        await query.answer()
     await send_main_menu(update, context, edit=True)
     return ConversationHandler.END
+
+# --- ЛОГИКА ОЧИСТКИ ФОТО ---
+
+async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "📷 Пришли мне фото, с которого нужно удалить текст.\n"
+        "Я автоматически очищу нижнюю область (30% снизу).",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]])
+    )
+
+async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        return
+        
+    photo_file = await update.message.photo[-1].get_file()
+    img_bytes = await photo_file.download_as_bytearray()
+    
+    msg = await update.message.reply_text("⏳ Nano Banana чистит фон... Подождите 10-15 сек.")
+    
+    # Вызываем очистку
+    cleaned_bytes = await asyncio.to_thread(brain.remove_text_from_image, bytes(img_bytes))
+    
+    if cleaned_bytes:
+        await msg.delete()
+        await update.message.reply_photo(cleaned_bytes, caption="✅ Готово! Текст удален.")
+    else:
+        await msg.edit_text("❌ Ошибка обработки. Возможно, формат фото не поддерживается или сбой API.")
+    
+    await send_main_menu(update, context)
+
+# --- ЛОГИКА КАРУСЕЛЕЙ ---
 
 async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    msg = await query.edit_message_text("🧠 Gemini генерирует идеи тем...")
+    msg = await query.edit_message_text("🧠 Gemini подбирает темы...")
     
     try:
         topics = await asyncio.to_thread(brain.generate_topics)
         keyboard = []
-        for t in topics[:5]:
-            keyboard.append([InlineKeyboardButton(t, callback_data=f"topic_select_{t[:25]}")])
+        for t in topics:
+            # Обрезаем callback_data до 64 байт
+            keyboard.append([InlineKeyboardButton(t, callback_data=f"ts_{t[:20]}")])
         
         keyboard.append([InlineKeyboardButton("✍️ Своя тема", callback_data="topic_custom")])
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
         
-        await msg.edit_text("Выбери тему для карусели:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await msg.edit_text("Выбери тему:", reply_markup=InlineKeyboardMarkup(keyboard))
         return CHOOSING_MODE
     except Exception as e:
-        logger.error(f"Ошибка тем: {e}")
-        await msg.edit_text("❌ Ошибка связи с Google. Попробуй позже.", 
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
+        logger.error(f"Topics Error: {e}")
+        await msg.edit_text("❌ Ошибка связи с Google.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
         return ConversationHandler.END
 
 async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    data = query.data
     
-    if query.data == "topic_custom":
-        await query.edit_message_text("Напиши тему для карусели (например: 'Как заработать на ИИ'):", 
-                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
+    if data == "topic_custom":
+        await query.edit_message_text("Напиши тему текстом:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
         return ENTERING_TOPIC
     
-    topic = query.data.replace("topic_select_", "")
+    # Пытаемся найти текст кнопки
+    topic = "Тема"
+    for row in query.message.reply_markup.inline_keyboard:
+        for btn in row:
+            if btn.callback_data == data:
+                topic = btn.text
+                break
+    
     return await start_generation_plan(update, context, topic)
 
 async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,23 +148,24 @@ async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAUL
     return await start_generation_plan(update, context, topic)
 
 async def start_generation_plan(update: Update, context: ContextTypes.DEFAULT_TYPE, topic):
-    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⏳ Работаю над планом для темы: *{topic}*...", parse_mode="Markdown")
+    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⏳ Пишу сценарий для: *{topic}*...", parse_mode="Markdown")
     
     plan = await asyncio.to_thread(brain.generate_carousel_plan, topic)
     if not plan:
-        await status_msg.edit_text("❌ Ошибка генерации плана.")
+        await status_msg.edit_text("❌ Не удалось создать план. Попробуйте другую тему.")
         return ConversationHandler.END
 
     context.user_data['current_plan'] = plan
     
-    preview = "📝 **Ваш сценарий готов:**\n\n"
-    for i, slide in enumerate(plan, 1):
-        preview += f"{i}. {slide.get('ru_caption', '')[:50]}...\n"
+    preview = "📝 **Сценарий:**\n\n"
+    for slide in plan:
+        num = slide.get('slide_number', '-')
+        caption = slide.get('ru_caption', '')[:40]
+        preview += f"{num}. {caption}...\n"
 
     keyboard = [
-        [InlineKeyboardButton("🚀 Запустить генерацию фото", callback_data="confirm_gen")],
-        [InlineKeyboardButton("🔄 Другой вариант", callback_data="mode_carousel")],
-        [InlineKeyboardButton("⬅️ В меню", callback_data="back_to_main")]
+        [InlineKeyboardButton("🚀 Генерировать фото", callback_data="confirm_gen")],
+        [InlineKeyboardButton("⬅️ Меню", callback_data="back_to_main")]
     ]
     await status_msg.edit_text(preview, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return CONFIRMING_PLAN
@@ -118,86 +175,67 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     
     plan = context.user_data.get('current_plan')
-    await query.edit_message_text(f"🎨 Начинаю отрисовку {len(plan)} слайдов. Это займет около 1-2 минут...")
+    await query.edit_message_text(f"🎨 Рисую {len(plan)} слайдов. Это займет ~1 минуту...")
     
-    for i, slide in enumerate(plan, 1):
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⏳ Генерация {i}/{len(plan)}...")
-        img_bytes = await asyncio.to_thread(brain.generate_image, slide.get('image_prompt'))
+    for slide in plan:
+        prompt = slide.get('image_prompt')
+        caption = slide.get('ru_caption')
+        
+        img_bytes = await asyncio.to_thread(brain.generate_image, prompt)
+        
         if img_bytes:
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
                 photo=img_bytes,
-                caption=slide.get('ru_caption')
+                caption=caption
             )
         else:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ Пропуск слайда из-за ошибки генерации.")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⚠️ Слайд не получился (Google Filter).")
             
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Карусель готова!")
     await send_main_menu(update, context)
     return ConversationHandler.END
 
-async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("📷 Пришли мне фото, которое нужно очистить от текста.", 
-                                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
-
-async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_file = await update.message.photo[-1].get_file()
-    img_bytes = await photo_file.download_as_bytearray()
-    
-    msg = await update.message.reply_text("⏳ Очищаю фото от текста...")
-    cleaned = await asyncio.to_thread(brain.remove_text_from_image, bytes(img_bytes))
-    
-    if cleaned:
-        await msg.delete()
-        await update.message.reply_photo(cleaned, caption="✅ Готово! Текст удален.")
-    else:
-        await msg.edit_text("❌ Не удалось очистить фото. Попробуй другое изображение.")
-    
-    await send_main_menu(update, context)
-
-async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    help_text = (
-        "ℹ️ **Помощь**\n\n"
-        "🎡 **Карусель** — создаю план из 5 слайдов и генерирую картинки через Imagen 3\n\n"
-        "🧹 **Очистка фото** — удаляю текст и водяные знаки с изображений\n\n"
-        "Просто выбери режим и следуй инструкциям!"
-    )
-    await query.edit_message_text(help_text, parse_mode="Markdown",
-                                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
+# --- ЗАПУСК ---
 
 def main():
-    token = os.getenv("TELEGRAM_TOKEN", "").strip()
-    if not token:
-        print("TELEGRAM_TOKEN is missing!")
+    # 1. ЧИСТКА ТОКЕНА (Удаляем пробелы, кавычки и переносы)
+    raw_token = os.getenv("TELEGRAM_TOKEN", "")
+    token = raw_token.strip().replace('"', '').replace("'", "")
+    
+    if not token: 
+        print("CRITICAL: TELEGRAM_TOKEN пустой!")
         sys.exit(1)
+        
+    print(f"✅ Токен найден: {token[:5]}... (длина {len(token)})")
 
+    # 2. Сборка приложения
     app = Application.builder().token(token).build()
 
-    carousel_conv = ConversationHandler(
+    # 3. Добавление обработчика ошибок
+    app.add_error_handler(error_handler)
+
+    # 4. Сценарии
+    carousel_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(mode_carousel_start, pattern='^mode_carousel$')],
         states={
-            CHOOSING_MODE: [CallbackQueryHandler(handle_topic_selection, pattern='^topic_')],
+            CHOOSING_MODE: [CallbackQueryHandler(handle_topic_selection, pattern='^ts_')],
             ENTERING_TOPIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_topic_input)],
             CONFIRMING_PLAN: [CallbackQueryHandler(run_final_generation, pattern='^confirm_gen$')]
         },
         fallbacks=[
             CallbackQueryHandler(cancel_action, pattern='^back_to_main$'),
-            CallbackQueryHandler(mode_carousel_start, pattern='^mode_carousel$'),
             CommandHandler('start', start)
         ]
     )
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(carousel_conv)
+    app.add_handler(carousel_handler)
     app.add_handler(CallbackQueryHandler(mode_cleaner_start, pattern='^mode_cleaner$'))
-    app.add_handler(CallbackQueryHandler(help_handler, pattern='^mode_help$'))
     app.add_handler(CallbackQueryHandler(cancel_action, pattern='^back_to_main$'))
     app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
-    print("✅ Nano Banana AI запущен!")
+    print("✅ Бот запущен (Stable v2.2)!")
     app.run_polling()
 
 if __name__ == '__main__':
