@@ -8,24 +8,18 @@ from telegram.ext import (
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 )
 
-# Пытаемся импортировать GoogleBrain
 try:
     from google_services import GoogleBrain
 except ImportError:
     print("CRITICAL: google_services.py not found!")
     sys.exit(1)
 
-# Логирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Состояния
 CHOOSING_MODE, ENTERING_TOPIC, CONFIRMING_PLAN = range(3)
 
-# Инициализация мозга
 brain = GoogleBrain()
-
-# --- Вспомогательные функции ---
 
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
     text = (
@@ -45,14 +39,11 @@ async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
 
-# --- Хендлеры ---
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_main_menu(update, context)
     return ConversationHandler.END
 
 async def cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Возврат в главное меню и сброс всех состояний"""
     query = update.callback_query
     if query:
         await query.answer("Возвращаемся...")
@@ -68,7 +59,7 @@ async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         topics = await asyncio.to_thread(brain.generate_topics)
         keyboard = []
-        for t in topics[:5]: # Берем топ-5 тем
+        for t in topics[:5]:
             keyboard.append([InlineKeyboardButton(t, callback_data=f"topic_select_{t[:25]}")])
         
         keyboard.append([InlineKeyboardButton("✍️ Своя тема", callback_data="topic_custom")])
@@ -91,7 +82,6 @@ async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_T
                                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
         return ENTERING_TOPIC
     
-    # Если выбрана готовая тема
     topic = query.data.replace("topic_select_", "")
     return await start_generation_plan(update, context, topic)
 
@@ -100,9 +90,6 @@ async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAUL
     return await start_generation_plan(update, context, topic)
 
 async def start_generation_plan(update: Update, context: ContextTypes.DEFAULT_TYPE, topic):
-    msg_source = update.callback_query if update.callback_query else update.message
-    
-    # Индикация работы
     status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⏳ Работаю над планом для темы: *{topic}*...", parse_mode="Markdown")
     
     plan = await asyncio.to_thread(brain.generate_carousel_plan, topic)
@@ -131,7 +118,8 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
     plan = context.user_data.get('current_plan')
     await query.edit_message_text(f"🎨 Начинаю отрисовку {len(plan)} слайдов. Это займет около 1-2 минут...")
     
-    for slide in plan:
+    for i, slide in enumerate(plan, 1):
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⏳ Генерация {i}/{len(plan)}...")
         img_bytes = await asyncio.to_thread(brain.generate_image, slide.get('image_prompt'))
         if img_bytes:
             await context.bot.send_photo(
@@ -145,37 +133,47 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
     await send_main_menu(update, context)
     return ConversationHandler.END
 
-# --- БЛОК ОЧИСТКИ ФОТО ---
 async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Пришли мне фото, которое нужно очистить от текста.", 
+    await query.edit_message_text("📷 Пришли мне фото, которое нужно очистить от текста.", 
                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
 
 async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_file = await update.message.photo[-1].get_file()
     img_bytes = await photo_file.download_as_bytearray()
     
-    msg = await update.message.reply_text("⏳ Очищаю...")
+    msg = await update.message.reply_text("⏳ Очищаю фото от текста...")
     cleaned = await asyncio.to_thread(brain.remove_text_from_image, bytes(img_bytes))
     
     if cleaned:
         await msg.delete()
-        await update.message.reply_photo(cleaned, caption="✅ Готово!")
+        await update.message.reply_photo(cleaned, caption="✅ Готово! Текст удален.")
     else:
-        await msg.edit_text("❌ Ошибка очистки")
+        await msg.edit_text("❌ Не удалось очистить фото. Попробуй другое изображение.")
     
     await send_main_menu(update, context)
 
-# --- MAIN ---
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    help_text = (
+        "ℹ️ **Помощь**\n\n"
+        "🎡 **Карусель** — создаю план из 5 слайдов и генерирую картинки через Imagen 3\n\n"
+        "🧹 **Очистка фото** — удаляю текст и водяные знаки с изображений\n\n"
+        "Просто выбери режим и следуй инструкциям!"
+    )
+    await query.edit_message_text(help_text, parse_mode="Markdown",
+                                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN", "").strip()
-    if not token: sys.exit(1)
+    if not token:
+        print("TELEGRAM_TOKEN is missing!")
+        sys.exit(1)
 
     app = Application.builder().token(token).build()
 
-    # Сценарий Карусели
     carousel_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(mode_carousel_start, pattern='^mode_carousel$')],
         states={
@@ -185,6 +183,7 @@ def main():
         },
         fallbacks=[
             CallbackQueryHandler(cancel_action, pattern='^back_to_main$'),
+            CallbackQueryHandler(mode_carousel_start, pattern='^mode_carousel$'),
             CommandHandler('start', start)
         ]
     )
@@ -192,11 +191,11 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(carousel_conv)
     app.add_handler(CallbackQueryHandler(mode_cleaner_start, pattern='^mode_cleaner$'))
+    app.add_handler(CallbackQueryHandler(help_handler, pattern='^mode_help$'))
     app.add_handler(CallbackQueryHandler(cancel_action, pattern='^back_to_main$'))
-    
     app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
-    print("✅ Бот запущен в User-Friendly режиме!")
+    print("✅ Nano Banana AI запущен!")
     app.run_polling()
 
 if __name__ == '__main__':
