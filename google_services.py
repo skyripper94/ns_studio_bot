@@ -1,7 +1,6 @@
 import os
 import json
 import base64
-import tempfile
 from google.cloud import aiplatform
 from google.oauth2 import service_account
 from vertexai.preview.generative_models import GenerativeModel, Image
@@ -27,13 +26,23 @@ class GoogleBrain:
     def generate_topics(self) -> list[str]:
         prompt = "Предложи 5 трендовых тем для Instagram-карусели про технологии и бизнес. Верни JSON массив строк."
         response = self.text_model.generate_content(prompt)
-        return json.loads(response.text.strip("```json\n").strip("```"))
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        return json.loads(text.strip())
 
     def generate_carousel_plan(self, topic: str) -> list[dict]:
         prompt = f"""Создай план карусели из 5 слайдов на тему: {topic}
         Верни JSON массив объектов с полями: image_prompt (англ), ru_caption (рус)"""
         response = self.text_model.generate_content(prompt)
-        return json.loads(response.text.strip("```json\n").strip("```"))
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        return json.loads(text.strip())
 
     def generate_image(self, prompt: str) -> bytes | None:
         try:
@@ -50,11 +59,3 @@ class GoogleBrain:
             return response.candidates[0].content.parts[0].inline_data.data
         except Exception:
             return None
-```
-
-**Railway Variables (итого нужно 4):**
-```
-TELEGRAM_TOKEN=xxx
-GOOGLE_KEY_BASE64=xxx (уже есть)
-GOOGLE_PROJECT_ID=твой-project-id
-GOOGLE_LOCATION=us-central1
