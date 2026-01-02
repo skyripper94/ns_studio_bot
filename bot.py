@@ -179,8 +179,6 @@ def main():
     app.add_handler(CallbackQueryHandler(mode_cleaner_start, pattern='^mode_cleaner$'))
     app.add_handler(CallbackQueryHandler(cancel_action, pattern='^back_to_main$'))
     
-    # Обработка фото (вне сценария)
-    from bot import process_photo_cleanup # Предполагаем, что функция осталась
     app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
     print("✅ Бот запущен в User-Friendly режиме!")
