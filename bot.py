@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import traceback
 import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
