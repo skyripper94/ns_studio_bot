@@ -152,6 +152,21 @@ async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text("Пришли мне фото, которое нужно очистить от текста.", 
                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]))
 
+async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo_file = await update.message.photo[-1].get_file()
+    img_bytes = await photo_file.download_as_bytearray()
+    
+    msg = await update.message.reply_text("⏳ Очищаю...")
+    cleaned = await asyncio.to_thread(brain.remove_text_from_image, bytes(img_bytes))
+    
+    if cleaned:
+        await msg.delete()
+        await update.message.reply_photo(cleaned, caption="✅ Готово!")
+    else:
+        await msg.edit_text("❌ Ошибка очистки")
+    
+    await send_main_menu(update, context)
+
 # --- MAIN ---
 
 def main():
