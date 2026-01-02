@@ -1,11 +1,6 @@
 import logging
 import os
 import asyncio
-# Вставьте это в начало bot.py перед brain = GoogleBrain()
-import base64
-if os.getenv("GOOGLE_KEY_BASE64"):
-    with open("google_key.json", "w") as f:
-        f.write(base64.b64decode(os.getenv("GOOGLE_KEY_BASE64")).decode())
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
