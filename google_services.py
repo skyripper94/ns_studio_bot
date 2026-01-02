@@ -1,7 +1,9 @@
 import os
 import json
-import io
+import base64
+import tempfile
 from google.cloud import aiplatform
+from google.oauth2 import service_account
 from vertexai.preview.generative_models import GenerativeModel, Image
 from vertexai.preview.vision_models import ImageGenerationModel
 
@@ -9,7 +11,16 @@ class GoogleBrain:
     def __init__(self):
         project_id = os.getenv("GOOGLE_PROJECT_ID")
         location = os.getenv("GOOGLE_LOCATION", "us-central1")
-        aiplatform.init(project=project_id, location=location)
+        
+        key_base64 = os.getenv("GOOGLE_KEY_BASE64")
+        if key_base64:
+            creds_json = base64.b64decode(key_base64).decode('utf-8')
+            creds_dict = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            aiplatform.init(project=project_id, location=location, credentials=credentials)
+        else:
+            aiplatform.init(project=project_id, location=location)
+        
         self.text_model = GenerativeModel("gemini-1.5-flash")
         self.image_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
 
@@ -39,3 +50,11 @@ class GoogleBrain:
             return response.candidates[0].content.parts[0].inline_data.data
         except Exception:
             return None
+```
+
+**Railway Variables (итого нужно 4):**
+```
+TELEGRAM_TOKEN=xxx
+GOOGLE_KEY_BASE64=xxx (уже есть)
+GOOGLE_PROJECT_ID=твой-project-id
+GOOGLE_LOCATION=us-central1
