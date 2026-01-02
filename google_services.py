@@ -20,7 +20,7 @@ class GoogleBrain:
         else:
             aiplatform.init(project=project_id, location=location)
         
-        self.text_model = GenerativeModel("gemini-1.5-flash")
+        self.text_model = GenerativeModel("gemini-1.5-flash-002")
         self.image_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
 
     def generate_topics(self) -> list[str]:
