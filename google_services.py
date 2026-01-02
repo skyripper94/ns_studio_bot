@@ -10,14 +10,6 @@ from vertexai.preview.vision_models import ImageGenerationModel, Image as Vertex
 from google.oauth2 import service_account
 from PIL import Image, ImageDraw
 
-token = os.getenv("TELEGRAM_TOKEN")
-print(f"DEBUG: Token found? {token is not None}")
-if token:
-    print(f"DEBUG: Token length: {len(token)}")
-    print(f"DEBUG: First 5 chars: {token[:5]}...")
-else:
-    print("DEBUG: ❌ TOKEN IS EMPTY OR MISSING!")
-
 logger = logging.getLogger(__name__)
 
 # --- КОНФИГУРАЦИЯ ---
