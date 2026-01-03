@@ -2,16 +2,18 @@ import logging
 import os
 import asyncio
 import sys
-import base64
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
+# Импорты Google GenAI SDK
 from google import genai
 from google.genai import types
 
+# 1. Настройка логов (убираем шум и прячем токен)
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 client = None
@@ -26,7 +28,6 @@ EDIT_PROMPT = """Edit this image:
 
 Return the edited image."""
 
-
 def init_client():
     global client
     api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
@@ -35,7 +36,7 @@ def init_client():
         logger.error("GOOGLE_CLOUD_API_KEY not set!")
         sys.exit(1)
     
-    # ФИКС 1: Убрали vertexai=True, так как используется api_key
+    # Инициализация клиента для AI Studio (без vertexai=True)
     try:
         client = genai.Client(api_key=api_key)
         logger.info("✅ Gemini client ready (AI Studio Mode)")
@@ -43,22 +44,21 @@ def init_client():
         logger.error(f"Client Init Error: {e}")
         sys.exit(1)
 
-
 def process_image(img_bytes: bytes) -> bytes:
     global client
     
     try:
-        # ФИКС: Используем прямой конструктор вместо .from_bytes()
-        # Библиотека ожидает параметр image_bytes
+        # 1. Создаем объект картинки. 
+        # В SDK google-genai объект types.Image создается через конструктор image_bytes
         my_image = types.Image(image_bytes=img_bytes)
 
-        # Оборачиваем в RawReferenceImage
+        # 2. Оборачиваем в RawReferenceImage (требование Imagen 3)
         ref_image = types.RawReferenceImage(
             reference_id=1,
             reference_image=my_image
         )
         
-        # Конфиг редактирования
+        # 3. Конфигурация
         config = types.EditImageConfig(
             edit_mode="inpainting-insert",
             number_of_images=1,
@@ -68,7 +68,7 @@ def process_image(img_bytes: bytes) -> bytes:
             output_mime_type="image/jpeg"
         )
         
-        # Вызов API
+        # 4. Вызов API
         response = client.models.edit_image(
             model='imagen-3.0-capability-001',
             prompt=EDIT_PROMPT,
@@ -76,44 +76,40 @@ def process_image(img_bytes: bytes) -> bytes:
             config=config
         )
         
-        # Получение результата
+        # 5. Возврат результата
         if response.generated_images:
             return response.generated_images[0].image.image_bytes
             
     except Exception as e:
         logger.error(f"Imagen API Error: {e}")
         return None
-
+    return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍌 *Nano Banana Pro Bot*\n\n"
-        "Отправь картинку — я уберу:\n"
-        "• Жёлтый текст и типографику\n"
-        "• Логотипы и полоски\n"
-        "• Заменю жёлтые стрелки на зелёные",
+        "Отправь картинку — я уберу жёлтый текст и перекрашу стрелки в зелёный.",
         parse_mode="Markdown"
     )
 
-
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("⏳ Обрабатываю через Nano Banana Pro...")
+    msg = await update.message.reply_text("⏳ Обрабатываю (Imagen 3)...")
     
     try:
         photo = await update.message.photo[-1].get_file()
         img_bytes = await photo.download_as_bytearray()
         
+        # Запускаем в потоке, чтобы не блокировать бота
         result = await asyncio.to_thread(process_image, bytes(img_bytes))
         
         if result:
             await msg.delete()
             await update.message.reply_photo(result, caption="✅ Готово")
         else:
-            await msg.edit_text("❌ Не удалось обработать")
+            await msg.edit_text("❌ Ошибка обработки (попробуйте другое фото)")
     except Exception as e:
-        logger.error(f"Error: {e}")
-        await msg.edit_text(f"❌ Ошибка: {str(e)[:200]}")
-
+        logger.error(f"Telegram Error: {e}")
+        await msg.edit_text("❌ Сбой бота")
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN", "").strip()
@@ -123,15 +119,24 @@ def main():
 
     init_client()
 
-    request = HTTPXRequest(http_version="1.1", read_timeout=120, write_timeout=120, connect_timeout=30)
+    # --- СЕТЕВОЙ ФИКС ---
+    # Force HTTP/1.1 и увеличенные таймауты решают проблему "Connection lost"
+    request = HTTPXRequest(
+        http_version="1.1",
+        connection_pool_size=8,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        connect_timeout=60.0
+    )
+    
     app = Application.builder().token(token).request(request).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    print("🍌 Nano Banana Pro Bot Started")
+    logger.info("🍌 Bot Started")
+    # drop_pending_updates удаляет старые зависшие сообщения, которые могли крашить бота
     app.run_polling(drop_pending_updates=True)
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
