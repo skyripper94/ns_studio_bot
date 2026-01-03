@@ -38,15 +38,24 @@ class GoogleBrain:
 
         # Модели
         try:
-            self.text_model = GenerativeModel("gemini-2.0-flash-001")
+            # SYSTEM INSTRUCTION: ЗАПРЕТ НА АНГЛИЙСКИЙ
+            system_instruction = """
+            Ты — русскоязычный контент-мейкер. 
+            Твоя задача — создавать вирусные заголовки и тексты для Instagram.
+            ГЛАВНОЕ ПРАВИЛО: ВЕСЬ ВЫВОД ДОЛЖЕН БЫТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ.
+            Никакого английского в заголовках или описаниях.
+            """
+            self.text_model = GenerativeModel(
+                "gemini-2.0-flash-001",
+                system_instruction=[system_instruction]
+            )
             self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-            logger.info("✅ Brain Online: Gemini 2.0 + Imagen 3 (Product Mode)")
+            logger.info("✅ Brain Online: Gemini 2.0 (Russian Force) + Imagen 3")
         except Exception:
             self.text_model = None
             self.image_model = None
 
     def _extract_json(self, text: str) -> List[Dict]:
-        """Умный парсер JSON"""
         try:
             start = text.find('[')
             end = text.rfind(']') + 1
@@ -58,22 +67,18 @@ class GoogleBrain:
             return []
 
     def generate_topics(self) -> List[str]:
-        """Генерирует микс из Новостей, Сравнений и Фактов"""
         if not self.text_model: return ["Ошибка API"]
         
-        # Жесткий промпт на актуальность и хайп
         prompt = """
-        Role: Senior Content Editor for a Wealth/Tech/Hype channel.
-        Task: Generate 6 viral topics for Instagram Carousels (Mix of categories).
+        Придумай 6 вирусных тем (хуков) для Instagram каруселей.
+        Смешай категории:
+        1. СРАВНЕНИЯ (Versus): Кто богаче, Что лучше (iPhone vs Samsung).
+        2. НОВОСТИ (News): GTA 6, Илон Маск, Netflix, Ferrari.
+        3. ФАКТЫ (Facts): Лавкрафт, Терракотовая армия, Деньги.
         
-        Categories to include:
-        1. VERSUS (e.g., "iPhone 1 vs iPhone 16", "Dubai vs NYC").
-        2. BREAKING NEWS/HYPE (e.g., "GTA 6 Release Date", "Ferrari New Hypercar").
-        3. MONEY FACTS (e.g., "MrBeast Net Worth", "Rothschild Family").
-        
-        Style: Short, Punchy, Clickbait. NO "Introduction to...".
-        Language: RUSSIAN (Strictly).
-        Output: List of 6 strings. No bullets.
+        Стиль: Кликбейт, Коротко, Хайп.
+        Язык: ТОЛЬКО РУССКИЙ.
+        Формат ответа: Простой список из 6 строк.
         """
         
         try:
@@ -82,50 +87,45 @@ class GoogleBrain:
             lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
             return lines[:6]
         except Exception:
-            return ["GTA 6: Что известно сейчас", "Доходы: Роналду vs Месси", "Секреты Apple", "Дубай: Мифы и Реальность"]
+            return ["GTA 6: Дата выхода", "Феррари: Новая модель", "Мистер Бист: Доходы", "Apple vs Android"]
 
     def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
-        """Маршрутизатор: создает план в зависимости от типа темы"""
         if not self.text_model: return []
         
-        # Инструкция для Gemini: Как работать с картинками и текстом
+        # Инструкция для Gemini под твою структуру
         prompt = f"""
-        Act as a Professional Instagram Producer.
-        Topic: "{topic}"
-        Format: Carousel of {slide_count} slides.
-        Target Audience: CIS/Russia (Russian Language ONLY).
+        Тема: "{topic}"
+        Количество слайдов: {slide_count}.
         
-        VISUAL STRUCTURE RULES (Important):
-        - Slide 1 (Cover): Must be a HIGH-IMPACT COLLAGE. Combine main elements (e.g., Split screen X vs Y, or Hero Object + Background).
-        - Middle Slides: Photorealistic, Cinematic, 8k, Vertical 3:4.
-        - Last Slide: Variation of the Cover (Collage) but with different lighting/angle.
+        ЗАДАЧА: Написать сценарий для Instagram карусели.
+        ЯЗЫК: РУССКИЙ (ВСЕ ТЕКСТЫ В ru_caption ТОЛЬКО НА РУССКОМ).
         
-        TEXT RULES:
-        - Language: RUSSIAN ONLY (No English text in 'ru_caption').
-        - Length: Super short. Max 5-8 words per slide.
-        - Style: Facts, Numbers, Dates. No "water".
+        СТРУКТУРА:
+        1. Слайд 1 (Обложка): 
+           - Текст: Хук/Заголовок (коротко).
+           - Картинка: КОЛЛАЖ (Split screen collage, high contrast). Смесь главных объектов темы.
+        2. Средние слайды:
+           - Текст: Факты, цифры, сравнения. Максимум 7 слов на слайд. Без воды.
+           - Картинка: Кинематографичная, вертикальная 3:4, фотореализм.
+        3. Последний слайд:
+           - Картинка: Вариация коллажа с первого слайда, но другой ракурс.
         
-        JSON Output Format:
+        Верни JSON список:
         [
           {{
             "slide_number": 1, 
-            "ru_caption": "GTA 6: Дата выхода подтверждена?", 
-            "image_prompt": "Vertical 3:4, split screen collage, left side Grand Theft Auto Vice City graphics, right side hyper-realistic GTA 6 graphics, neon lighting"
-          }},
-          ...
+            "ru_caption": "Текст на русском...", 
+            "image_prompt": "Vertical 3:4, split screen collage..."
+          }}
         ]
         """
         
         try:
-            config = GenerationConfig(temperature=0.7) # Чуть строже для соблюдения JSON
+            config = GenerationConfig(temperature=0.7)
             response = self.text_model.generate_content(prompt, generation_config=config)
             data = self._extract_json(response.text)
             
-            # Валидация: если Gemini вдруг сгенерировала меньше/больше, чем просили
-            if len(data) != slide_count:
-                logger.warning(f"Gemini slide count mismatch. Asked {slide_count}, got {len(data)}")
-                # Можно обрезать или дополнить, но пока оставим как есть
-            
+            # Если AI вернул меньше слайдов, чем просили — не страшно, главное чтобы не пусто
             return data
         except Exception as e:
             logger.error(f"Plan Gen Error: {e}")
@@ -144,16 +144,15 @@ class GoogleBrain:
                 images[0].save(output, format="PNG")
                 return output.getvalue()
             except ResourceExhausted:
-                time.sleep(4)
+                time.sleep(5) # Ждем дольше при лимитах
                 continue
             except Exception as e:
                 logger.error(f"Imagen Error: {e}")
                 if attempt == 1: return None
-                time.sleep(1)
+                time.sleep(2)
         return None
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
-        # Стандартная очистка
         if not self.image_model: return None
         try:
             pil_img = Image.open(io.BytesIO(img_bytes))
