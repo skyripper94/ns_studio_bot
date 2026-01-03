@@ -18,70 +18,17 @@ logger = logging.getLogger(__name__)
 CATEGORIES = {
     "news": {
         "name": "🔥 Новости",
-        "prompt": """Придумай 5 тем про АКТУАЛЬНЫЕ события:
-- Релизы (GTA 6, iPhone, фильмы)
-- Сделки компаний
-- Анонсы технологий
-Короткие хуки на русском, макс 8 слов."""
+        "prompt": "5 тем про АКТУАЛЬНЫЕ события (GTA 6, iPhone, IT). Коротко на русском."
     },
     "compare": {
         "name": "📊 Сравнения",
-        "prompt": """Придумай 5 тем для СРАВНЕНИЙ с цифрами:
-- MrBeast vs страны по населению
-- Доходы актёров/спортсменов
-- Компании vs ВВП стран
-Короткие хуки на русском, макс 8 слов."""
+        "prompt": "5 тем для сравнений (MrBeast vs страны, доходы и т.д.). Коротко на русском."
     },
     "facts": {
         "name": "🧠 Факты",
-        "prompt": """Придумай 5 тем "А ты знал?":
-- Исторические факты
-- Научные открытия
-- Необычные законы
-Короткие хуки на русском, макс 8 слов."""
-    },
-    "popculture": {
-        "name": "🎬 Кино/Игры",
-        "prompt": """Придумай 5 тем про кино/игры/сериалы:
-- Эволюция персонажей
-- Behind the scenes
-- Актёры тогда и сейчас
-Короткие хуки на русском, макс 8 слов."""
-    },
-    "money": {
-        "name": "💰 Деньги",
-        "prompt": """Придумай 5 тем про богатство:
-- Состояния миллиардеров
-- Лимитированные авто
-- Самые дорогие вещи
-Короткие хуки на русском, макс 8 слов."""
-    },
-    "world": {
-        "name": "🌍 Мир",
-        "prompt": """Придумай 5 тем про страны:
-- Необычные законы
-- Тюрьмы разных стран
-- Города будущего
-Короткие хуки на русском, макс 8 слов."""
+        "prompt": "5 необычных фактов 'А ты знал?'. Коротко на русском."
     }
 }
-
-BASE_IMAGE_STYLE = """Style: Premium magazine cover, editorial design.
-Visual elements: forest green accent arrows, forest green circular frames, forest green outlines and highlights.
-Composition: Dynamic collage layout, multiple focal points.
-Quality: Cinematic lighting, photorealistic, 8K detail, professional photography.
-Color accent: Forest green (#228B22) for all graphic elements.
-Format: Vertical 3:4 aspect ratio.
-IMPORTANT: NO TEXT ON IMAGE."""
-
-COLLAGE_STYLE = """Style: Magazine cover collage combining multiple subjects.
-Visual elements: Forest green arrows connecting elements, forest green circular frames, forest green outlines.
-Layout: Dynamic composition with overlapping elements.
-Quality: Cinematic, photorealistic, premium editorial look.
-Color accent: Forest green (#228B22) for all graphic elements.
-Format: Vertical 3:4.
-IMPORTANT: NO TEXT ON IMAGE."""
-
 
 class GoogleBrain:
     def __init__(self):
@@ -102,11 +49,11 @@ class GoogleBrain:
             logger.error(f"Auth Error: {e}")
 
         try:
+            # Используем Gemini 2.0 Flash для лучших промптов
             self.text_model = GenerativeModel("gemini-2.0-flash-001")
-            self.image_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
-            logger.info("✅ Brain: Gemini 2.0 + Imagen 3")
-        except Exception as e:
-            logger.error(f"Model Error: {e}")
+            self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
+            logger.info("✅ Brain Online: Gemini 2.0 (Premium Nano Style)")
+        except Exception:
             self.text_model = None
             self.image_model = None
 
@@ -114,126 +61,64 @@ class GoogleBrain:
         try:
             start = text.find('[')
             end = text.rfind(']') + 1
-            if start == -1 or end == 0:
-                clean = text.replace("```json", "").replace("```", "").strip()
-                return json.loads(clean)
             return json.loads(text[start:end])
-        except:
-            return []
+        except: return []
 
-    def _extract_lines(self, text: str) -> List[str]:
-        lines = []
-        for line in text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            line = line.lstrip('0123456789.-•*) ').strip()
-            if line and len(line) > 3:
-                lines.append(line)
-        return lines[:6]
-
-    def generate_topics_by_category(self, category: str) -> List[str]:
-        if not self.text_model:
-            return ["Ошибка API"]
-        
-        cat_data = CATEGORIES.get(category, CATEGORIES["facts"])
-        prompt = cat_data["prompt"] + "\nОтветь только списком тем, по одной на строку."
-        
+    def generate_topics(self, category_key: str) -> List[str]:
+        cat = CATEGORIES.get(category_key, CATEGORIES["news"])
+        prompt = cat["prompt"]
         try:
-            config = GenerationConfig(temperature=0.8)
-            response = self.text_model.generate_content(prompt, generation_config=config)
-            return self._extract_lines(response.text)[:5]
-        except Exception as e:
-            logger.error(f"Topics Error: {e}")
-            return ["Ошибка генерации тем"]
+            res = self.text_model.generate_content(prompt)
+            return [l.strip().replace("*", "").replace("-", "") for l in res.text.split('\n') if len(l) > 5][:5]
+        except: return ["Ошибка генерации тем"]
 
     def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
-        if not self.text_model:
-            return []
+        prompt = f"""
+        Тема: "{topic}" ({slide_count} слайдов).
+        Задача: План для Instagram. Язык: РУССКИЙ.
         
-        if slide_count == 1:
-            return [{
-                "slide_number": 1,
-                "ru_caption": topic,
-                "image_prompt": f"Magazine cover collage about: {topic}",
-                "is_cover": True
-            }]
+        ИНСТРУКЦИЯ ПО ВИЗУАЛУ (image_prompt):
+        Для каждого слайда пиши промпт на английском строго по формуле:
+        "A vertical 3:4 aspect ratio photograph. [PHOTO OF REAL SUBJECTS/SCENE]. Cinematic lighting, photorealistic, 8k. In the top right corner, there is a clean circular inset picture with a THICK FOREST GREEN BORDER showing a close-up of [DETAIL]. A small, styled FOREST GREEN ARROW points from the main scene towards this circular inset. Full bleed image, completely frameless, edge-to-edge."
+
+        ВАЖНО:
+        - Если в теме MrBeast — пиши "High-quality photo of real Jimmy Donaldson (MrBeast)".
+        - Все графические элементы (стрелка, обводка) должны быть FOREST GREEN.
         
-        prompt = f"""Тема: "{topic}" | Слайдов: {slide_count}
-
-СТРУКТУРА:
-- Слайд 1: обложка-коллаж
-- Слайды 2-{slide_count-1}: контент
-- Слайд {slide_count}: финальный коллаж
-
-ТЕКСТ (ru_caption): макс 7 слов, русский, факты с цифрами
-КАРТИНКА (image_prompt): описание сцены на английском, БЕЗ стиля
-
-JSON:
-[{{"slide_number": 1, "ru_caption": "...", "image_prompt": "...", "is_cover": true}}]"""
-
+        Верни JSON:
+        [
+          {{"slide_number": 1, "ru_caption": "Текст...", "image_prompt": "..."}}
+        ]
+        """
         try:
-            config = GenerationConfig(temperature=0.7)
-            response = self.text_model.generate_content(prompt, generation_config=config)
-            plan = self._extract_json(response.text)
-            if plan:
-                plan[0]["is_cover"] = True
-                if len(plan) > 1:
-                    plan[-1]["is_cover"] = True
-            return plan
-        except Exception as e:
-            logger.error(f"Plan Error: {e}")
-            return []
+            res = self.text_model.generate_content(prompt, generation_config=GenerationConfig(temperature=0.3))
+            return self._extract_json(res.text)
+        except: return []
 
-    def generate_image(self, scene_prompt: str, is_cover: bool = False) -> Optional[bytes]:
-        if not self.image_model:
-            return None
-        
-        style = COLLAGE_STYLE if is_cover else BASE_IMAGE_STYLE
-        full_prompt = f"{style}\n\nScene: {scene_prompt}"
+    def generate_image(self, prompt: str) -> Optional[bytes]:
+        if not self.image_model: return None
+        # Негативный промпт убирает 'зеленку' с лиц и фона
+        negative = "green skin, green face, green atmosphere, neon green, lime green, cartoon, anime, illustration, text, watermark, white frame, border"
         
         for attempt in range(2):
             try:
                 images = self.image_model.generate_images(
-                    prompt=full_prompt,
+                    prompt=prompt,
+                    negative_prompt=negative,
                     number_of_images=1,
                     aspect_ratio="3:4",
-                    add_watermark=False
+                    safety_filter_level="block_some",
+                    person_generation="allow_adult"
                 )
-                if not images:
-                    return None
-                
-                img = images[0]
-                if hasattr(img, '_image_bytes'):
-                    return img._image_bytes
-                elif hasattr(img, 'image_bytes'):
-                    return img.image_bytes
-                else:
-                    output = io.BytesIO()
-                    img.save(output)
-                    return output.getvalue()
-            
-            except ResourceExhausted:
-                time.sleep(5)
+                if images:
+                    buf = io.BytesIO()
+                    images[0].save(buf, format="PNG")
+                    return buf.getvalue()
+            except ResourceExhausted: time.sleep(5)
             except Exception as e:
                 logger.error(f"Imagen Error: {e}")
-                time.sleep(2)
+                time.sleep(1)
         return None
-
-    def regenerate_with_feedback(self, original_prompt: str, feedback: str, is_cover: bool = False) -> tuple:
-        if not self.text_model:
-            return original_prompt, self.generate_image(original_prompt, is_cover)
-        
-        edit_prompt = f"""Оригинал: "{original_prompt}"
-Изменить: "{feedback}"
-Напиши НОВОЕ описание сцены на английском (1-2 предложения). Только описание."""
-
-        try:
-            response = self.text_model.generate_content(edit_prompt)
-            new_scene = response.text.strip()
-            return new_scene, self.generate_image(new_scene, is_cover)
-        except:
-            return original_prompt, self.generate_image(original_prompt, is_cover)
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
         try:
@@ -241,9 +126,7 @@ JSON:
             w, h = pil_img.size
             draw = ImageDraw.Draw(pil_img)
             draw.rectangle([(0, int(h * 0.75)), (w, h)], fill=(255, 255, 255))
-            output = io.BytesIO()
-            pil_img.save(output, format="PNG")
-            return output.getvalue()
-        except Exception as e:
-            logger.error(f"Remove Error: {e}")
-            return None
+            out = io.BytesIO()
+            pil_img.save(out, format="PNG")
+            return out.getvalue()
+        except: return None
