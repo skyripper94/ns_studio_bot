@@ -3,7 +3,6 @@ import json
 import base64
 import logging
 import io
-import asyncio
 import time
 from typing import List, Dict, Optional
 
@@ -16,12 +15,79 @@ from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
+CATEGORIES = {
+    "news": {
+        "name": "🔥 Новости",
+        "prompt": """Придумай 5 тем про АКТУАЛЬНЫЕ события:
+- Релизы (GTA 6, iPhone, фильмы)
+- Сделки компаний
+- Анонсы технологий
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "compare": {
+        "name": "📊 Сравнения",
+        "prompt": """Придумай 5 тем для СРАВНЕНИЙ с цифрами:
+- MrBeast vs страны по населению
+- Доходы актёров/спортсменов
+- Компании vs ВВП стран
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "facts": {
+        "name": "🧠 Факты",
+        "prompt": """Придумай 5 тем "А ты знал?":
+- Исторические факты
+- Научные открытия
+- Необычные законы
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "popculture": {
+        "name": "🎬 Кино/Игры",
+        "prompt": """Придумай 5 тем про кино/игры/сериалы:
+- Эволюция персонажей
+- Behind the scenes
+- Актёры тогда и сейчас
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "money": {
+        "name": "💰 Деньги",
+        "prompt": """Придумай 5 тем про богатство:
+- Состояния миллиардеров
+- Лимитированные авто
+- Самые дорогие вещи
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "world": {
+        "name": "🌍 Мир",
+        "prompt": """Придумай 5 тем про страны:
+- Необычные законы
+- Тюрьмы разных стран
+- Города будущего
+Короткие хуки на русском, макс 8 слов."""
+    }
+}
+
+BASE_IMAGE_STYLE = """Style: Premium magazine cover, editorial design.
+Visual elements: forest green accent arrows, forest green circular frames, forest green outlines and highlights.
+Composition: Dynamic collage layout, multiple focal points.
+Quality: Cinematic lighting, photorealistic, 8K detail, professional photography.
+Color accent: Forest green (#228B22) for all graphic elements.
+Format: Vertical 3:4 aspect ratio.
+IMPORTANT: NO TEXT ON IMAGE."""
+
+COLLAGE_STYLE = """Style: Magazine cover collage combining multiple subjects.
+Visual elements: Forest green arrows connecting elements, forest green circular frames, forest green outlines.
+Layout: Dynamic composition with overlapping elements.
+Quality: Cinematic, photorealistic, premium editorial look.
+Color accent: Forest green (#228B22) for all graphic elements.
+Format: Vertical 3:4.
+IMPORTANT: NO TEXT ON IMAGE."""
+
+
 class GoogleBrain:
     def __init__(self):
         project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
         location = os.getenv("GOOGLE_LOCATION", "us-central1")
         
-        # Авторизация
         try:
             key_base64 = os.getenv("GOOGLE_KEY_BASE64")
             if key_base64:
@@ -35,23 +101,12 @@ class GoogleBrain:
         except Exception as e:
             logger.error(f"Auth Error: {e}")
 
-        # Модели
         try:
-            # SYSTEM INSTRUCTION: ПРЕМИАЛЬНЫЙ СТИЛЬ ТЕКСТА
-            system_instruction = """
-            Ты — редактор премиального делового медиа.
-            Тон: Спокойный, Интеллектуальный, Фактический, Дорогой.
-            ЗАПРЕЩЕНО: Кликбейт, слова "Шок", "Срочно", Caps Lock, эмодзи в тексте слайдов.
-            Язык: Строго РУССКИЙ.
-            """
-            self.text_model = GenerativeModel(
-                "gemini-2.0-flash-001",
-                system_instruction=[system_instruction]
-            )
-            # Используем лучшую доступную модель Imagen 3
-            self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-            logger.info("✅ Brain Online: Gemini 2.0 (Nano Style) + Imagen 3")
-        except Exception:
+            self.text_model = GenerativeModel("gemini-2.0-flash-001")
+            self.image_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
+            logger.info("✅ Brain: Gemini 2.0 + Imagen 3")
+        except Exception as e:
+            logger.error(f"Model Error: {e}")
             self.text_model = None
             self.image_model = None
 
@@ -66,140 +121,129 @@ class GoogleBrain:
         except:
             return []
 
-    def generate_topics(self) -> List[str]:
-        if not self.text_model: return ["Ошибка API"]
+    def _extract_lines(self, text: str) -> List[str]:
+        lines = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            line = line.lstrip('0123456789.-•*) ').strip()
+            if line and len(line) > 3:
+                lines.append(line)
+        return lines[:6]
+
+    def generate_topics_by_category(self, category: str) -> List[str]:
+        if not self.text_model:
+            return ["Ошибка API"]
         
-        prompt = """
-        Придумай 6 тем для премиального блога (Tech, Business, History, Luxury).
-        Стиль заголовков: Спокойный, аналитический, вызывающий интерес фактом.
-        Примеры: "Экономика MrBeast", "Как Netflix меняет кино", "Феномен Ferrari".
-        Верни список строк на русском.
-        """
+        cat_data = CATEGORIES.get(category, CATEGORIES["facts"])
+        prompt = cat_data["prompt"] + "\nОтветь только списком тем, по одной на строку."
+        
         try:
-            config = GenerationConfig(temperature=0.7)
+            config = GenerationConfig(temperature=0.8)
             response = self.text_model.generate_content(prompt, generation_config=config)
-            lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
-            return lines[:6]
-        except Exception:
-            return ["История Ferrari", "Экономика Дубая", "Будущее ИИ", "Рынок Люкса"]
+            return self._extract_lines(response.text)[:5]
+        except Exception as e:
+            logger.error(f"Topics Error: {e}")
+            return ["Ошибка генерации тем"]
 
     def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
-        if not self.text_model: return []
+        if not self.text_model:
+            return []
         
-        # --- ГЛАВНЫЙ ПРОМПТ С ФИРМЕННЫМ СТИЛЕМ ---
-        prompt = f"""
-        Тема: "{topic}" ({slide_count} слайдов).
-        Задача: Сценарий для премиальной карусели.
+        if slide_count == 1:
+            return [{
+                "slide_number": 1,
+                "ru_caption": topic,
+                "image_prompt": f"Magazine cover collage about: {topic}",
+                "is_cover": True
+            }]
         
-        ЧАСТЬ 1: ТЕКСТ (ru_caption)
-        - Сухие факты, цифры. Максимум 7 слов.
-        - Строго на русском.
-        
-        ЧАСТЬ 2: ВИЗУАЛ (image_prompt) - САМОЕ ВАЖНОЕ!
-        Ты обязан генерировать промпты строго в определенном стиле.
-        
-        ШАБЛОН ПРОМПТА (Используй его для каждого слайда!):
-        "A vertical 3:4 aspect ratio photograph. [ОПИСАНИЕ ГЛАВНОЙ СЦЕНЫ РЕАЛИСТИЧНО]. Photorealistic, 8k, cinematic lighting. In the top right corner, there is a clean circular inset picture with a THICK FOREST GREEN BORDER showing a close-up of [ДЕТАЛЬ]. A small, styled FOREST GREEN ARROW points from the main scene towards this circular inset. Full bleed image, completely frameless."
-        
-        Пример для темы про MrBeast:
-        "A vertical 3:4 aspect ratio photograph. Wide shot of the real Jimmy Donaldson (MrBeast) standing in a massive studio filled with money and cameras. Photorealistic, 8k, cinematic lighting. In the top right corner, a clean circular inset picture with a thick forest green border showing a close-up of his logo on a shirt. A small styled forest green arrow points from him to the circle. Full bleed."
-        
-        Опиши каждый слайд уникально, но строго следуя этому шаблону с зелеными элементами.
-        
-        JSON Output:
-        [
-          {{
-            "slide_number": 1, 
-            "ru_caption": "Заголовок...", 
-            "image_prompt": "A vertical 3:4 aspect ratio photograph..."
-          }}
-        ]
-        """
+        prompt = f"""Тема: "{topic}" | Слайдов: {slide_count}
+
+СТРУКТУРА:
+- Слайд 1: обложка-коллаж
+- Слайды 2-{slide_count-1}: контент
+- Слайд {slide_count}: финальный коллаж
+
+ТЕКСТ (ru_caption): макс 7 слов, русский, факты с цифрами
+КАРТИНКА (image_prompt): описание сцены на английском, БЕЗ стиля
+
+JSON:
+[{{"slide_number": 1, "ru_caption": "...", "image_prompt": "...", "is_cover": true}}]"""
+
         try:
             config = GenerationConfig(temperature=0.7)
             response = self.text_model.generate_content(prompt, generation_config=config)
-            data = self._extract_json(response.text)
-            return data
-        except Exception:
+            plan = self._extract_json(response.text)
+            if plan:
+                plan[0]["is_cover"] = True
+                if len(plan) > 1:
+                    plan[-1]["is_cover"] = True
+            return plan
+        except Exception as e:
+            logger.error(f"Plan Error: {e}")
             return []
 
-    def generate_image(self, prompt: str) -> Optional[bytes]:
-        if not self.image_model: return None
+    def generate_image(self, scene_prompt: str, is_cover: bool = False) -> Optional[bytes]:
+        if not self.image_model:
+            return None
         
-        # Добавляем негативный промпт, чтобы убрать мультяшность и текст
-        negative_prompt = "cartoon, anime, illustration, painting, text, watermark, signature, ugly, deformed, blurry, low quality, borders, frames"
+        style = COLLAGE_STYLE if is_cover else BASE_IMAGE_STYLE
+        full_prompt = f"{style}\n\nScene: {scene_prompt}"
         
         for attempt in range(2):
             try:
-                # Imagen 3 поддерживает negative_prompt в последних версиях SDK
-                # Если вдруг нет - он его просто проигнорирует
-                try:
-                    images = self.image_model.generate_images(
-                        prompt=prompt,
-                        negative_prompt=negative_prompt,
-                        number_of_images=1, 
-                        aspect_ratio="3:4",
-                        safety_filter_level="block_some", 
-                        person_generation="allow_adult"
-                    )
-                except TypeError:
-                     # Фоллбэк для старых версий SDK без negative_prompt
-                     images = self.image_model.generate_images(
-                        prompt=prompt,
-                        number_of_images=1, 
-                        aspect_ratio="3:4",
-                        safety_filter_level="block_some", 
-                        person_generation="allow_adult"
-                    )
-
-                if not images: return None
+                images = self.image_model.generate_images(
+                    prompt=full_prompt,
+                    number_of_images=1,
+                    aspect_ratio="3:4",
+                    add_watermark=False
+                )
+                if not images:
+                    return None
                 
-                output = io.BytesIO()
-                # Универсальное сохранение
-                try:
-                    images[0].save(output, format="PNG")
-                except TypeError:
-                     images[0].save(output)
-                
-                return output.getvalue()
-
+                img = images[0]
+                if hasattr(img, '_image_bytes'):
+                    return img._image_bytes
+                elif hasattr(img, 'image_bytes'):
+                    return img.image_bytes
+                else:
+                    output = io.BytesIO()
+                    img.save(output)
+                    return output.getvalue()
+            
             except ResourceExhausted:
                 time.sleep(5)
-                continue
             except Exception as e:
                 logger.error(f"Imagen Error: {e}")
-                time.sleep(1)
+                time.sleep(2)
         return None
 
-    def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
-        if not self.image_model: return None
-        try:
-            pil_img = Image.open(io.BytesIO(img_bytes))
-            if pil_img.width > 2000:
-                pil_img.thumbnail((1500, 1500))
-                buf = io.BytesIO()
-                pil_img.save(buf, format="PNG")
-                img_bytes = buf.getvalue()
+    def regenerate_with_feedback(self, original_prompt: str, feedback: str, is_cover: bool = False) -> tuple:
+        if not self.text_model:
+            return original_prompt, self.generate_image(original_prompt, is_cover)
+        
+        edit_prompt = f"""Оригинал: "{original_prompt}"
+Изменить: "{feedback}"
+Напиши НОВОЕ описание сцены на английском (1-2 предложения). Только описание."""
 
-            v_img = Image(image_bytes=img_bytes)
+        try:
+            response = self.text_model.generate_content(edit_prompt)
+            new_scene = response.text.strip()
+            return new_scene, self.generate_image(new_scene, is_cover)
+        except:
+            return original_prompt, self.generate_image(original_prompt, is_cover)
+
+    def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
+        try:
+            pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
             w, h = pil_img.size
-            mask = Image.new("L", (w, h), 0)
-            draw = ImageDraw.Draw(mask)
-            draw.rectangle([(0, int(h * 0.70)), (w, h)], fill=255)
-            mask_buf = io.BytesIO()
-            mask.save(mask_buf, format="PNG")
-            
-            from vertexai.preview.vision_models import Image as VertexImage
-            v_img = VertexImage(image_bytes=img_bytes)
-            v_mask = VertexImage(image_bytes=mask_buf.getvalue())
-            
-            edited = self.image_model.edit_images(base_image=v_img, mask=v_mask, prompt="clean background", number_of_images=1)
-            
-            out = io.BytesIO()
-            try:
-                edited[0].save(out, format="PNG")
-            except:
-                edited[0].save(out)
-            return out.getvalue()
-        except Exception:
+            draw = ImageDraw.Draw(pil_img)
+            draw.rectangle([(0, int(h * 0.75)), (w, h)], fill=(255, 255, 255))
+            output = io.BytesIO()
+            pil_img.save(output, format="PNG")
+            return output.getvalue()
+        except Exception as e:
+            logger.error(f"Remove Error: {e}")
             return None
