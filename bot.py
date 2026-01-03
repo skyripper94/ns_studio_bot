@@ -9,35 +9,47 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-# Проверка библиотек
+# 1. Проверка наличия мозгов
 try:
     from google_services import GoogleBrain
 except ImportError:
     print("CRITICAL: google_services.py не найден!")
     sys.exit(1)
 
-# Логирование
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# 2. Логирование (Чистое, без мусора)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    level=logging.INFO
+)
+# Заглушаем технический шум библиотек, оставляем только важное
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext.Application").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Состояния
 CHOOSING_MODE, ENTERING_TOPIC, CONFIRMING_PLAN = range(3)
 
+# 3. Инициализация AI
 try:
     brain = GoogleBrain()
-except Exception:
+except Exception as e:
+    logger.critical(f"Brain Death: {e}")
     sys.exit(1)
 
-# --- МЕНЮ ---
+# --- ИНТЕРФЕЙС ---
 
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Сбрасываем флаг обработки, чтобы разблокировать бота
     context.user_data['is_processing'] = False
-    text = "💎 **Wealth AI Creator v4.1 (Gemini 2.0)**\n\nВыбери задачу:"
+    
+    text = "💎 **Wealth AI Creator v5.0 (Final Patch)**\n\nСистемы в норме. Выбери задачу:"
     keyboard = [
         [InlineKeyboardButton("📊 Создать Карусель", callback_data='mode_carousel')],
         [InlineKeyboardButton("🧹 Очистить фото", callback_data='mode_cleaner')]
     ]
+    
     if update.callback_query:
+        # Безопасное редактирование (try/except на случай, если сообщение старое)
         try:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         except:
@@ -54,7 +66,7 @@ async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_main_menu(update, context)
     return ConversationHandler.END
 
-# --- ОЧИСТКА ---
+# --- ОЧИСТКА ФОТО ---
 
 async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -68,7 +80,7 @@ async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TY
     if not update.message.photo: return
     
     if context.user_data.get('is_processing'):
-        await update.message.reply_text("⏳ Жди, я занят...")
+        await update.message.reply_text("⏳ Я занят, подожди...")
         return
     context.user_data['is_processing'] = True
 
@@ -76,16 +88,18 @@ async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         f = await update.message.photo[-1].get_file()
         b = await f.download_as_bytearray()
+        
+        # Heavy lifting in thread
         res = await asyncio.to_thread(brain.remove_text_from_image, bytes(b))
         
         if res:
             await msg.delete()
             await update.message.reply_photo(res, caption="✅ Готово.")
         else:
-            await msg.edit_text("❌ Ошибка.")
+            await msg.edit_text("❌ Ошибка обработки.")
     except Exception as e:
-        logger.error(f"Cleanup Error: {e}")
-        await msg.edit_text("⚠️ Сбой.")
+        logger.error(f"Photo Error: {e}")
+        await msg.edit_text("⚠️ Сбой сервера.")
     finally:
         context.user_data['is_processing'] = False
         await send_main_menu(update, context)
@@ -95,7 +109,7 @@ async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TY
 async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("🧠 Gemini 2.0 думает...")
+    await query.edit_message_text("🧠 Gemini 2.0 генерирует идеи...")
     
     topics = await asyncio.to_thread(brain.generate_topics)
     
@@ -111,7 +125,10 @@ async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     if query.data == "topic_custom":
-        await query.edit_message_text("✍️ Напиши тему:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
+        await query.edit_message_text(
+            "✍️ Напиши тему:", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]])
+        )
         return ENTERING_TOPIC
     
     topic = "Тема"
@@ -124,9 +141,11 @@ async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAUL
     return await generate_plan_step(update, context, update.message.text)
 
 async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE, topic):
+    # Блокировка повторных нажатий
     if context.user_data.get('is_processing'): return CONFIRMING_PLAN
     context.user_data['is_processing'] = True
     
+    # Определяем куда отвечать
     if update.callback_query:
         msg = await update.callback_query.message.reply_text(f"📝 План: **{topic}**...", parse_mode="Markdown")
     else:
@@ -173,7 +192,7 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     if context.user_data.get('is_gen_running'):
-        await query.message.reply_text("⏳ Жди...")
+        await query.message.reply_text("⏳ Уже работаю...")
         return
     context.user_data['is_gen_running'] = True
     
@@ -203,11 +222,23 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
         
     return ConversationHandler.END
 
+# --- ЗАПУСК ---
+
 def main():
     token = os.getenv("TELEGRAM_TOKEN", "").strip().replace('"', '').replace("'", "")
     if not token: sys.exit(1)
 
-    request = HTTPXRequest(connection_pool_size=8, read_timeout=40.0, write_timeout=40.0, connect_timeout=40.0)
+    # ==========================================
+    # 🛑 ФИКС СЕТИ: УВЕЛИЧЕНЫ ТАЙМ-АУТЫ ДО 120s
+    # ==========================================
+    request = HTTPXRequest(
+        connection_pool_size=10, # Больше соединений
+        read_timeout=120.0,      # Ждем ответ от Телеграма до 2 минут
+        write_timeout=120.0,     # Отправляем данные до 2 минут
+        connect_timeout=60.0,    # Соединяемся до 1 минуты
+        pool_timeout=60.0        # Ждем свободного слота
+    )
+
     app = Application.builder().token(token).request(request).build()
 
     conv = ConversationHandler(
@@ -230,7 +261,7 @@ def main():
             CallbackQueryHandler(back_to_main, pattern='^back_to_main$'),
             CommandHandler('start', start)
         ],
-        conversation_timeout=600 
+        conversation_timeout=1200 # 20 минут сессия
     )
 
     app.add_handler(CommandHandler("start", start))
@@ -239,8 +270,9 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_main, pattern='^back_to_main$'))
     app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
-    print("✅ Bot Started (Gemini 2.0)")
-    app.run_polling()
+    print("✅ Bot Started (Network Fix Applied)")
+    # drop_pending_updates=True удалит старые зависшие сообщения, которые могли крашить бота при старте
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
