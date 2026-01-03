@@ -22,7 +22,7 @@ class GoogleBrain:
         project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
         location = os.getenv("GOOGLE_LOCATION", "us-central1")
         
-        # --- АВТОРИЗАЦИЯ ---
+        # Авторизация
         try:
             key_base64 = os.getenv("GOOGLE_KEY_BASE64")
             if key_base64:
@@ -34,24 +34,19 @@ class GoogleBrain:
             else:
                 aiplatform.init(project=project_id, location=location)
         except Exception as e:
-            logger.error(f"Critical Auth Error: {e}")
+            logger.error(f"Auth Error: {e}")
 
-        # --- МОДЕЛИ ---
+        # Модели
         try:
-            # ТРЕБОВАНИЕ ПОЛЬЗОВАТЕЛЯ: Gemini 2.0 Flash 001
             self.text_model = GenerativeModel("gemini-2.0-flash-001")
-            
-            # Imagen 3 (Стандарт)
             self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-            
-            logger.info("✅ Brain Online: Gemini 2.0 Flash-001 + Imagen 3")
-        except Exception as e:
-            logger.error(f"Model Init Error: {e}")
+            logger.info("✅ Brain Online: Gemini 2.0 + Imagen 3 (Product Mode)")
+        except Exception:
             self.text_model = None
             self.image_model = None
 
     def _extract_json(self, text: str) -> List[Dict]:
-        """Парсинг JSON с защитой от лишнего текста"""
+        """Умный парсер JSON"""
         try:
             start = text.find('[')
             end = text.rfind(']') + 1
@@ -59,60 +54,78 @@ class GoogleBrain:
                 clean = text.replace("```json", "").replace("```", "").strip()
                 return json.loads(clean)
             return json.loads(text[start:end])
-        except Exception:
+        except:
             return []
 
     def generate_topics(self) -> List[str]:
-        if not self.text_model: return ["Ошибка: Модель не подключена"]
+        """Генерирует микс из Новостей, Сравнений и Фактов"""
+        if not self.text_model: return ["Ошибка API"]
         
-        # Разнообразие тем
-        focus = random.choice(["Money Psychology", "Future Tech 2030", "Dark History Facts", "Space Mysteries"])
+        # Жесткий промпт на актуальность и хайп
+        prompt = """
+        Role: Senior Content Editor for a Wealth/Tech/Hype channel.
+        Task: Generate 6 viral topics for Instagram Carousels (Mix of categories).
         
-        prompt = f"""
-        Role: Viral Content Strategist.
-        Task: Generate 5 unique Instagram Carousel topics.
-        Focus: {focus}.
-        Style: Clickbait, High-Impact, Contrast (X vs Y).
-        Output: List of 5 strings only. No bullets. Russian language.
+        Categories to include:
+        1. VERSUS (e.g., "iPhone 1 vs iPhone 16", "Dubai vs NYC").
+        2. BREAKING NEWS/HYPE (e.g., "GTA 6 Release Date", "Ferrari New Hypercar").
+        3. MONEY FACTS (e.g., "MrBeast Net Worth", "Rothschild Family").
+        
+        Style: Short, Punchy, Clickbait. NO "Introduction to...".
+        Language: RUSSIAN (Strictly).
+        Output: List of 6 strings. No bullets.
         """
         
         try:
-            # Temperature 0.8 для креативности
-            config = GenerationConfig(temperature=0.8)
+            config = GenerationConfig(temperature=0.9)
             response = self.text_model.generate_content(prompt, generation_config=config)
             lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
-            return lines[:5]
-        except Exception as e:
-            logger.error(f"Topic Gen Error: {e}")
-            return ["Темы недоступны (Ошибка API)", "Попробуйте позже"]
+            return lines[:6]
+        except Exception:
+            return ["GTA 6: Что известно сейчас", "Доходы: Роналду vs Месси", "Секреты Apple", "Дубай: Мифы и Реальность"]
 
-    def generate_carousel_plan(self, topic: str) -> List[Dict[str, str]]:
+    def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
+        """Маршрутизатор: создает план в зависимости от типа темы"""
         if not self.text_model: return []
         
-        style = random.choice(["Aggressive Facts", "Minimalist comparisons", "Dark aesthetic"])
-        
+        # Инструкция для Gemini: Как работать с картинками и текстом
         prompt = f"""
+        Act as a Professional Instagram Producer.
         Topic: "{topic}"
-        Style: {style}.
-        Create 4 slides.
+        Format: Carousel of {slide_count} slides.
+        Target Audience: CIS/Russia (Russian Language ONLY).
         
-        Constraints:
-        1. Text: MAX 6 WORDS per slide. Minimalist.
-        2. Content: Hard facts or comparisons only.
-        3. Visuals: Vertical 3:4, Photorealistic, Cinematic.
+        VISUAL STRUCTURE RULES (Important):
+        - Slide 1 (Cover): Must be a HIGH-IMPACT COLLAGE. Combine main elements (e.g., Split screen X vs Y, or Hero Object + Background).
+        - Middle Slides: Photorealistic, Cinematic, 8k, Vertical 3:4.
+        - Last Slide: Variation of the Cover (Collage) but with different lighting/angle.
         
-        JSON Format only:
+        TEXT RULES:
+        - Language: RUSSIAN ONLY (No English text in 'ru_caption').
+        - Length: Super short. Max 5-8 words per slide.
+        - Style: Facts, Numbers, Dates. No "water".
+        
+        JSON Output Format:
         [
-          {{"slide_number": 1, "ru_caption": "...", "image_prompt": "Vertical 3:4, ..."}}
+          {{
+            "slide_number": 1, 
+            "ru_caption": "GTA 6: Дата выхода подтверждена?", 
+            "image_prompt": "Vertical 3:4, split screen collage, left side Grand Theft Auto Vice City graphics, right side hyper-realistic GTA 6 graphics, neon lighting"
+          }},
+          ...
         ]
         """
+        
         try:
-            config = GenerationConfig(temperature=0.7)
+            config = GenerationConfig(temperature=0.7) # Чуть строже для соблюдения JSON
             response = self.text_model.generate_content(prompt, generation_config=config)
             data = self._extract_json(response.text)
             
-            # Валидация данных
-            if not isinstance(data, list): return []
+            # Валидация: если Gemini вдруг сгенерировала меньше/больше, чем просили
+            if len(data) != slide_count:
+                logger.warning(f"Gemini slide count mismatch. Asked {slide_count}, got {len(data)}")
+                # Можно обрезать или дополнить, но пока оставим как есть
+            
             return data
         except Exception as e:
             logger.error(f"Plan Gen Error: {e}")
@@ -121,7 +134,6 @@ class GoogleBrain:
     def generate_image(self, prompt: str) -> Optional[bytes]:
         if not self.image_model: return None
         
-        # Попытка генерации с ретраем
         for attempt in range(2):
             try:
                 images = self.image_model.generate_images(
@@ -141,10 +153,10 @@ class GoogleBrain:
         return None
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
+        # Стандартная очистка
         if not self.image_model: return None
         try:
             pil_img = Image.open(io.BytesIO(img_bytes))
-            # Ресайз если большая
             if pil_img.width > 2000 or pil_img.height > 2000:
                 pil_img.thumbnail((1500, 1500))
                 buf = io.BytesIO()
