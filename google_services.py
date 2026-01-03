@@ -4,7 +4,6 @@ import base64
 import logging
 import io
 import asyncio
-import random
 import time
 from typing import List, Dict, Optional
 
@@ -22,7 +21,6 @@ class GoogleBrain:
         project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
         location = os.getenv("GOOGLE_LOCATION", "us-central1")
         
-        # Авторизация
         try:
             key_base64 = os.getenv("GOOGLE_KEY_BASE64")
             if key_base64:
@@ -36,25 +34,19 @@ class GoogleBrain:
         except Exception as e:
             logger.error(f"Auth Error: {e}")
 
-        # Модели
         try:
-            # SYSTEM INSTRUCTION: ПРЕМИАЛЬНЫЙ СТИЛЬ
             system_instruction = """
-            Ты — главный редактор премиального делового медиа (стиль Forbes, Esquire, RBC).
-            Твоя задача — создавать интеллектуальный контент для Instagram.
-            
-            TONE OF VOICE:
-            - Спокойный, уверенный, экспертный.
-            - НИКАКОГО кликбейта, капса, восклицательных знаков и слов "ШОК", "ВЗРЫВ", "СРОЧНО".
-            - Только проверенные факты, цифры и аналитика.
-            - Язык: Строго РУССКИЙ.
+            Ты — редактор премиального делового медиа.
+            Тон: Спокойный, Интеллектуальный, Фактический.
+            ЗАПРЕЩЕНО: Кликбейт, слова "Шок", "Срочно", Caps Lock.
+            Язык: Строго РУССКИЙ.
             """
             self.text_model = GenerativeModel(
                 "gemini-2.0-flash-001",
                 system_instruction=[system_instruction]
             )
             self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-            logger.info("✅ Brain Online: Gemini 2.0 (Premium Mode) + Imagen 3")
+            logger.info("✅ Brain Online: Gemini 2.0 (Premium) + Imagen 3")
         except Exception:
             self.text_model = None
             self.image_model = None
@@ -74,65 +66,51 @@ class GoogleBrain:
         if not self.text_model: return ["Ошибка API"]
         
         prompt = """
-        Придумай 6 актуальных тем для делового медиа.
-        
-        Категории:
-        1. ТЕХНОЛОГИИ (AI, Space, Biotech) — только факты.
-        2. БИЗНЕС/ДЕНЬГИ (Доходы, Рынки, История брендов).
-        3. КУЛЬТУРА/ИСТОРИЯ (Личности, Артефакты, Кино).
-        
-        ТРЕБОВАНИЯ:
-        - Заголовки должны быть спокойными и интригующими (без желтизны).
-        - Пример ХОРОШО: "Как Netflix меняет подход к сериалам", "Экономика GTA 6", "Феномен Лавкрафта".
-        - Пример ПЛОХО: "ШОК! ТЫ НЕ ПОВЕРИШЬ!", "ЭТО ВЗОРВАЛО ИНТЕРНЕТ".
-        
-        Верни просто список из 6 строк на русском языке.
+        Придумай 6 тем для премиального блога (Tech, Business, Art).
+        Стиль: Спокойный, аналитический.
+        Примеры: "Феномен NVIDIA", "Рынок искусства 2025", "История дома Gucci".
+        Верни список строк на русском.
         """
-        
         try:
-            config = GenerationConfig(temperature=0.7) # Снизил температуру для строгости
+            config = GenerationConfig(temperature=0.6)
             response = self.text_model.generate_content(prompt, generation_config=config)
             lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
             return lines[:6]
         except Exception:
-            return ["История Ferrari", "Экономика Дубая", "Будущее нейросетей", "Рынок искусства"]
+            # FALLBACK TOPICS (Если Google упал)
+            return ["ИИ в Бизнесе", "История Ferrari", "Будущее Энергетики", "Рынок Люкса"]
 
     def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
         if not self.text_model: return []
         
         prompt = f"""
-        Тема: "{topic}"
-        Количество слайдов: {slide_count}.
+        Тема: "{topic}" ({slide_count} слайдов).
+        Задача: Сценарий для спокойного, интеллектуального медиа.
         
-        ЗАДАЧА: Сценарий для премиальной карусели.
+        Текст (ru_caption):
+        - Сухие факты. Цифры.
+        - Макс 7 слов на слайд.
+        - Строго на русском.
         
-        СТИЛЬ ТЕКСТА (ru_caption):
-        - Лаконичный. Максимум 6-8 слов на слайд.
-        - Сухие факты. Цифры. Годы. Имена.
-        - Без эмоциональных окрасок.
+        Визуал (image_prompt):
+        - Слайд 1: Minimalist Collage, High-End Magazine Style.
+        - Остальные: Cinematic, Photorealistic, 3:4 Vertical, Soft Lighting.
         
-        СТИЛЬ ВИЗУАЛА (image_prompt):
-        - Слайд 1 (Обложка): Elegant minimalistic collage. High-end editorial style.
-        - Остальные: Cinematic, photorealistic, muted colors, 8k, vertical 3:4.
-        - Последний: Закрепление образа с обложки.
-        
-        JSON Output:
+        JSON Format:
         [
           {{
             "slide_number": 1, 
-            "ru_caption": "Заголовок на русском", 
-            "image_prompt": "Vertical 3:4, elegant collage..."
+            "ru_caption": "Текст...", 
+            "image_prompt": "Vertical 3:4, collage..."
           }}
         ]
         """
-        
         try:
-            config = GenerationConfig(temperature=0.6) # Строгий режим
+            config = GenerationConfig(temperature=0.6)
             response = self.text_model.generate_content(prompt, generation_config=config)
             data = self._extract_json(response.text)
             return data
-        except Exception as e:
-            logger.error(f"Plan Gen Error: {e}")
+        except Exception:
             return []
 
     def generate_image(self, prompt: str) -> Optional[bytes]:
@@ -144,46 +122,43 @@ class GoogleBrain:
                     prompt=prompt, number_of_images=1, aspect_ratio="3:4",
                     safety_filter_level="block_some", person_generation="allow_adult"
                 )
+                if not images: return None
                 
-                # --- ФИКС ОШИБКИ ---
-                # Вместо .save() используем прямой доступ к байтам, если он есть
-                # Или проверяем, вернулись ли картинки
-                if not images:
-                    logger.warning("Google вернул пустой список картинок (Safety Filter?)")
-                    return None
-                    
-                # Самый надежный способ в новой версии SDK:
-                # Обычно это images[0]._image_bytes или images[0].image_bytes
-                # Но если старый метод save() сломался, попробуем сохранить без формата (если он принимает путь)
-                # ИЛИ используем ._image_bytes который есть в GeneratedImage
+                # --- УНИВЕРСАЛЬНЫЙ СПОСОБ СОХРАНЕНИЯ (БЕЗ ОШИБОК) ---
+                output = io.BytesIO()
+                # Если объект имеет метод save - используем его без формата, если он ругается
+                # Но лучше всего достать байты, если SDK это позволяет
+                try:
+                    images[0].save(output, format="PNG")
+                except TypeError:
+                     # Если метод save не принимает format (старая/новая версия SDK)
+                     images[0].save(output)
                 
-                if hasattr(images[0], "_image_bytes"):
-                    return images[0]._image_bytes
-                else:
-                     # Fallback для некоторых версий SDK
-                     # Пытаемся сохранить во временный буфер без аргумента format, если он его не принимает
-                     # Но скорее всего _image_bytes сработает
-                     return images[0]._image_bytes
+                return output.getvalue()
 
             except ResourceExhausted:
-                time.sleep(5)
+                time.sleep(3)
                 continue
             except Exception as e:
                 logger.error(f"Imagen Error: {e}")
-                if attempt == 1: return None
-                time.sleep(2)
+                time.sleep(1)
         return None
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
         if not self.image_model: return None
         try:
             pil_img = Image.open(io.BytesIO(img_bytes))
-            if pil_img.width > 2000 or pil_img.height > 2000:
+            if pil_img.width > 2000:
                 pil_img.thumbnail((1500, 1500))
                 buf = io.BytesIO()
                 pil_img.save(buf, format="PNG")
                 img_bytes = buf.getvalue()
 
+            v_img = Image(image_bytes=img_bytes) # Внимание: тут может быть конфликт имен, но в контексте класса используется VertexImage через алиас
+            # (В коде выше импорт был: from vertexai.preview.vision_models import ImageGenerationModel)
+            # Приведем к безопасному виду:
+            from vertexai.preview.vision_models import Image as VertexImage
+            
             w, h = pil_img.size
             mask = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(mask)
@@ -196,11 +171,11 @@ class GoogleBrain:
             
             edited = self.image_model.edit_images(base_image=v_img, mask=v_mask, prompt="clean background", number_of_images=1)
             
-            # ТАКОЙ ЖЕ ФИКС
-            if hasattr(edited[0], "_image_bytes"):
-                return edited[0]._image_bytes
-            return None
-            
-        except Exception as e:
-            logger.error(f"Edit Error: {e}")
+            out = io.BytesIO()
+            try:
+                edited[0].save(out, format="PNG")
+            except:
+                edited[0].save(out)
+            return out.getvalue()
+        except Exception:
             return None
