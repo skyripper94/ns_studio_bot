@@ -35,47 +35,55 @@ def init_client():
         logger.error("GOOGLE_CLOUD_API_KEY not set!")
         sys.exit(1)
     
-    client = genai.Client(
-        vertexai=True,
-        api_key=api_key,
-    )
-    logger.info("✅ Gemini client ready")
+    # ФИКС 1: Убрали vertexai=True, так как используется api_key
+    try:
+        client = genai.Client(api_key=api_key)
+        logger.info("✅ Gemini client ready (AI Studio Mode)")
+    except Exception as e:
+        logger.error(f"Client Init Error: {e}")
+        sys.exit(1)
 
 
 def process_image(img_bytes: bytes) -> bytes:
     global client
     
-    # 1. Создаем объект Image (а не Part) для редактирования
-    # В новом SDK Imagen требует RawReferenceImage
     try:
-        raw_ref = types.RawReferenceImage(
+        # ФИКС 2: Новый формат для Imagen 3 в SDK google-genai
+        # Создаем объект RawReferenceImage для редактирования
+        ref_image = types.RawReferenceImage(
             reference_id=1,
             reference_image=types.Image.from_bytes(img_bytes)
         )
         
-        # 2. Вызываем edit_image с правильным конфигом
-        # Используем EditImageConfig вместо несуществующего ImageConfig
+        # Параметры редактирования
+        config = types.EditImageConfig(
+            edit_mode="inpainting-insert",
+            number_of_images=1,
+            safety_filter_level="block_some",
+            person_generation="allow_adult",
+            include_rai_reason=True,
+            output_mime_type="image/jpeg"
+        )
+        
+        # Вызов модели
         response = client.models.edit_image(
             model='imagen-3.0-capability-001',
             prompt=EDIT_PROMPT,
-            reference_images=[raw_ref],
-            config=types.EditImageConfig(
-                edit_mode="inpainting-insert", # Режим редактирования (стандартный для инструкций)
-                number_of_images=1,
-                include_rai_reason=True,
-                safety_filter_level="block_some", 
-                person_generation="allow_adult"
-            )
+            reference_images=[ref_image],
+            config=config
         )
         
-        # 3. Извлекаем результат
+        # Получение результата
         if response.generated_images:
             return response.generated_images[0].image.image_bytes
-        return None
-        
+            
     except Exception as e:
         logger.error(f"Imagen API Error: {e}")
-        return None
+        # Если модель не найдена в AI Studio, пробуем запасную
+        if "404" in str(e):
+            logger.error("Модель imagen-3.0-capability-001 недоступна по API Key. Проверьте доступ к Imagen в AI Studio.")
+            
+    return None
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
