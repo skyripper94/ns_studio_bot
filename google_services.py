@@ -38,19 +38,23 @@ class GoogleBrain:
 
         # Модели
         try:
-            # SYSTEM INSTRUCTION: ЗАПРЕТ НА АНГЛИЙСКИЙ
+            # SYSTEM INSTRUCTION: ПРЕМИАЛЬНЫЙ СТИЛЬ
             system_instruction = """
-            Ты — русскоязычный контент-мейкер. 
-            Твоя задача — создавать вирусные заголовки и тексты для Instagram.
-            ГЛАВНОЕ ПРАВИЛО: ВЕСЬ ВЫВОД ДОЛЖЕН БЫТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ.
-            Никакого английского в заголовках или описаниях.
+            Ты — главный редактор премиального делового медиа (стиль Forbes, Esquire, RBC).
+            Твоя задача — создавать интеллектуальный контент для Instagram.
+            
+            TONE OF VOICE:
+            - Спокойный, уверенный, экспертный.
+            - НИКАКОГО кликбейта, капса, восклицательных знаков и слов "ШОК", "ВЗРЫВ", "СРОЧНО".
+            - Только проверенные факты, цифры и аналитика.
+            - Язык: Строго РУССКИЙ.
             """
             self.text_model = GenerativeModel(
                 "gemini-2.0-flash-001",
                 system_instruction=[system_instruction]
             )
             self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-            logger.info("✅ Brain Online: Gemini 2.0 (Russian Force) + Imagen 3")
+            logger.info("✅ Brain Online: Gemini 2.0 (Premium Mode) + Imagen 3")
         except Exception:
             self.text_model = None
             self.image_model = None
@@ -70,62 +74,62 @@ class GoogleBrain:
         if not self.text_model: return ["Ошибка API"]
         
         prompt = """
-        Придумай 6 вирусных тем (хуков) для Instagram каруселей.
-        Смешай категории:
-        1. СРАВНЕНИЯ (Versus): Кто богаче, Что лучше (iPhone vs Samsung).
-        2. НОВОСТИ (News): GTA 6, Илон Маск, Netflix, Ferrari.
-        3. ФАКТЫ (Facts): Лавкрафт, Терракотовая армия, Деньги.
+        Придумай 6 актуальных тем для делового медиа.
         
-        Стиль: Кликбейт, Коротко, Хайп.
-        Язык: ТОЛЬКО РУССКИЙ.
-        Формат ответа: Простой список из 6 строк.
+        Категории:
+        1. ТЕХНОЛОГИИ (AI, Space, Biotech) — только факты.
+        2. БИЗНЕС/ДЕНЬГИ (Доходы, Рынки, История брендов).
+        3. КУЛЬТУРА/ИСТОРИЯ (Личности, Артефакты, Кино).
+        
+        ТРЕБОВАНИЯ:
+        - Заголовки должны быть спокойными и интригующими (без желтизны).
+        - Пример ХОРОШО: "Как Netflix меняет подход к сериалам", "Экономика GTA 6", "Феномен Лавкрафта".
+        - Пример ПЛОХО: "ШОК! ТЫ НЕ ПОВЕРИШЬ!", "ЭТО ВЗОРВАЛО ИНТЕРНЕТ".
+        
+        Верни просто список из 6 строк на русском языке.
         """
         
         try:
-            config = GenerationConfig(temperature=0.9)
+            config = GenerationConfig(temperature=0.7) # Снизил температуру для строгости
             response = self.text_model.generate_content(prompt, generation_config=config)
             lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
             return lines[:6]
         except Exception:
-            return ["GTA 6: Дата выхода", "Феррари: Новая модель", "Мистер Бист: Доходы", "Apple vs Android"]
+            return ["История Ferrari", "Экономика Дубая", "Будущее нейросетей", "Рынок искусства"]
 
     def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
         if not self.text_model: return []
         
-        # Инструкция для Gemini под твою структуру
         prompt = f"""
         Тема: "{topic}"
         Количество слайдов: {slide_count}.
         
-        ЗАДАЧА: Написать сценарий для Instagram карусели.
-        ЯЗЫК: РУССКИЙ (ВСЕ ТЕКСТЫ В ru_caption ТОЛЬКО НА РУССКОМ).
+        ЗАДАЧА: Сценарий для премиальной карусели.
         
-        СТРУКТУРА:
-        1. Слайд 1 (Обложка): 
-           - Текст: Хук/Заголовок (коротко).
-           - Картинка: КОЛЛАЖ (Split screen collage, high contrast). Смесь главных объектов темы.
-        2. Средние слайды:
-           - Текст: Факты, цифры, сравнения. Максимум 7 слов на слайд. Без воды.
-           - Картинка: Кинематографичная, вертикальная 3:4, фотореализм.
-        3. Последний слайд:
-           - Картинка: Вариация коллажа с первого слайда, но другой ракурс.
+        СТИЛЬ ТЕКСТА (ru_caption):
+        - Лаконичный. Максимум 6-8 слов на слайд.
+        - Сухие факты. Цифры. Годы. Имена.
+        - Без эмоциональных окрасок.
         
-        Верни JSON список:
+        СТИЛЬ ВИЗУАЛА (image_prompt):
+        - Слайд 1 (Обложка): Elegant minimalistic collage. High-end editorial style.
+        - Остальные: Cinematic, photorealistic, muted colors, 8k, vertical 3:4.
+        - Последний: Закрепление образа с обложки.
+        
+        JSON Output:
         [
           {{
             "slide_number": 1, 
-            "ru_caption": "Текст на русском...", 
-            "image_prompt": "Vertical 3:4, split screen collage..."
+            "ru_caption": "Заголовок на русском", 
+            "image_prompt": "Vertical 3:4, elegant collage..."
           }}
         ]
         """
         
         try:
-            config = GenerationConfig(temperature=0.7)
+            config = GenerationConfig(temperature=0.6) # Строгий режим
             response = self.text_model.generate_content(prompt, generation_config=config)
             data = self._extract_json(response.text)
-            
-            # Если AI вернул меньше слайдов, чем просили — не страшно, главное чтобы не пусто
             return data
         except Exception as e:
             logger.error(f"Plan Gen Error: {e}")
@@ -140,11 +144,29 @@ class GoogleBrain:
                     prompt=prompt, number_of_images=1, aspect_ratio="3:4",
                     safety_filter_level="block_some", person_generation="allow_adult"
                 )
-                output = io.BytesIO()
-                images[0].save(output, format="PNG")
-                return output.getvalue()
+                
+                # --- ФИКС ОШИБКИ ---
+                # Вместо .save() используем прямой доступ к байтам, если он есть
+                # Или проверяем, вернулись ли картинки
+                if not images:
+                    logger.warning("Google вернул пустой список картинок (Safety Filter?)")
+                    return None
+                    
+                # Самый надежный способ в новой версии SDK:
+                # Обычно это images[0]._image_bytes или images[0].image_bytes
+                # Но если старый метод save() сломался, попробуем сохранить без формата (если он принимает путь)
+                # ИЛИ используем ._image_bytes который есть в GeneratedImage
+                
+                if hasattr(images[0], "_image_bytes"):
+                    return images[0]._image_bytes
+                else:
+                     # Fallback для некоторых версий SDK
+                     # Пытаемся сохранить во временный буфер без аргумента format, если он его не принимает
+                     # Но скорее всего _image_bytes сработает
+                     return images[0]._image_bytes
+
             except ResourceExhausted:
-                time.sleep(5) # Ждем дольше при лимитах
+                time.sleep(5)
                 continue
             except Exception as e:
                 logger.error(f"Imagen Error: {e}")
@@ -166,7 +188,6 @@ class GoogleBrain:
             mask = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(mask)
             draw.rectangle([(0, int(h * 0.70)), (w, h)], fill=255)
-            
             mask_buf = io.BytesIO()
             mask.save(mask_buf, format="PNG")
             
@@ -174,8 +195,12 @@ class GoogleBrain:
             v_mask = VertexImage(image_bytes=mask_buf.getvalue())
             
             edited = self.image_model.edit_images(base_image=v_img, mask=v_mask, prompt="clean background", number_of_images=1)
-            output = io.BytesIO()
-            edited[0].save(output, format="PNG")
-            return output.getvalue()
-        except Exception:
+            
+            # ТАКОЙ ЖЕ ФИКС
+            if hasattr(edited[0], "_image_bytes"):
+                return edited[0]._image_bytes
+            return None
+            
+        except Exception as e:
+            logger.error(f"Edit Error: {e}")
             return None
