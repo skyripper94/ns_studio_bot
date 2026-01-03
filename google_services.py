@@ -15,6 +15,72 @@ from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
+CATEGORIES = {
+    "news": {
+        "name": "🔥 Новости",
+        "prompt": """Придумай 5 тем про АКТУАЛЬНЫЕ события:
+- Релизы (GTA 6, iPhone, фильмы)
+- Сделки компаний
+- Анонсы технологий
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "compare": {
+        "name": "📊 Сравнения",
+        "prompt": """Придумай 5 тем для СРАВНЕНИЙ с цифрами:
+- MrBeast vs страны по населению
+- Доходы актёров/спортсменов
+- Компании vs ВВП стран
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "facts": {
+        "name": "🧠 Факты",
+        "prompt": """Придумай 5 тем "А ты знал?":
+- Исторические факты
+- Научные открытия
+- Необычные законы
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "popculture": {
+        "name": "🎬 Кино/Игры",
+        "prompt": """Придумай 5 тем про кино/игры/сериалы:
+- Эволюция персонажей
+- Behind the scenes
+- Актёры тогда и сейчас
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "money": {
+        "name": "💰 Деньги",
+        "prompt": """Придумай 5 тем про богатство:
+- Состояния миллиардеров
+- Лимитированные авто
+- Самые дорогие вещи
+Короткие хуки на русском, макс 8 слов."""
+    },
+    "world": {
+        "name": "🌍 Мир",
+        "prompt": """Придумай 5 тем про страны:
+- Необычные законы
+- Тюрьмы разных стран
+- Города будущего
+Короткие хуки на русском, макс 8 слов."""
+    }
+}
+
+BASE_IMAGE_STYLE = """Style: Premium magazine cover, editorial design.
+Visual elements: golden/yellow accent arrows, circular frames, forest green highlights.
+Composition: Dynamic collage layout, multiple focal points.
+Quality: Cinematic lighting, photorealistic, 8K detail, professional photography.
+Format: Vertical 3:4 aspect ratio.
+IMPORTANT: NO TEXT ON IMAGE."""
+
+COLLAGE_STYLE = """Style: Magazine cover collage combining multiple subjects.
+Visual elements: Golden arrows connecting elements, circular frames, forest green accents.
+Layout: Dynamic composition with overlapping elements.
+Quality: Cinematic, photorealistic, premium editorial look.
+Format: Vertical 3:4.
+IMPORTANT: NO TEXT ON IMAGE."""
+
+
 class GoogleBrain:
     def __init__(self):
         project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
@@ -53,60 +119,113 @@ class GoogleBrain:
         except:
             return []
 
-    def generate_topics(self) -> List[str]:
-        if not self.text_model: return ["Ошибка API"]
+    def _extract_lines(self, text: str) -> List[str]:
+        lines = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            line = line.lstrip('0123456789.-•*) ').strip()
+            if line and len(line) > 3:
+                lines.append(line)
+        return lines[:6]
+
+    def generate_topics_by_category(self, category: str) -> List[str]:
+        if not self.text_model:
+            return ["Ошибка API"]
         
-        prompt = "Придумай 6 тем для блога (Tech, Business). Ответь списком строк на русском."
+        cat_data = CATEGORIES.get(category, CATEGORIES["facts"])
+        prompt = cat_data["prompt"] + "\nОтветь только списком тем, по одной на строку."
+        
         try:
-            config = GenerationConfig(temperature=0.6)
+            config = GenerationConfig(temperature=0.8)
             response = self.text_model.generate_content(prompt, generation_config=config)
-            lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
-            return lines[:6]
-        except Exception:
-            return ["ИИ в Бизнесе", "История Ferrari", "Будущее Энергетики", "Рынок Люкса"]
+            return self._extract_lines(response.text)[:5]
+        except Exception as e:
+            logger.error(f"Topics Error: {e}")
+            return ["Ошибка генерации тем"]
 
     def generate_carousel_plan(self, topic: str, slide_count: int) -> List[Dict[str, str]]:
-        if not self.text_model: return []
+        if not self.text_model:
+            return []
         
-        prompt = f"""
-        Тема: "{topic}" ({slide_count} слайдов).
+        if slide_count == 1:
+            return [{
+                "slide_number": 1,
+                "ru_caption": topic,
+                "image_prompt": f"Magazine cover collage about: {topic}",
+                "is_cover": True
+            }]
         
-        ru_caption: Факты, макс 7 слов, русский.
-        image_prompt: Cinematic, Photorealistic, 4:5 Vertical.
-        
-        JSON:
-        [{{"slide_number": 1, "ru_caption": "...", "image_prompt": "..."}}]
-        """
+        prompt = f"""Тема: "{topic}" | Слайдов: {slide_count}
+
+СТРУКТУРА:
+- Слайд 1: обложка-коллаж
+- Слайды 2-{slide_count-1}: контент
+- Слайд {slide_count}: финальный коллаж
+
+ТЕКСТ (ru_caption): макс 7 слов, русский, факты с цифрами
+КАРТИНКА (image_prompt): описание сцены на английском, БЕЗ стиля
+
+JSON:
+[{{"slide_number": 1, "ru_caption": "...", "image_prompt": "...", "is_cover": true}}]"""
+
         try:
-            config = GenerationConfig(temperature=0.6)
+            config = GenerationConfig(temperature=0.7)
             response = self.text_model.generate_content(prompt, generation_config=config)
-            return self._extract_json(response.text)
-        except Exception:
+            plan = self._extract_json(response.text)
+            if plan:
+                plan[0]["is_cover"] = True
+                if len(plan) > 1:
+                    plan[-1]["is_cover"] = True
+            return plan
+        except Exception as e:
+            logger.error(f"Plan Error: {e}")
             return []
 
-    def generate_image(self, prompt: str) -> Optional[bytes]:
-        if not self.image_model: return None
+    def generate_image(self, scene_prompt: str, is_cover: bool = False) -> Optional[bytes]:
+        if not self.image_model:
+            return None
+        
+        style = COLLAGE_STYLE if is_cover else BASE_IMAGE_STYLE
+        full_prompt = f"{style}\n\nScene: {scene_prompt}"
         
         for attempt in range(2):
             try:
                 images = self.image_model.generate_images(
-                    prompt=prompt, 
-                    number_of_images=1, 
-                    aspect_ratio="4:5",
+                    prompt=full_prompt,
+                    number_of_images=1,
+                    aspect_ratio="3:4",
                     add_watermark=False
                 )
-                if not images: return None
+                if not images:
+                    return None
                 
                 output = io.BytesIO()
                 images[0].save(output, format="PNG")
                 return output.getvalue()
-
+            
             except ResourceExhausted:
-                time.sleep(3)
+                time.sleep(5)
             except Exception as e:
                 logger.error(f"Imagen Error: {e}")
-                time.sleep(1)
+                time.sleep(2)
         return None
+
+    def regenerate_with_feedback(self, original_prompt: str, feedback: str, is_cover: bool = False) -> tuple:
+        if not self.text_model:
+            return original_prompt, self.generate_image(original_prompt, is_cover)
+        
+        edit_prompt = f"""Оригинал: "{original_prompt}"
+Изменить: "{feedback}"
+Напиши НОВОЕ описание сцены на английском (1-2 предложения). Только описание."""
+
+        try:
+            response = self.text_model.generate_content(edit_prompt)
+            new_scene = response.text.strip()
+            return new_scene, self.generate_image(new_scene, is_cover)
+        except:
+            return original_prompt, self.generate_image(original_prompt, is_cover)
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
         try:
@@ -118,5 +237,5 @@ class GoogleBrain:
             pil_img.save(output, format="PNG")
             return output.getvalue()
         except Exception as e:
-            logger.error(f"Edit Error: {e}")
+            logger.error(f"Remove Error: {e}")
             return None
