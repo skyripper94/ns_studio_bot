@@ -48,14 +48,17 @@ def process_image(img_bytes: bytes) -> bytes:
     global client
     
     try:
-        # ФИКС 2: Новый формат для Imagen 3 в SDK google-genai
-        # Создаем объект RawReferenceImage для редактирования
+        # ФИКС: Используем прямой конструктор вместо .from_bytes()
+        # Библиотека ожидает параметр image_bytes
+        my_image = types.Image(image_bytes=img_bytes)
+
+        # Оборачиваем в RawReferenceImage
         ref_image = types.RawReferenceImage(
             reference_id=1,
-            reference_image=types.Image.from_bytes(img_bytes)
+            reference_image=my_image
         )
         
-        # Параметры редактирования
+        # Конфиг редактирования
         config = types.EditImageConfig(
             edit_mode="inpainting-insert",
             number_of_images=1,
@@ -65,7 +68,7 @@ def process_image(img_bytes: bytes) -> bytes:
             output_mime_type="image/jpeg"
         )
         
-        # Вызов модели
+        # Вызов API
         response = client.models.edit_image(
             model='imagen-3.0-capability-001',
             prompt=EDIT_PROMPT,
@@ -79,11 +82,7 @@ def process_image(img_bytes: bytes) -> bytes:
             
     except Exception as e:
         logger.error(f"Imagen API Error: {e}")
-        # Если модель не найдена в AI Studio, пробуем запасную
-        if "404" in str(e):
-            logger.error("Модель imagen-3.0-capability-001 недоступна по API Key. Проверьте доступ к Imagen в AI Studio.")
-            
-    return None
+        return None
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
