@@ -10,7 +10,7 @@ from typing import List, Dict, Optional
 
 from google.cloud import aiplatform
 from google.oauth2 import service_account
-from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+from google.api_core.exceptions import ResourceExhausted
 from vertexai.generative_models import GenerativeModel, GenerationConfig
 from vertexai.preview.vision_models import ImageGenerationModel
 from PIL import Image, ImageDraw
@@ -22,7 +22,7 @@ class GoogleBrain:
         project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
         location = os.getenv("GOOGLE_LOCATION", "us-central1")
         
-        # Авторизация
+        # --- АВТОРИЗАЦИЯ ---
         try:
             key_base64 = os.getenv("GOOGLE_KEY_BASE64")
             if key_base64:
@@ -36,33 +36,22 @@ class GoogleBrain:
         except Exception as e:
             logger.error(f"Critical Auth Error: {e}")
 
-        # Инициализация моделей с Fail-safe
+        # --- МОДЕЛИ ---
         try:
-            self.text_model = GenerativeModel("gemini-1.5-flash")
+            # ТРЕБОВАНИЕ ПОЛЬЗОВАТЕЛЯ: Gemini 2.0 Flash 001
+            self.text_model = GenerativeModel("gemini-2.0-flash-001")
+            
+            # Imagen 3 (Стандарт)
             self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-            logger.info("✅ Brain Online: Gemini Flash + Imagen 3")
+            
+            logger.info("✅ Brain Online: Gemini 2.0 Flash-001 + Imagen 3")
         except Exception as e:
             logger.error(f"Model Init Error: {e}")
             self.text_model = None
             self.image_model = None
 
-    def _validate_plan(self, data: List[Dict]) -> List[Dict]:
-        """Проверяет, что AI не прислал мусор вместо структуры"""
-        valid_slides = []
-        if not isinstance(data, list): return []
-        
-        for slide in data:
-            # Если ключей нет, ставим заглушки, чтобы не крашиться
-            clean_slide = {
-                "slide_number": slide.get("slide_number", 0),
-                "ru_caption": slide.get("ru_caption", "Текст отсутствует"),
-                "image_prompt": slide.get("image_prompt", "Abstract background, minimalistic, 8k")
-            }
-            valid_slides.append(clean_slide)
-        return valid_slides
-
     def _extract_json(self, text: str) -> List[Dict]:
-        """Парсинг JSON с защитой от Markdown"""
+        """Парсинг JSON с защитой от лишнего текста"""
         try:
             start = text.find('[')
             end = text.rfind(']') + 1
@@ -74,25 +63,28 @@ class GoogleBrain:
             return []
 
     def generate_topics(self) -> List[str]:
-        if not self.text_model: return ["Ошибка API"]
+        if not self.text_model: return ["Ошибка: Модель не подключена"]
         
-        focus = random.choice(["Wealth/Money", "Future Tech", "Psychology/Power", "Dark History"])
+        # Разнообразие тем
+        focus = random.choice(["Money Psychology", "Future Tech 2030", "Dark History Facts", "Space Mysteries"])
+        
         prompt = f"""
         Role: Viral Content Strategist.
         Task: Generate 5 unique Instagram Carousel topics.
         Focus: {focus}.
         Style: Clickbait, High-Impact, Contrast (X vs Y).
-        Output: List of 5 strings only. No bullets. Russian.
+        Output: List of 5 strings only. No bullets. Russian language.
         """
         
         try:
-            config = GenerationConfig(temperature=0.95) # Максимальная креативность
+            # Temperature 0.8 для креативности
+            config = GenerationConfig(temperature=0.8)
             response = self.text_model.generate_content(prompt, generation_config=config)
             lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
             return lines[:5]
         except Exception as e:
             logger.error(f"Topic Gen Error: {e}")
-            return ["Биткоин: Крах или Туземун?", "ИИ против Врачей", "Секреты Рокфеллера", "Космос: Мы одни?"]
+            return ["Темы недоступны (Ошибка API)", "Попробуйте позже"]
 
     def generate_carousel_plan(self, topic: str) -> List[Dict[str, str]]:
         if not self.text_model: return []
@@ -105,27 +97,31 @@ class GoogleBrain:
         Create 4 slides.
         
         Constraints:
-        1. Text: MAX 6 WORDS per slide.
-        2. Visuals: Vertical 3:4, Photorealistic, Cinematic.
+        1. Text: MAX 6 WORDS per slide. Minimalist.
+        2. Content: Hard facts or comparisons only.
+        3. Visuals: Vertical 3:4, Photorealistic, Cinematic.
         
-        JSON Format:
+        JSON Format only:
         [
           {{"slide_number": 1, "ru_caption": "...", "image_prompt": "Vertical 3:4, ..."}}
         ]
         """
         try:
-            config = GenerationConfig(temperature=0.85)
+            config = GenerationConfig(temperature=0.7)
             response = self.text_model.generate_content(prompt, generation_config=config)
-            raw_data = self._extract_json(response.text)
-            return self._validate_plan(raw_data)
+            data = self._extract_json(response.text)
+            
+            # Валидация данных
+            if not isinstance(data, list): return []
+            return data
         except Exception as e:
             logger.error(f"Plan Gen Error: {e}")
             return []
 
     def generate_image(self, prompt: str) -> Optional[bytes]:
-        """Генерация с 1 попыткой ретрая (если сеть моргнула)"""
         if not self.image_model: return None
         
+        # Попытка генерации с ретраем
         for attempt in range(2):
             try:
                 images = self.image_model.generate_images(
@@ -136,26 +132,24 @@ class GoogleBrain:
                 images[0].save(output, format="PNG")
                 return output.getvalue()
             except ResourceExhausted:
-                # Если лимиты - ждем и пробуем еще раз
-                time.sleep(5)
+                time.sleep(4)
                 continue
             except Exception as e:
-                logger.error(f"Imagen Error (Attempt {attempt}): {e}")
+                logger.error(f"Imagen Error: {e}")
                 if attempt == 1: return None
-                time.sleep(2)
+                time.sleep(1)
         return None
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
         if not self.image_model: return None
         try:
-            # Оптимизация: ресайз если картинка огромная (защита памяти)
             pil_img = Image.open(io.BytesIO(img_bytes))
+            # Ресайз если большая
             if pil_img.width > 2000 or pil_img.height > 2000:
                 pil_img.thumbnail((1500, 1500))
                 buf = io.BytesIO()
                 pil_img.save(buf, format="PNG")
                 img_bytes = buf.getvalue()
-                pil_img = Image.open(io.BytesIO(img_bytes)) # Re-open resized
 
             w, h = pil_img.size
             mask = Image.new("L", (w, h), 0)
@@ -172,6 +166,5 @@ class GoogleBrain:
             output = io.BytesIO()
             edited[0].save(output, format="PNG")
             return output.getvalue()
-        except Exception as e:
-            logger.error(f"Cleanup Error: {e}")
+        except Exception:
             return None
