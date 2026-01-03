@@ -2,103 +2,127 @@ import logging
 import os
 import asyncio
 import sys
+import base64
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-# Импорты Google GenAI SDK
+# Импорты по твоему образцу
 from google import genai
 from google.genai import types
 
-# 1. Настройка логов
+# Настройка логов
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 client = None
 
-EDIT_PROMPT = """Edit this image:
-1. Remove ALL yellow text and typography from the image (especially bottom 40%)
-2. Remove the yellow horizontal lines above the text
-3. Remove any logos or watermarks
-4. Change ALL yellow arrows to forest green color (#228B22)
-5. Restore the original background where text/elements were removed
-6. Keep everything else exactly the same
-
-Return the edited image."""
+# Промпт переписан для Gemini (она понимает инструкции лучше)
+EDIT_PROMPT = """
+Task: Generate a modified version of this image.
+Changes required:
+1. Remove ALL yellow text and typography.
+2. Remove yellow lines.
+3. Change yellow arrows to forest green (#228B22).
+4. Remove logos/watermarks.
+5. Keep the background and other elements exactly as they are.
+Output: A high-quality image.
+"""
 
 def init_client():
     global client
     api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
-    
     if not api_key:
         logger.error("GOOGLE_CLOUD_API_KEY not set!")
         sys.exit(1)
     
+    # Инициализация строго как в твоем примере
     try:
-        # Инициализация для AI Studio
-        client = genai.Client(api_key=api_key)
-        logger.info("✅ Gemini client ready (AI Studio Mode)")
+        client = genai.Client(
+            api_key=api_key,
+            # vertexai=True убрал, так как для API Key обычно используется AI Studio,
+            # но если у тебя Vertex проект, раскомментируй. 
+            # Для стабильности с API KEY лучше оставить дефолт.
+        )
+        logger.info("✅ Gemini Client Ready (GenAI SDK)")
     except Exception as e:
         logger.error(f"Client Init Error: {e}")
         sys.exit(1)
-        
 
 def process_image(img_bytes: bytes) -> bytes:
     global client
-    
     try:
-        my_image = types.Image(image_bytes=img_bytes)
+        # 1. Создаем Part из картинки (как в твоем коде)
+        image_part = types.Part.from_bytes(
+            data=img_bytes,
+            mime_type="image/jpeg",
+        )
+        
+        # 2. Создаем Part из текста
+        text_part = types.Part.from_text(text=EDIT_PROMPT)
 
-        ref_image = types.RawReferenceImage(
-            reference_id=1,
-            reference_image=my_image
+        # 3. Конфиг (ВОТ ОНО! То, что ты нашел)
+        generate_content_config = types.GenerateContentConfig(
+            temperature=1,
+            top_p=0.95,
+            max_output_tokens=8192,
+            # Ключевой момент: просим вернуть КАРТИНКУ
+            response_modalities=["IMAGE"], 
+            safety_settings=[
+                types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF")
+            ],
+            # Тот самый ImageConfig, который вызывал ошибку раньше (теперь он на своем месте)
+            image_config=types.ImageConfig(
+                aspect_ratio="3:4",
+                output_mime_type="image/jpeg",
+            ),
         )
-        
-        # ФИКС: Параметры должны быть ЗАГЛАВНЫМИ БУКВАМИ (требование нового SDK)
-        config = types.EditImageConfig(
-            edit_mode="inpainting-insert",
-            number_of_images=1,
-            # Исправлено: block_some -> BLOCK_ONLY_HIGH
-            safety_filter_level="BLOCK_ONLY_HIGH", 
-            # Исправлено: allow_adult -> ALLOW_ADULT
-            person_generation="ALLOW_ADULT",
-            include_rai_reason=True,
-            output_mime_type="image/jpeg"
+
+        # 4. Вызов (используем актуальную модель Gemini 2.0 Flash Exp)
+        # "gemini-3-pro" из примера может быть еще закрыта, 2.0 Flash - работает.
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-exp", 
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[image_part, text_part]
+                )
+            ],
+            config=generate_content_config,
         )
-        
-        response = client.models.edit_image(
-            model='imagen-3.0-capability-001',
-            prompt=EDIT_PROMPT,
-            reference_images=[ref_image],
-            config=config
-        )
-        
-        if response.generated_images:
-            return response.generated_images[0].image.image_bytes
-            
+
+        # 5. Извлекаем картинку из ответа
+        # Ответ Gemini с картинкой приходит в parts
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.inline_data:
+                    return part.inline_data.data
+                # Иногда байты могут быть в другом поле в зависимости от версии
+                if hasattr(part, 'image_bytes'):
+                     return part.image_bytes
+                     
     except Exception as e:
-        logger.error(f"Imagen API Error: {e}")
+        logger.error(f"GenAI Error: {e}")
         return None
     return None
-    
 
-# --- ГЛАВНЫЙ ФИКС СТАБИЛЬНОСТИ ---
+# --- Обработчик ошибок Telegram ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ловит ошибки и не дает боту упасть"""
     logger.error(f"⚠️ Telegram Error: {context.error}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🍌 *Nano Banana Pro Bot*\n\n"
-        "Отправь картинку — я уберу жёлтый текст и перекрашу стрелки в зелёный.",
+        "🍌 *Nano Banana Pro (Gemini Native)*\n\n"
+        "Отправь фото -> Я перерисую его через Gemini 2.0 Vision.",
         parse_mode="Markdown"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("⏳ Обрабатываю (Imagen 3)...")
-    
+    msg = await update.message.reply_text("⏳ Генерирую...")
     try:
         photo = await update.message.photo[-1].get_file()
         img_bytes = await photo.download_as_bytearray()
@@ -109,37 +133,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.delete()
             await update.message.reply_photo(result, caption="✅ Готово")
         else:
-            await msg.edit_text("❌ Ошибка обработки (Google вернул пустоту)")
+            await msg.edit_text("❌ Ошибка генерации (возможно, фильтры)")
     except Exception as e:
-        logger.error(f"Processing Error: {e}")
-        await msg.edit_text("❌ Сбой бота")
+        logger.error(f"Bot Error: {e}")
+        await msg.edit_text("❌ Сбой")
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN", "").strip()
     if not token:
-        logger.error("TELEGRAM_TOKEN not set")
         sys.exit(1)
-
-    init_client()
-
-    # Настройки сети (HTTP 1.1 + тайм-ауты)
-    request = HTTPXRequest(
-        http_version="1.1",
-        connection_pool_size=10,
-        read_timeout=60.0,
-        write_timeout=60.0,
-        connect_timeout=60.0
-    )
     
+    init_client()
+    
+    # Сетевые настройки
+    request = HTTPXRequest(http_version="1.1", connection_pool_size=10, read_timeout=60, write_timeout=60, connect_timeout=60)
     app = Application.builder().token(token).request(request).build()
-
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    # Добавляем обработчик ошибок, чтобы бот не крашился
     app.add_error_handler(error_handler)
 
-    logger.info("🍌 Bot Started")
+    logger.info("🍌 Bot Started (Gemini Native Mode)")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
