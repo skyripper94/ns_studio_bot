@@ -45,53 +45,37 @@ def init_client():
 def process_image(img_bytes: bytes) -> bytes:
     global client
     
-    image_part = types.Part.from_bytes(
-        data=img_bytes,
-        mime_type="image/jpeg",
-    )
-    text_part = types.Part.from_text(text=EDIT_PROMPT)
-    
-    contents = [
-        types.Content(
-            role="user",
-            parts=[image_part, text_part]
+    # 1. Создаем объект Image (а не Part) для редактирования
+    # В новом SDK Imagen требует RawReferenceImage
+    try:
+        raw_ref = types.RawReferenceImage(
+            reference_id=1,
+            reference_image=types.Image.from_bytes(img_bytes)
         )
-    ]
-    
-    config = types.GenerateContentConfig(
-        temperature=1,
-        top_p=0.95,
-        max_output_tokens=32768,
-        response_modalities=["TEXT", "IMAGE"],
-        safety_settings=[
-            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
-            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
-            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
-            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF")
-        ],
-        image_config=types.ImageConfig(
-            aspect_ratio="3:4",
-            image_size="1K",
-            output_mime_type="image/png",
-        ),
-    )
-    
-    model = "gemini-3-pro-image-preview"
-    
-    response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config,
-    )
-    
-    if response.candidates:
-        for part in response.candidates[0].content.parts:
-            if part.inline_data:
-                logger.info("✅ Image received from API")
-                return base64.standard_b64decode(part.inline_data.data)
-    
-    logger.warning("No image in response")
-    return None
+        
+        # 2. Вызываем edit_image с правильным конфигом
+        # Используем EditImageConfig вместо несуществующего ImageConfig
+        response = client.models.edit_image(
+            model='imagen-3.0-capability-001',
+            prompt=EDIT_PROMPT,
+            reference_images=[raw_ref],
+            config=types.EditImageConfig(
+                edit_mode="inpainting-insert", # Режим редактирования (стандартный для инструкций)
+                number_of_images=1,
+                include_rai_reason=True,
+                safety_filter_level="block_some", 
+                person_generation="allow_adult"
+            )
+        )
+        
+        # 3. Извлекаем результат
+        if response.generated_images:
+            return response.generated_images[0].image.image_bytes
+        return None
+        
+    except Exception as e:
+        logger.error(f"Imagen API Error: {e}")
+        return None
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
