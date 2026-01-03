@@ -9,18 +9,16 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-# Проверка
 try:
     from google_services import GoogleBrain
 except ImportError:
     sys.exit(1)
 
-# Логирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Состояния: 4 ШАГА
+# Состояния
 CHOOSING_TOPIC, ENTERING_CUSTOM_TOPIC, CHOOSING_COUNT, CONFIRMING_PLAN = range(4)
 
 try:
@@ -28,16 +26,14 @@ try:
 except Exception:
     sys.exit(1)
 
-# --- УТИЛИТА ДЛЯ ОТПРАВКИ ---
+# --- УТИЛИТА ---
 async def safe_reply(update: Update, text: str, markup=None, use_md=False):
-    """Безопасная отправка без крашей из-за Markdown"""
     parse_mode = "Markdown" if use_md else None
     try:
         if update.callback_query:
             try:
                 await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode=parse_mode)
             except:
-                # Если не получилось отредактировать (например, текст не изменился) - шлем новое
                 await update.callback_query.message.reply_text(text, reply_markup=markup, parse_mode=parse_mode)
         else:
             await update.message.reply_text(text, reply_markup=markup, parse_mode=parse_mode)
@@ -47,14 +43,13 @@ async def safe_reply(update: Update, text: str, markup=None, use_md=False):
 # --- МЕНЮ ---
 
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear() # Сброс состояния
+    context.user_data.clear()
     
-    text = "💎 **Wealth AI Creator v7.0 (Russian Patch)**\n\nВыбери режим:"
+    text = "💎 **Wealth AI (Premium)**\n\nИнтеллектуальный контент-ассистент.\nВыберите задачу:"
     keyboard = [
-        [InlineKeyboardButton("📊 Создать Контент (Коллажи/Факты)", callback_data='mode_carousel')],
+        [InlineKeyboardButton("📊 Создать Карусель (Business/Tech)", callback_data='mode_carousel')],
         [InlineKeyboardButton("🧹 Очистить фото", callback_data='mode_cleaner')]
     ]
-    # Используем Markdown только в меню, где мы контролируем текст
     await safe_reply(update, text, InlineKeyboardMarkup(keyboard), use_md=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -71,11 +66,7 @@ async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(
-        "📷 **Очистка**\nПришли фото - я уберу текст снизу.", 
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]]),
-        parse_mode="Markdown"
-    )
+    await safe_reply(update, "📷 **Очистка**\nПришлите фото для обработки.", InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Меню", callback_data="back_to_main")]]), use_md=True)
 
 async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo: return
@@ -86,19 +77,19 @@ async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TY
         res = await asyncio.to_thread(brain.remove_text_from_image, bytes(b))
         if res:
             await msg.delete()
-            await update.message.reply_photo(res, caption="✅ Чисто.")
+            await update.message.reply_photo(res, caption="✅ Готово.")
         else:
-            await msg.edit_text("❌ Ошибка.")
+            await msg.edit_text("❌ Ошибка обработки.")
     except Exception:
         await msg.edit_text("⚠️ Сбой.")
     await send_main_menu(update, context)
 
-# --- ЛОГИКА КАРУСЕЛЕЙ (НОВАЯ) ---
+# --- КАРУСЕЛИ ---
 
 async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("🧠 Анализирую тренды...")
+    await query.edit_message_text("🧠 Анализ повестки...")
     
     topics = await asyncio.to_thread(brain.generate_topics)
     
@@ -107,11 +98,10 @@ async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         kb.append([InlineKeyboardButton(t, callback_data=f"topic_select_{t[:30]}")])
         
     kb.append([InlineKeyboardButton("✍️ Своя тема", callback_data="topic_custom")])
-    kb.append([InlineKeyboardButton("🔄 Новые темы", callback_data="mode_carousel")])
+    kb.append([InlineKeyboardButton("🔄 Обновить", callback_data="mode_carousel")])
     kb.append([InlineKeyboardButton("⬅️ Меню", callback_data="back_to_main")])
     
-    # БЕЗ MARKDOWN, чтобы не падало из-за спецсимволов в темах
-    await query.edit_message_text("🔥 Выбери тему (Хук):", reply_markup=InlineKeyboardMarkup(kb))
+    await safe_reply(update, "🔥 Актуальные темы (Бизнес/Наука):", InlineKeyboardMarkup(kb), use_md=False)
     return CHOOSING_TOPIC
 
 async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,7 +109,7 @@ async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     if query.data == "topic_custom":
-        await query.edit_message_text("✍️ Напиши тему:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
+        await query.edit_message_text("✍️ Введите тему:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
         return ENTERING_CUSTOM_TOPIC
     
     topic = "Тема"
@@ -133,14 +123,13 @@ async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAUL
     return await ask_slide_count(update, context, update.message.text)
 
 async def ask_slide_count(update: Update, context: ContextTypes.DEFAULT_TYPE, topic):
-    """Выбор количества слайдов"""
     context.user_data['current_topic'] = topic
     
-    text = f"📌 Тема: {topic}\n\nСколько слайдов генерируем?"
+    text = f"📌 Тема: {topic}\n\nОбъем материала?"
     keyboard = [
-        [InlineKeyboardButton("🖼 1 (Только обложка)", callback_data="count_1")],
-        [InlineKeyboardButton("⚡ 3 (Быстро)", callback_data="count_3")],
-        [InlineKeyboardButton("📚 6 (Стандарт)", callback_data="count_6")],
+        [InlineKeyboardButton("🖼 1 (Обложка)", callback_data="count_1")],
+        [InlineKeyboardButton("⚡ 3 (Новость)", callback_data="count_3")],
+        [InlineKeyboardButton("📚 6 (Разбор)", callback_data="count_6")],
         [InlineKeyboardButton("📖 10 (Лонгрид)", callback_data="count_10")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="mode_carousel")]
     ]
@@ -162,20 +151,20 @@ async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if context.user_data.get('is_processing'): return CONFIRMING_PLAN
     context.user_data['is_processing'] = True
     
-    await update.callback_query.edit_message_text(f"📝 Пишу сценарий ({count} слайдов): {topic}...")
+    await update.callback_query.edit_message_text(f"📝 Подготовка сценария ({count} слайдов): {topic}...")
     
     try:
         plan = await asyncio.to_thread(brain.generate_carousel_plan, topic, count)
         context.user_data['plan'] = plan
         
-        preview = f"📊 План: {topic}\n\n"
-        if not plan: preview += "⚠️ Ошибка AI. Нажми 'Переписать'."
+        preview = f"📊 Структура: {topic}\n\n"
+        if not plan: preview += "⚠️ Сбой AI. Попробуйте 'Переписать'."
         for s in plan:
             preview += f"🔹 {s.get('ru_caption', '...')}\n"
         
         kb = [
-            [InlineKeyboardButton("🚀 Генерировать", callback_data="go")],
-            [InlineKeyboardButton("🔄 Переписать текст", callback_data="regen_plan")],
+            [InlineKeyboardButton("🚀 Создать", callback_data="go")],
+            [InlineKeyboardButton("🔄 Переписать", callback_data="regen_plan")],
             [InlineKeyboardButton("⬅️ Меню", callback_data="back_to_main")]
         ]
         await update.callback_query.edit_message_text(preview, reply_markup=InlineKeyboardMarkup(kb))
@@ -186,13 +175,13 @@ async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 async def regenerate_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("Обновляю...")
+    await query.answer("Обновление...")
     
     topic = context.user_data.get('current_topic')
     count = context.user_data.get('slide_count', 3)
     
     if not topic:
-        await query.message.reply_text("⚠️ Данные устарели.")
+        await query.message.reply_text("⚠️ Сессия истекла.")
         return ConversationHandler.END
         
     return await generate_plan_step(update, context, topic, count)
@@ -203,16 +192,16 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
 
     plan = context.user_data.get('plan')
     if not plan:
-        await query.message.reply_text("⚠️ Ошибка данных.")
+        await query.message.reply_text("⚠️ Данные отсутствуют.")
         return ConversationHandler.END
 
     if context.user_data.get('is_gen_running'):
-        await query.message.reply_text("⏳ Жди...")
+        await query.message.reply_text("⏳ Процесс уже запущен.")
         return
     context.user_data['is_gen_running'] = True
     
     try:
-        await query.edit_message_text(f"🎨 Рисую {len(plan)} слайдов (Коллажи, 3:4)...")
+        await query.edit_message_text(f"🎨 Визуализация {len(plan)} слайдов...")
         
         for i, slide in enumerate(plan):
             prompt = slide.get('image_prompt')
@@ -223,8 +212,6 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
             
             if img:
                 await status.delete()
-                # Здесь Markdown можно оставить, так как caption обычно безопасен
-                # но для 100% защиты от крашей caption можно экранировать
                 try:
                     await context.bot.send_photo(
                         update.effective_chat.id, 
@@ -233,14 +220,13 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
                         parse_mode="Markdown"
                     )
                 except:
-                    # Если маркдаун сломался - шлем без него
                      await context.bot.send_photo(update.effective_chat.id, img, caption=f"{caption}\n\n#{i+1}")
             else:
-                await status.edit_text(f"⚠️ Слайд {i+1} пропущен.")
+                await status.edit_text(f"⚠️ Слайд {i+1}: Ошибка генерации.")
             
             if i < len(plan) - 1: await asyncio.sleep(8)
                 
-        await context.bot.send_message(update.effective_chat.id, "✅ Карусель готова!")
+        await context.bot.send_message(update.effective_chat.id, "✅ Материалы готовы.")
     finally:
         context.user_data['is_gen_running'] = False
         context.user_data['plan'] = None
@@ -248,13 +234,10 @@ async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYP
         
     return ConversationHandler.END
 
-# --- ЗАПУСК ---
-
 def main():
     token = os.getenv("TELEGRAM_TOKEN", "").strip().replace('"', '').replace("'", "")
     if not token: sys.exit(1)
 
-    # Максимальные тайм-ауты
     request = HTTPXRequest(connection_pool_size=10, read_timeout=120.0, write_timeout=120.0, connect_timeout=60.0)
     app = Application.builder().token(token).request(request).build()
 
@@ -292,7 +275,7 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_main, pattern='^back_to_main$'))
     app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
-    print("✅ Bot Started (Final Patch: Russian + Collages + Stability)")
+    print("✅ Bot Started (Premium Style + Fixes)")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
