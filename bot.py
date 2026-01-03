@@ -34,42 +34,46 @@ Output: A high-quality image.
 
 def init_client():
     global client
-    # 1. Пытаемся найти JSON-ключ (Service Account) - ЭТО ВАЖНО ДЛЯ GEMINI 2.0 VISION
+    # 1. Ищем секретный ключ
     key_base64 = os.getenv("GOOGLE_KEY_BASE64")
     
-    # Резервные параметры (если нет в JSON)
+    # Резерв
     project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
     location = os.getenv("GOOGLE_LOCATION", "us-central1")
 
     try:
         if key_base64:
-            # Декодируем ключ из Base64
+            # Декодируем
             key_clean = key_base64.strip().replace('\n', '').replace(' ', '')
             creds_json = base64.b64decode(key_clean).decode('utf-8')
             creds_dict = json.loads(creds_json)
             
-            # Создаем credentials
-            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            # --- ГЛАВНЫЙ ФИКС (Scope) ---
+            # Мы явно говорим Google: "Дай этому ключу доступ к облачной платформе"
+            scopes = ["https://www.googleapis.com/auth/cloud-platform"]
             
-            # Инициализируем клиент в режиме Vertex AI (OAuth)
-            # Это решает ошибку "API keys are not supported"
+            credentials = service_account.Credentials.from_service_account_info(
+                creds_dict, 
+                scopes=scopes  # <--- ВОТ ЧТО ИСПРАВИТ ОШИБКУ INVALID_SCOPE
+            )
+            
+            # Инициализируем клиент
             client = genai.Client(
                 vertexai=True,
                 project=creds_dict.get("project_id", project_id),
                 location=location,
                 credentials=credentials
             )
-            logger.info("✅ Gemini Client Ready (Vertex AI / Service Account Mode)")
+            logger.info("✅ Gemini Client Ready (Vertex AI Mode + Scopes)")
             
         else:
-            # Если JSON нет, пробуем старый метод (API Key), но он может выдавать 401
+            # Fallback на API Key (но он скорее всего не сработает для картинок)
             api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
             if not api_key:
-                logger.error("❌ Auth Error: No GOOGLE_KEY_BASE64 or GOOGLE_CLOUD_API_KEY found")
+                logger.error("❌ Auth Error: No GOOGLE_KEY_BASE64 found")
                 sys.exit(1)
-                
             client = genai.Client(api_key=api_key)
-            logger.warning("⚠️ Gemini Client Ready (API Key Mode - May be restricted)")
+            logger.warning("⚠️ Gemini Client Ready (API Key Mode)")
 
     except Exception as e:
         logger.error(f"Client Init Error: {e}")
@@ -84,7 +88,7 @@ def process_image(img_bytes: bytes) -> bytes:
         )
         text_part = types.Part.from_text(text=EDIT_PROMPT)
 
-        # Конфиг без ImageConfig (которого нет в библиотеке)
+        # Конфиг для Gemini 2.0
         generate_content_config = types.GenerateContentConfig(
             temperature=1,
             top_p=0.95,
@@ -98,7 +102,6 @@ def process_image(img_bytes: bytes) -> bytes:
             ],
         )
 
-        # Вызов модели
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp", 
             contents=[
@@ -110,6 +113,7 @@ def process_image(img_bytes: bytes) -> bytes:
             config=generate_content_config,
         )
 
+        # Извлекаем результат
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
                 if part.inline_data:
@@ -128,7 +132,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍌 *Nano Banana Pro (Vertex AI)*\n\n"
-        "Отправь фото. Я использую авторизацию Pro-уровня для обработки.",
+        "Система авторизована. Отправляй фото!",
         parse_mode="Markdown"
     )
 
@@ -144,7 +148,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.delete()
             await update.message.reply_photo(result, caption="✅ Готово")
         else:
-            await msg.edit_text("❌ Ошибка генерации. Проверьте логи.")
+            await msg.edit_text("❌ Ошибка генерации (Смотри логи)")
     except Exception as e:
         logger.error(f"Bot Error: {e}")
         await msg.edit_text("❌ Сбой")
