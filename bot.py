@@ -10,7 +10,7 @@ from telegram.request import HTTPXRequest
 from google import genai
 from google.genai import types
 
-# 1. Настройка логов (убираем шум и прячем токен)
+# 1. Настройка логов
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -36,8 +36,8 @@ def init_client():
         logger.error("GOOGLE_CLOUD_API_KEY not set!")
         sys.exit(1)
     
-    # Инициализация клиента для AI Studio (без vertexai=True)
     try:
+        # Инициализация для AI Studio
         client = genai.Client(api_key=api_key)
         logger.info("✅ Gemini client ready (AI Studio Mode)")
     except Exception as e:
@@ -48,17 +48,16 @@ def process_image(img_bytes: bytes) -> bytes:
     global client
     
     try:
-        # 1. Создаем объект картинки. 
-        # В SDK google-genai объект types.Image создается через конструктор image_bytes
+        # 1. Создаем объект Image через конструктор (правильный метод для SDK)
         my_image = types.Image(image_bytes=img_bytes)
 
-        # 2. Оборачиваем в RawReferenceImage (требование Imagen 3)
+        # 2. Оборачиваем в RawReferenceImage
         ref_image = types.RawReferenceImage(
             reference_id=1,
             reference_image=my_image
         )
         
-        # 3. Конфигурация
+        # 3. Конфиг (EditImageConfig)
         config = types.EditImageConfig(
             edit_mode="inpainting-insert",
             number_of_images=1,
@@ -68,7 +67,7 @@ def process_image(img_bytes: bytes) -> bytes:
             output_mime_type="image/jpeg"
         )
         
-        # 4. Вызов API
+        # 4. Вызов
         response = client.models.edit_image(
             model='imagen-3.0-capability-001',
             prompt=EDIT_PROMPT,
@@ -76,7 +75,7 @@ def process_image(img_bytes: bytes) -> bytes:
             config=config
         )
         
-        # 5. Возврат результата
+        # 5. Результат
         if response.generated_images:
             return response.generated_images[0].image.image_bytes
             
@@ -84,6 +83,11 @@ def process_image(img_bytes: bytes) -> bytes:
         logger.error(f"Imagen API Error: {e}")
         return None
     return None
+
+# --- ГЛАВНЫЙ ФИКС СТАБИЛЬНОСТИ ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ловит ошибки и не дает боту упасть"""
+    logger.error(f"⚠️ Telegram Error: {context.error}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -99,16 +103,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo = await update.message.photo[-1].get_file()
         img_bytes = await photo.download_as_bytearray()
         
-        # Запускаем в потоке, чтобы не блокировать бота
         result = await asyncio.to_thread(process_image, bytes(img_bytes))
         
         if result:
             await msg.delete()
             await update.message.reply_photo(result, caption="✅ Готово")
         else:
-            await msg.edit_text("❌ Ошибка обработки (попробуйте другое фото)")
+            await msg.edit_text("❌ Ошибка обработки (Google вернул пустоту)")
     except Exception as e:
-        logger.error(f"Telegram Error: {e}")
+        logger.error(f"Processing Error: {e}")
         await msg.edit_text("❌ Сбой бота")
 
 def main():
@@ -119,11 +122,10 @@ def main():
 
     init_client()
 
-    # --- СЕТЕВОЙ ФИКС ---
-    # Force HTTP/1.1 и увеличенные таймауты решают проблему "Connection lost"
+    # Настройки сети (HTTP 1.1 + тайм-ауты)
     request = HTTPXRequest(
         http_version="1.1",
-        connection_pool_size=8,
+        connection_pool_size=10,
         read_timeout=60.0,
         write_timeout=60.0,
         connect_timeout=60.0
@@ -133,9 +135,11 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    
+    # Добавляем обработчик ошибок, чтобы бот не крашился
+    app.add_error_handler(error_handler)
 
     logger.info("🍌 Bot Started")
-    # drop_pending_updates удаляет старые зависшие сообщения, которые могли крашить бота
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
