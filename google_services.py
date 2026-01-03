@@ -3,13 +3,15 @@ import json
 import base64
 import logging
 import io
-import traceback
 import asyncio
+import random
+import time
 from typing import List, Dict, Optional
 
 from google.cloud import aiplatform
 from google.oauth2 import service_account
-from vertexai.generative_models import GenerativeModel
+from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from vertexai.preview.vision_models import ImageGenerationModel
 from PIL import Image, ImageDraw
 
@@ -20,6 +22,7 @@ class GoogleBrain:
         project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
         location = os.getenv("GOOGLE_LOCATION", "us-central1")
         
+        # Авторизация
         try:
             key_base64 = os.getenv("GOOGLE_KEY_BASE64")
             if key_base64:
@@ -31,105 +34,134 @@ class GoogleBrain:
             else:
                 aiplatform.init(project=project_id, location=location)
         except Exception as e:
-            logger.error(f"Auth Error: {e}")
+            logger.error(f"Critical Auth Error: {e}")
 
-        # ПОДКЛЮЧЕНИЕ МОДЕЛЕЙ
+        # Инициализация моделей с Fail-safe
         try:
-            self.text_model = GenerativeModel("gemini-1.5-flash") # Быстрая и умная
-            self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006") # Imagen 3
-            logger.info("✅ Brain Connected: Gemini Flash + Imagen 3")
-        except Exception:
+            self.text_model = GenerativeModel("gemini-1.5-flash")
+            self.image_model = ImageGenerationModel.from_pretrained("imagegeneration@006")
+            logger.info("✅ Brain Online: Gemini Flash + Imagen 3")
+        except Exception as e:
+            logger.error(f"Model Init Error: {e}")
             self.text_model = None
             self.image_model = None
+
+    def _validate_plan(self, data: List[Dict]) -> List[Dict]:
+        """Проверяет, что AI не прислал мусор вместо структуры"""
+        valid_slides = []
+        if not isinstance(data, list): return []
+        
+        for slide in data:
+            # Если ключей нет, ставим заглушки, чтобы не крашиться
+            clean_slide = {
+                "slide_number": slide.get("slide_number", 0),
+                "ru_caption": slide.get("ru_caption", "Текст отсутствует"),
+                "image_prompt": slide.get("image_prompt", "Abstract background, minimalistic, 8k")
+            }
+            valid_slides.append(clean_slide)
+        return valid_slides
+
+    def _extract_json(self, text: str) -> List[Dict]:
+        """Парсинг JSON с защитой от Markdown"""
+        try:
+            start = text.find('[')
+            end = text.rfind(']') + 1
+            if start == -1 or end == 0:
+                clean = text.replace("```json", "").replace("```", "").strip()
+                return json.loads(clean)
+            return json.loads(text[start:end])
+        except Exception:
+            return []
 
     def generate_topics(self) -> List[str]:
         if not self.text_model: return ["Ошибка API"]
         
-        # ПРОМПТ: ТОЛЬКО ХАРДКОРНЫЕ ФАКТЫ И СРАВНЕНИЯ
-        prompt = """
-        Ты — редактор топового Instagram-паблика в нише Wealth/Facts/Tech.
-        Придумай 5 тем для каруселей.
-        
-        КРИТЕРИИ ТЕМ:
-        1. СРАВНЕНИЯ (Then vs Now, Price vs Quality, Rich vs Poor).
-        2. ШОК-ФАКТЫ (Цифры, которые взрывают мозг).
-        3. ТЕХНОЛОГИИ (AI, Space, Crypto).
-        
-        ПРИМЕРЫ (КАК НАДО):
-        - iPhone 1 (2007) vs iPhone 16 (2025)
-        - $100 в 1990 vs $100 сегодня
-        - Зарплата Илона Маска в секунду
-        - Скорость AI vs Скорость Мозга
-        
-        Верни только список из 5 строк. Без нумерации. На русском языке.
+        focus = random.choice(["Wealth/Money", "Future Tech", "Psychology/Power", "Dark History"])
+        prompt = f"""
+        Role: Viral Content Strategist.
+        Task: Generate 5 unique Instagram Carousel topics.
+        Focus: {focus}.
+        Style: Clickbait, High-Impact, Contrast (X vs Y).
+        Output: List of 5 strings only. No bullets. Russian.
         """
+        
         try:
-            response = self.text_model.generate_content(prompt)
-            lines = [line.strip().replace("*", "").replace("-", "").strip() for line in response.text.split('\n') if line.strip()]
+            config = GenerationConfig(temperature=0.95) # Максимальная креативность
+            response = self.text_model.generate_content(prompt, generation_config=config)
+            lines = [l.strip().replace("*", "").replace("-", "").strip() for l in response.text.split('\n') if l.strip()]
             return lines[:5]
-        except Exception:
-            return ["Биткоин: 2010 vs 2026", "Скорость света vs Скорость мысли", "Цена золота за 100 лет", "AI заменит врачей?"]
+        except Exception as e:
+            logger.error(f"Topic Gen Error: {e}")
+            return ["Биткоин: Крах или Туземун?", "ИИ против Врачей", "Секреты Рокфеллера", "Космос: Мы одни?"]
 
     def generate_carousel_plan(self, topic: str) -> List[Dict[str, str]]:
         if not self.text_model: return []
         
-        # ПРОМПТ: СЛАЙДЫ С МИНИМУМОМ СЛОВ
+        style = random.choice(["Aggressive Facts", "Minimalist comparisons", "Dark aesthetic"])
+        
         prompt = f"""
         Topic: "{topic}"
-        Create a 4-slide plan for Instagram.
+        Style: {style}.
+        Create 4 slides.
         
-        STRICT RULES FOR TEXT:
-        1. MAX 7 WORDS per slide. Absolute minimum.
-        2. NO sentences. Only "Data + Label" or "Object A vs Object B".
-        3. Font style implied: Big, Bold, Impactful.
+        Constraints:
+        1. Text: MAX 6 WORDS per slide.
+        2. Visuals: Vertical 3:4, Photorealistic, Cinematic.
         
-        STRICT RULES FOR IMAGE PROMPT:
-        1. Aspect Ratio: Vertical 3:4.
-        2. Style: Photorealistic, 8k, Editorial Photography.
-        3. Composition: Split screen for comparisons OR Central hero object for facts.
-        
-        Output JSON list:
+        JSON Format:
         [
-          {{"slide_number": 1, "ru_caption": "10 МБ в 1990 = $5000", "image_prompt": "Vertical 3:4, vintage hard drive photo comparison..."}},
-          {{"slide_number": 2, "ru_caption": "10 МБ сегодня = Бесплатно", "image_prompt": "Vertical 3:4, modern cloud server abstract..."}}
+          {{"slide_number": 1, "ru_caption": "...", "image_prompt": "Vertical 3:4, ..."}}
         ]
         """
         try:
-            response = self.text_model.generate_content(prompt)
-            clean = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean)
+            config = GenerationConfig(temperature=0.85)
+            response = self.text_model.generate_content(prompt, generation_config=config)
+            raw_data = self._extract_json(response.text)
+            return self._validate_plan(raw_data)
         except Exception as e:
-            logger.error(f"Plan Error: {e}")
+            logger.error(f"Plan Gen Error: {e}")
             return []
 
     def generate_image(self, prompt: str) -> Optional[bytes]:
+        """Генерация с 1 попыткой ретрая (если сеть моргнула)"""
         if not self.image_model: return None
         
-        try:
-            # Формат 3:4 (идеально для Инсты)
-            images = self.image_model.generate_images(
-                prompt=prompt, 
-                number_of_images=1, 
-                aspect_ratio="3:4", 
-                safety_filter_level="block_some", 
-                person_generation="allow_adult"
-            )
-            output = io.BytesIO()
-            images[0].save(output, format="PNG")
-            return output.getvalue()
-        except Exception as e:
-            logger.error(f"Imagen Error: {e}")
-            return None
+        for attempt in range(2):
+            try:
+                images = self.image_model.generate_images(
+                    prompt=prompt, number_of_images=1, aspect_ratio="3:4",
+                    safety_filter_level="block_some", person_generation="allow_adult"
+                )
+                output = io.BytesIO()
+                images[0].save(output, format="PNG")
+                return output.getvalue()
+            except ResourceExhausted:
+                # Если лимиты - ждем и пробуем еще раз
+                time.sleep(5)
+                continue
+            except Exception as e:
+                logger.error(f"Imagen Error (Attempt {attempt}): {e}")
+                if attempt == 1: return None
+                time.sleep(2)
+        return None
 
     def remove_text_from_image(self, img_bytes: bytes) -> Optional[bytes]:
         if not self.image_model: return None
         try:
+            # Оптимизация: ресайз если картинка огромная (защита памяти)
             pil_img = Image.open(io.BytesIO(img_bytes))
+            if pil_img.width > 2000 or pil_img.height > 2000:
+                pil_img.thumbnail((1500, 1500))
+                buf = io.BytesIO()
+                pil_img.save(buf, format="PNG")
+                img_bytes = buf.getvalue()
+                pil_img = Image.open(io.BytesIO(img_bytes)) # Re-open resized
+
             w, h = pil_img.size
-            # Чистим нижние 35% картинки
             mask = Image.new("L", (w, h), 0)
             draw = ImageDraw.Draw(mask)
-            draw.rectangle([(0, int(h * 0.65)), (w, h)], fill=255)
+            draw.rectangle([(0, int(h * 0.70)), (w, h)], fill=255)
+            
             mask_buf = io.BytesIO()
             mask.save(mask_buf, format="PNG")
             
@@ -140,5 +172,6 @@ class GoogleBrain:
             output = io.BytesIO()
             edited[0].save(output, format="PNG")
             return output.getvalue()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Cleanup Error: {e}")
             return None
