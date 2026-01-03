@@ -203,9 +203,15 @@ JSON:
                 if not images:
                     return None
                 
-                output = io.BytesIO()
-                images[0].save(output, format="PNG")
-                return output.getvalue()
+                img = images[0]
+                if hasattr(img, '_image_bytes'):
+                    return img._image_bytes
+                elif hasattr(img, 'image_bytes'):
+                    return img.image_bytes
+                else:
+                    output = io.BytesIO()
+                    img.save(output)
+                    return output.getvalue()
             
             except ResourceExhausted:
                 time.sleep(5)
