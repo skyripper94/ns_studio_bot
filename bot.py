@@ -2,27 +2,27 @@ import logging
 import os
 import asyncio
 import sys
-import base64
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-# Импорты по твоему образцу
+# Импорты Google GenAI SDK
 from google import genai
 from google.genai import types
 
-# Настройка логов
+# 1. Настройка логов
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 client = None
 
-# Промпт переписан для Gemini (она понимает инструкции лучше)
+# Промпт: Четко просим вернуть ТОЛЬКО картинку
 EDIT_PROMPT = """
 Task: Generate a modified version of this image.
 Changes required:
-1. Remove ALL yellow text and typography.
+1. Remove ALL yellow text and typography from the image.
 2. Remove yellow lines.
 3. Change yellow arrows to forest green (#228B22).
 4. Remove logos/watermarks.
@@ -37,15 +37,10 @@ def init_client():
         logger.error("GOOGLE_CLOUD_API_KEY not set!")
         sys.exit(1)
     
-    # Инициализация строго как в твоем примере
     try:
-        client = genai.Client(
-            api_key=api_key,
-            # vertexai=True убрал, так как для API Key обычно используется AI Studio,
-            # но если у тебя Vertex проект, раскомментируй. 
-            # Для стабильности с API KEY лучше оставить дефолт.
-        )
-        logger.info("✅ Gemini Client Ready (GenAI SDK)")
+        # Инициализация клиента
+        client = genai.Client(api_key=api_key)
+        logger.info("✅ Gemini Client Ready")
     except Exception as e:
         logger.error(f"Client Init Error: {e}")
         sys.exit(1)
@@ -53,21 +48,21 @@ def init_client():
 def process_image(img_bytes: bytes) -> bytes:
     global client
     try:
-        # 1. Создаем Part из картинки (как в твоем коде)
+        # 1. Картинка (Part)
         image_part = types.Part.from_bytes(
             data=img_bytes,
             mime_type="image/jpeg",
         )
         
-        # 2. Создаем Part из текста
+        # 2. Текст (Part)
         text_part = types.Part.from_text(text=EDIT_PROMPT)
 
-        # 3. Конфиг (ВОТ ОНО! То, что ты нашел)
+        # 3. Конфигурация (ИСПРАВЛЕНА: убран ImageConfig, который вызывал ошибку)
         generate_content_config = types.GenerateContentConfig(
             temperature=1,
             top_p=0.95,
             max_output_tokens=8192,
-            # Ключевой момент: просим вернуть КАРТИНКУ
+            # Главный параметр: заставляем модель вернуть КАРТИНКУ
             response_modalities=["IMAGE"], 
             safety_settings=[
                 types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
@@ -75,15 +70,9 @@ def process_image(img_bytes: bytes) -> bytes:
                 types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
                 types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF")
             ],
-            # Тот самый ImageConfig, который вызывал ошибку раньше (теперь он на своем месте)
-            image_config=types.ImageConfig(
-                aspect_ratio="3:4",
-                output_mime_type="image/jpeg",
-            ),
         )
 
-        # 4. Вызов (используем актуальную модель Gemini 2.0 Flash Exp)
-        # "gemini-3-pro" из примера может быть еще закрыта, 2.0 Flash - работает.
+        # 4. Вызов модели Gemini 2.0 Flash
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp", 
             contents=[
@@ -95,13 +84,13 @@ def process_image(img_bytes: bytes) -> bytes:
             config=generate_content_config,
         )
 
-        # 5. Извлекаем картинку из ответа
-        # Ответ Gemini с картинкой приходит в parts
+        # 5. Извлечение картинки
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
+                # Проверяем inline_data (байты)
                 if part.inline_data:
                     return part.inline_data.data
-                # Иногда байты могут быть в другом поле в зависимости от версии
+                # На всякий случай проверяем атрибут image_bytes
                 if hasattr(part, 'image_bytes'):
                      return part.image_bytes
                      
@@ -110,14 +99,14 @@ def process_image(img_bytes: bytes) -> bytes:
         return None
     return None
 
-# --- Обработчик ошибок Telegram ---
+# --- Обработчик ошибок ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"⚠️ Telegram Error: {context.error}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🍌 *Nano Banana Pro (Gemini Native)*\n\n"
-        "Отправь фото -> Я перерисую его через Gemini 2.0 Vision.",
+        "🍌 *Nano Banana Pro (Gemini 2.0)*\n\n"
+        "Отправь фото -> Получи обработанную версию.",
         parse_mode="Markdown"
     )
 
@@ -133,7 +122,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.delete()
             await update.message.reply_photo(result, caption="✅ Готово")
         else:
-            await msg.edit_text("❌ Ошибка генерации (возможно, фильтры)")
+            await msg.edit_text("❌ Ошибка генерации (попробуйте другое фото)")
     except Exception as e:
         logger.error(f"Bot Error: {e}")
         await msg.edit_text("❌ Сбой")
@@ -145,7 +134,7 @@ def main():
     
     init_client()
     
-    # Сетевые настройки
+    # Сеть
     request = HTTPXRequest(http_version="1.1", connection_pool_size=10, read_timeout=60, write_timeout=60, connect_timeout=60)
     app = Application.builder().token(token).request(request).build()
     
@@ -153,7 +142,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(error_handler)
 
-    logger.info("🍌 Bot Started (Gemini Native Mode)")
+    logger.info("🍌 Bot Started")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
