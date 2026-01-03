@@ -2,15 +2,18 @@ import logging
 import os
 import asyncio
 import sys
+import json
+import base64
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-# Импорты Google GenAI SDK
+# Импорты Google
 from google import genai
 from google.genai import types
+from google.oauth2 import service_account
 
-# 1. Настройка логов
+# Настройка логов
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -18,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 client = None
 
-# Промпт: Четко просим вернуть ТОЛЬКО картинку
 EDIT_PROMPT = """
 Task: Generate a modified version of this image.
 Changes required:
-1. Remove ALL yellow text and typography from the image.
+1. Remove ALL yellow text and typography.
 2. Remove yellow lines.
 3. Change yellow arrows to forest green (#228B22).
 4. Remove logos/watermarks.
@@ -32,15 +34,43 @@ Output: A high-quality image.
 
 def init_client():
     global client
-    api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
-    if not api_key:
-        logger.error("GOOGLE_CLOUD_API_KEY not set!")
-        sys.exit(1)
+    # 1. Пытаемся найти JSON-ключ (Service Account) - ЭТО ВАЖНО ДЛЯ GEMINI 2.0 VISION
+    key_base64 = os.getenv("GOOGLE_KEY_BASE64")
     
+    # Резервные параметры (если нет в JSON)
+    project_id = os.getenv("GOOGLE_PROJECT_ID", "tough-shard-479214-t2")
+    location = os.getenv("GOOGLE_LOCATION", "us-central1")
+
     try:
-        # Инициализация клиента
-        client = genai.Client(api_key=api_key)
-        logger.info("✅ Gemini Client Ready")
+        if key_base64:
+            # Декодируем ключ из Base64
+            key_clean = key_base64.strip().replace('\n', '').replace(' ', '')
+            creds_json = base64.b64decode(key_clean).decode('utf-8')
+            creds_dict = json.loads(creds_json)
+            
+            # Создаем credentials
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            
+            # Инициализируем клиент в режиме Vertex AI (OAuth)
+            # Это решает ошибку "API keys are not supported"
+            client = genai.Client(
+                vertexai=True,
+                project=creds_dict.get("project_id", project_id),
+                location=location,
+                credentials=credentials
+            )
+            logger.info("✅ Gemini Client Ready (Vertex AI / Service Account Mode)")
+            
+        else:
+            # Если JSON нет, пробуем старый метод (API Key), но он может выдавать 401
+            api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
+            if not api_key:
+                logger.error("❌ Auth Error: No GOOGLE_KEY_BASE64 or GOOGLE_CLOUD_API_KEY found")
+                sys.exit(1)
+                
+            client = genai.Client(api_key=api_key)
+            logger.warning("⚠️ Gemini Client Ready (API Key Mode - May be restricted)")
+
     except Exception as e:
         logger.error(f"Client Init Error: {e}")
         sys.exit(1)
@@ -48,21 +78,17 @@ def init_client():
 def process_image(img_bytes: bytes) -> bytes:
     global client
     try:
-        # 1. Картинка (Part)
         image_part = types.Part.from_bytes(
             data=img_bytes,
             mime_type="image/jpeg",
         )
-        
-        # 2. Текст (Part)
         text_part = types.Part.from_text(text=EDIT_PROMPT)
 
-        # 3. Конфигурация (ИСПРАВЛЕНА: убран ImageConfig, который вызывал ошибку)
+        # Конфиг без ImageConfig (которого нет в библиотеке)
         generate_content_config = types.GenerateContentConfig(
             temperature=1,
             top_p=0.95,
             max_output_tokens=8192,
-            # Главный параметр: заставляем модель вернуть КАРТИНКУ
             response_modalities=["IMAGE"], 
             safety_settings=[
                 types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
@@ -72,7 +98,7 @@ def process_image(img_bytes: bytes) -> bytes:
             ],
         )
 
-        # 4. Вызов модели Gemini 2.0 Flash
+        # Вызов модели
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp", 
             contents=[
@@ -84,13 +110,10 @@ def process_image(img_bytes: bytes) -> bytes:
             config=generate_content_config,
         )
 
-        # 5. Извлечение картинки
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
-                # Проверяем inline_data (байты)
                 if part.inline_data:
                     return part.inline_data.data
-                # На всякий случай проверяем атрибут image_bytes
                 if hasattr(part, 'image_bytes'):
                      return part.image_bytes
                      
@@ -99,19 +122,18 @@ def process_image(img_bytes: bytes) -> bytes:
         return None
     return None
 
-# --- Обработчик ошибок ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"⚠️ Telegram Error: {context.error}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🍌 *Nano Banana Pro (Gemini 2.0)*\n\n"
-        "Отправь фото -> Получи обработанную версию.",
+        "🍌 *Nano Banana Pro (Vertex AI)*\n\n"
+        "Отправь фото. Я использую авторизацию Pro-уровня для обработки.",
         parse_mode="Markdown"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("⏳ Генерирую...")
+    msg = await update.message.reply_text("⏳ Генерирую (Vertex AI)...")
     try:
         photo = await update.message.photo[-1].get_file()
         img_bytes = await photo.download_as_bytearray()
@@ -122,7 +144,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.delete()
             await update.message.reply_photo(result, caption="✅ Готово")
         else:
-            await msg.edit_text("❌ Ошибка генерации (попробуйте другое фото)")
+            await msg.edit_text("❌ Ошибка генерации. Проверьте логи.")
     except Exception as e:
         logger.error(f"Bot Error: {e}")
         await msg.edit_text("❌ Сбой")
@@ -142,7 +164,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(error_handler)
 
-    logger.info("🍌 Bot Started")
+    logger.info("🍌 Bot Started (Vertex Mode)")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
