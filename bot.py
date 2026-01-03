@@ -43,31 +43,31 @@ def init_client():
     except Exception as e:
         logger.error(f"Client Init Error: {e}")
         sys.exit(1)
+        
 
 def process_image(img_bytes: bytes) -> bytes:
     global client
     
     try:
-        # 1. Создаем объект Image через конструктор (правильный метод для SDK)
         my_image = types.Image(image_bytes=img_bytes)
 
-        # 2. Оборачиваем в RawReferenceImage
         ref_image = types.RawReferenceImage(
             reference_id=1,
             reference_image=my_image
         )
         
-        # 3. Конфиг (EditImageConfig)
+        # ФИКС: Параметры должны быть ЗАГЛАВНЫМИ БУКВАМИ (требование нового SDK)
         config = types.EditImageConfig(
             edit_mode="inpainting-insert",
             number_of_images=1,
-            safety_filter_level="block_some",
-            person_generation="allow_adult",
+            # Исправлено: block_some -> BLOCK_ONLY_HIGH
+            safety_filter_level="BLOCK_ONLY_HIGH", 
+            # Исправлено: allow_adult -> ALLOW_ADULT
+            person_generation="ALLOW_ADULT",
             include_rai_reason=True,
             output_mime_type="image/jpeg"
         )
         
-        # 4. Вызов
         response = client.models.edit_image(
             model='imagen-3.0-capability-001',
             prompt=EDIT_PROMPT,
@@ -75,7 +75,6 @@ def process_image(img_bytes: bytes) -> bytes:
             config=config
         )
         
-        # 5. Результат
         if response.generated_images:
             return response.generated_images[0].image.image_bytes
             
@@ -83,6 +82,7 @@ def process_image(img_bytes: bytes) -> bytes:
         logger.error(f"Imagen API Error: {e}")
         return None
     return None
+    
 
 # --- ГЛАВНЫЙ ФИКС СТАБИЛЬНОСТИ ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
