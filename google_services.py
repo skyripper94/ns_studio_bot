@@ -67,16 +67,18 @@ CATEGORIES = {
 }
 
 BASE_IMAGE_STYLE = """Style: Premium magazine cover, editorial design.
-Visual elements: golden/yellow accent arrows, circular frames, forest green highlights.
+Visual elements: forest green accent arrows, forest green circular frames, forest green outlines and highlights.
 Composition: Dynamic collage layout, multiple focal points.
 Quality: Cinematic lighting, photorealistic, 8K detail, professional photography.
+Color accent: Forest green (#228B22) for all graphic elements.
 Format: Vertical 3:4 aspect ratio.
 IMPORTANT: NO TEXT ON IMAGE."""
 
 COLLAGE_STYLE = """Style: Magazine cover collage combining multiple subjects.
-Visual elements: Golden arrows connecting elements, circular frames, forest green accents.
+Visual elements: Forest green arrows connecting elements, forest green circular frames, forest green outlines.
 Layout: Dynamic composition with overlapping elements.
 Quality: Cinematic, photorealistic, premium editorial look.
+Color accent: Forest green (#228B22) for all graphic elements.
 Format: Vertical 3:4.
 IMPORTANT: NO TEXT ON IMAGE."""
 
