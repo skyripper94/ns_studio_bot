@@ -2,7 +2,6 @@ import logging
 import os
 import asyncio
 import sys
-import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
@@ -10,56 +9,41 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-# Проверка зависимостей
+# Проверка библиотек
 try:
     from google_services import GoogleBrain
 except ImportError:
-    print("CRITICAL: google_services.py missing")
+    print("CRITICAL: google_services.py не найден!")
     sys.exit(1)
 
-# Настройка логов
+# Логирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Состояния
 CHOOSING_MODE, ENTERING_TOPIC, CONFIRMING_PLAN = range(3)
 
-# Инициализация
 try:
     brain = GoogleBrain()
 except Exception:
     sys.exit(1)
 
-# --- УТИЛИТЫ ---
-
-async def safe_reply(update: Update, text: str, markup=None):
-    """Безопасная отправка/редактирование сообщений"""
-    try:
-        if update.callback_query:
-            # Пробуем редактировать
-            try:
-                await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="Markdown")
-            except Exception:
-                # Если сообщение слишком старое или такое же - шлем новое
-                await update.callback_query.message.reply_text(text, reply_markup=markup, parse_mode="Markdown")
-        else:
-            await update.message.reply_text(text, reply_markup=markup, parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Reply Error: {e}")
-
 # --- МЕНЮ ---
 
 async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Очистка флагов обработки
     context.user_data['is_processing'] = False
-    
-    text = "💎 **Wealth AI Creator v4.0 (Optimized)**\n\nВыбери задачу:"
+    text = "💎 **Wealth AI Creator v4.1 (Gemini 2.0)**\n\nВыбери задачу:"
     keyboard = [
         [InlineKeyboardButton("📊 Создать Карусель", callback_data='mode_carousel')],
         [InlineKeyboardButton("🧹 Очистить фото", callback_data='mode_cleaner')]
     ]
-    await safe_reply(update, text, InlineKeyboardMarkup(keyboard))
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except:
+            await update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_main_menu(update, context)
@@ -83,29 +67,25 @@ async def mode_cleaner_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo: return
     
-    # Anti-spam
     if context.user_data.get('is_processing'):
-        await update.message.reply_text("⏳ Я еще занят предыдущей задачей...")
+        await update.message.reply_text("⏳ Жди, я занят...")
         return
     context.user_data['is_processing'] = True
 
-    msg = await update.message.reply_text("⏳ Обработка (Imagen 3)...")
-    
+    msg = await update.message.reply_text("⏳ Обработка...")
     try:
         f = await update.message.photo[-1].get_file()
         b = await f.download_as_bytearray()
-        
-        # CPU-bound задача -> в тред
         res = await asyncio.to_thread(brain.remove_text_from_image, bytes(b))
         
         if res:
             await msg.delete()
             await update.message.reply_photo(res, caption="✅ Готово.")
         else:
-            await msg.edit_text("❌ Не удалось обработать.")
+            await msg.edit_text("❌ Ошибка.")
     except Exception as e:
-        logger.error(f"Photo Error: {e}")
-        await msg.edit_text("⚠️ Ошибка сервера.")
+        logger.error(f"Cleanup Error: {e}")
+        await msg.edit_text("⚠️ Сбой.")
     finally:
         context.user_data['is_processing'] = False
         await send_main_menu(update, context)
@@ -115,7 +95,7 @@ async def process_photo_cleanup(update: Update, context: ContextTypes.DEFAULT_TY
 async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("🧠 Генерирую темы...")
+    await query.edit_message_text("🧠 Gemini 2.0 думает...")
     
     topics = await asyncio.to_thread(brain.generate_topics)
     
@@ -123,7 +103,7 @@ async def mode_carousel_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     kb.append([InlineKeyboardButton("✍️ Своя тема", callback_data="topic_custom")])
     kb.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
     
-    await query.edit_message_text("🔥 Выбери тему:", reply_markup=InlineKeyboardMarkup(kb))
+    await query.edit_message_text("🔥 Темы:", reply_markup=InlineKeyboardMarkup(kb))
     return CHOOSING_MODE
 
 async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,24 +111,19 @@ async def handle_topic_selection(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     if query.data == "topic_custom":
-        await query.edit_message_text(
-            "✍️ Напиши тему:", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]])
-        )
+        await query.edit_message_text("✍️ Напиши тему:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]]))
         return ENTERING_TOPIC
     
     topic = "Тема"
     for row in query.message.reply_markup.inline_keyboard:
         for btn in row:
             if btn.callback_data == query.data: topic = btn.text
-                
     return await generate_plan_step(update, context, topic)
 
 async def handle_custom_topic_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await generate_plan_step(update, context, update.message.text)
 
 async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE, topic):
-    # Anti-Spam Check
     if context.user_data.get('is_processing'): return CONFIRMING_PLAN
     context.user_data['is_processing'] = True
     
@@ -157,20 +132,14 @@ async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
     else:
         msg = await update.message.reply_text(f"📝 План: **{topic}**...", parse_mode="Markdown")
     
-    # Сохраняем для регена
     context.user_data['current_topic'] = topic
 
     try:
         plan = await asyncio.to_thread(brain.generate_carousel_plan, topic)
-        
-        if not plan:
-            await msg.edit_text("❌ AI не ответил. Попробуй кнопку 'Переписать'.")
-            plan = [] # Пустой план, чтобы не крашить
-        
         context.user_data['plan'] = plan
         
         preview = f"📊 **План:** {topic}\n\n"
-        if not plan: preview += "⚠️ (Пусто, нажмите Переписать)"
+        if not plan: preview += "⚠️ Пусто (Нажми Переписать)"
         for s in plan:
             preview += f"🔹 {s.get('ru_caption', '...')}\n"
         
@@ -180,7 +149,6 @@ async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
             [InlineKeyboardButton("⬅️ Меню", callback_data="back_to_main")]
         ]
         await msg.edit_text(preview, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-        
     finally:
         context.user_data['is_processing'] = False
         
@@ -189,77 +157,56 @@ async def generate_plan_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def regenerate_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer("Обновляю...")
-    
-    # State Recovery: если бот перезагрузился и потерял тему
     topic = context.user_data.get('current_topic')
     if not topic:
-        await query.message.reply_text("⚠️ Данные устарели. Начните заново.")
-        await send_main_menu(update, context)
+        await query.message.reply_text("⚠️ Данные устарели.")
         return ConversationHandler.END
-        
     return await generate_plan_step(update, context, topic)
 
 async def run_final_generation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # 1. State Check
     plan = context.user_data.get('plan')
     if not plan:
-        await query.message.reply_text("⚠️ Ошибка данных. Начните заново.")
+        await query.message.reply_text("⚠️ Ошибка данных.")
         return ConversationHandler.END
 
-    # 2. Race Condition Lock
     if context.user_data.get('is_gen_running'):
-        await query.message.reply_text("⏳ Уже генерирую...")
+        await query.message.reply_text("⏳ Жди...")
         return
     context.user_data['is_gen_running'] = True
     
     try:
-        await query.edit_message_text(f"🎨 Рисую {len(plan)} слайдов (Осторожно, это займет ~40 сек)...")
+        await query.edit_message_text(f"🎨 Рисую {len(plan)} слайдов...")
         
         for i, slide in enumerate(plan):
             prompt = slide.get('image_prompt')
             caption = slide.get('ru_caption')
             
             status = await context.bot.send_message(update.effective_chat.id, f"Слайд {i+1}...")
-            
             img = await asyncio.to_thread(brain.generate_image, prompt)
             
             if img:
                 await status.delete()
-                await context.bot.send_photo(
-                    update.effective_chat.id, img, 
-                    caption=f"**{caption}**\n\n#{i+1}", parse_mode="Markdown"
-                )
+                await context.bot.send_photo(update.effective_chat.id, img, caption=f"**{caption}**\n\n#{i+1}", parse_mode="Markdown")
             else:
-                await status.edit_text(f"⚠️ Слайд {i+1} пропущен (фильтр).")
+                await status.edit_text(f"⚠️ Слайд {i+1} пропущен.")
             
-            # Anti-429 Delay
-            if i < len(plan) - 1:
-                await asyncio.sleep(8)
+            if i < len(plan) - 1: await asyncio.sleep(8)
                 
         await context.bot.send_message(update.effective_chat.id, "✅ Готово!")
-        
-    except Exception as e:
-        logger.error(f"Gen Error: {e}")
-        await context.bot.send_message(update.effective_chat.id, "❌ Произошел сбой во время генерации.")
-        
     finally:
-        # 3. Cleanup & Unlock
         context.user_data['is_gen_running'] = False
-        context.user_data['plan'] = None  # Free memory
+        context.user_data['plan'] = None
         await send_main_menu(update, context)
         
     return ConversationHandler.END
-
-# --- APP ---
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN", "").strip().replace('"', '').replace("'", "")
     if not token: sys.exit(1)
 
-    # Таймауты сети (Важно для Railway)
     request = HTTPXRequest(connection_pool_size=8, read_timeout=40.0, write_timeout=40.0, connect_timeout=40.0)
     app = Application.builder().token(token).request(request).build()
 
@@ -283,7 +230,7 @@ def main():
             CallbackQueryHandler(back_to_main, pattern='^back_to_main$'),
             CommandHandler('start', start)
         ],
-        conversation_timeout=600 # 10 минут и сброс (защита памяти)
+        conversation_timeout=600 
     )
 
     app.add_handler(CommandHandler("start", start))
@@ -292,7 +239,7 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_main, pattern='^back_to_main$'))
     app.add_handler(MessageHandler(filters.PHOTO, process_photo_cleanup))
 
-    print("✅ Bot Optimized & Secured (v4.0)")
+    print("✅ Bot Started (Gemini 2.0)")
     app.run_polling()
 
 if __name__ == '__main__':
